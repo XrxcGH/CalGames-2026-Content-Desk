@@ -598,6 +598,18 @@ The Whisper pass is **declined**, not deferred. It fails the two rules this repo
 
 **Caveat.** The current cue set is entirely screen and scene changes on match state; there are no pit-cam, interview or crowd-cam cues yet, so the attribute has nothing to attach to until that content exists. Build it with the interview intake, which creates the first content it guards. Make it a confirm-and-log gate, never a refusal, or the director routes around it. Three taps or fewer on intake, or a good interviewer routes around it and back-fills dishonestly. E117 binds at a WRRF offseason by adoption rather than by rule, so frame it as the house standard.
 
+**Built 2026-08-11, attached somewhere better than the cue engine.** This item put the guard on `Cue`, then admitted in its own caveat that no cue it could attach to exists. The panel does exist, it is used every segment, and it is the exact moment the desk is told who is on camera — so that is where it went.
+
+A profile carries `student`, one press on the book row, and two things follow.
+
+**The name is shortened to a given name and a family initial.** The thing being avoided is precise, and it is not "a child on television": students are on camera at every FRC event and should be. What a broadcast graphic adds is a durable, indexed, searchable record — full name plus team number plus face, burnt into a public video that outlives the weekend and that the student cannot take down. "Alex R. · Driver · 846" identifies them to everyone in the hall, to their team, and to the family watching at home, which is the entire audience the card is for, while being useless to a search engine. Adults keep their full names; a mentor, an FTA and the commentators are doing a public job under their own name.
+
+The shortening happens in the core, **before** the panel payload is built, not at render time. The payload goes into the append-only NDJSON log, which is replayed and archived: shortening only in CSS or in `program.js` would put the exact string being avoided into the permanent record and leave it there.
+
+**And an adult-present reminder**, which is the YouTube half of this item and the one with teeth. Students on the panel with no adult on it returns a warning the desk prints where the confirmation normally goes. A reminder rather than a refusal, exactly as the caveat above asks: a desk that blocks the shot gets routed around within the hour and then knows nothing at all. It is advice and cannot be more than that — whether an adult is in frame is a fact about the room that no field in a JSON body can know.
+
+**Still open:** the `/s/intake` tablet and the consent gate in the publish queue. Those need interview content that does not exist yet, which was this item's own conclusion and remains right.
+
 #### 41. Notice and signage pack
 
 **What.** Generate from event config an entrance photography and recording notice, a pit-lane card, a desk-served privacy page behind the QR, and a lightweight opt-out registry feeding the per-team media posture flag.

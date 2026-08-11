@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ProfileBook } from './profiles.ts';
+import { ProfileBook, shortenForMinor } from './profiles.ts';
 import { reduce } from './state.ts';
 import { initialState, type DeskEvent, type DeskState, type PanelState } from './types.ts';
 
@@ -121,4 +121,86 @@ test('a junk team number becomes null rather than reaching the graphic', () => {
 test('the panel title falls back rather than rendering an empty band', () => {
   const after = reduce(initialState(), ev('panel.show', { people: [{ name: 'A' }] }));
   assert.equal(panelOf(after)?.title, 'Analysis desk');
+});
+
+test('a student airs as a given name and a family initial', () => {
+  assert.equal(shortenForMinor('Alex Rivera'), 'Alex R.');
+  assert.equal(shortenForMinor('Maria de la Cruz'), 'Maria de la C.');
+  assert.equal(shortenForMinor('Nguyen Van Minh'), 'Nguyen Van M.');
+  // Nothing to shorten, and "A." would be worse than the name.
+  assert.equal(shortenForMinor('Bolt'), 'Bolt');
+  // The first LETTER, not the first character: an initial of '"' is gibberish.
+  assert.equal(shortenForMinor('Jordan (Jo) "Ace"'), 'Jordan (Jo) A.');
+});
+
+test('the flag changes what airs and nothing else', async () => {
+  const dir = await scratch();
+  try {
+    const book = new ProfileBook(dir);
+    await book.load();
+    const [p] = await book.resolve([
+      { name: 'Alex Rivera', role: 'Drive coach', team: 846, student: true },
+    ]);
+    assert.equal(p!.name, 'Alex Rivera', 'the book keeps the real name; the operator needs it');
+    assert.equal(p!.display, 'Alex R.', 'the graphic gets the short one');
+    assert.equal(p!.team, 846, 'nothing else is hidden');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an upgraded book does not lose every adult surname', async () => {
+  // A book written before the flag existed has no `student` field, and
+  // treating a missing field as anything but false would shorten the whole
+  // commentary team on the first restart after the upgrade.
+  const dir = await scratch();
+  try {
+    await mkdir(join(dir, 'data'), { recursive: true });
+    await writeFile(join(dir, 'data', 'profiles.json'), JSON.stringify([
+      { id: 'p1', name: 'Sam Whitfield', role: 'Play-by-play', team: null, lastUsedAt: 1, uses: 3 },
+    ]));
+    const book = new ProfileBook(dir);
+    await book.load();
+    assert.equal(book.list[0]!.display, 'Sam Whitfield');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('omitting the flag is not the same as clearing it', async () => {
+  // The desk sends {id, name, role, team} on every panel push. If a missing
+  // field read as "adult", a student's surname would come back the second time
+  // they were put on air.
+  const dir = await scratch();
+  try {
+    const book = new ProfileBook(dir);
+    await book.load();
+    const [p] = await book.resolve([{ name: 'Alex Rivera', team: 846, student: true }]);
+    const [again] = await book.resolve([{ id: p!.id, name: 'Alex Rivera', team: 846 }]);
+    assert.equal(again!.display, 'Alex R.');
+    // Explicitly clearing it does work: somebody ticked the wrong row.
+    const [cleared] = await book.resolve([
+      { id: p!.id, name: 'Alex Rivera', team: 846, student: false },
+    ]);
+    assert.equal(cleared!.display, 'Alex Rivera');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the derived name is not written to disk', async () => {
+  // A stale `display` in the file would outrank the name it came from after
+  // somebody hand-edited the JSON.
+  const dir = await scratch();
+  try {
+    const book = new ProfileBook(dir);
+    await book.load();
+    await book.resolve([{ name: 'Alex Rivera', team: 846, student: true }]);
+    const raw = JSON.parse(await readFile(join(dir, 'data', 'profiles.json'), 'utf8')) as
+      Record<string, unknown>[];
+    assert.equal('display' in raw[0]!, false);
+    assert.equal(raw[0]!.student, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

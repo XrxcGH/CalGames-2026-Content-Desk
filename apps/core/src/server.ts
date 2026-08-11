@@ -856,11 +856,39 @@ export function startServer(opts: ServerOpts) {
               source: 'manual',
               payload: {
                 title: String(body.title ?? '').trim(),
-                people: people.map(p => ({ name: p.name, role: p.role, team: p.team })),
+                // `display`, not `name`. This payload goes on the graphic AND
+                // into the append-only event log, which is the artifact that
+                // outlives the weekend and gets replayed and archived. A
+                // student's full surname must not enter it at all: shortening
+                // only at render time would put the thing being avoided into
+                // the permanent record and leave it there.
+                people: people.map(p => ({ name: p.display, role: p.role, team: p.team })),
               },
             });
           }
-          return json(res, 200, { on: people.length, people });
+          /**
+           * The adult-present reminder.
+           *
+           * [YouTube removes or chat-disables live streams showing minors
+           * under 16 who are not visibly accompanied by an
+           * adult](https://support.google.com/youtube/answer/2801999), and a
+           * repeat costs the channel its ability to stream at all. The failure
+           * mode is not one clip, it is the event's stream dying mid-Saturday.
+           *
+           * Deliberately a REMINDER and not a refusal. A desk that blocks the
+           * shot gets routed around within an hour and then the desk knows
+           * nothing at all; a line of text at the moment the operator presses
+           * the button is the version that survives the weekend. It is also
+           * only ever advice: whether an adult is in frame is a fact about the
+           * room, and no field in a JSON body can know it.
+           */
+          const students = people.filter(p => p.student).length;
+          const adults = people.length - students;
+          const warning = students > 0 && adults === 0
+            ? 'Students on camera with no adult on the panel. YouTube needs an adult ' +
+              'visibly in frame — check the shot before you cut to it.'
+            : undefined;
+          return json(res, 200, { on: people.length, people, warning });
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }

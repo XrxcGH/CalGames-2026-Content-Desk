@@ -404,6 +404,8 @@ function paintBook() {
     const who = document.createElement('span');
     who.className = 'who';
     const name = document.createElement('b');
+    // The book shows the REAL name: this is the operator's list, and finding
+    // the right person in it is the whole job. Only the graphic shortens.
     name.textContent = p.name;
     who.append(name);
     if (p.role || p.team) {
@@ -411,6 +413,33 @@ function paintBook() {
       sub.textContent = ' · ' + [p.role, p.team].filter(Boolean).join(' ');
       who.append(sub);
     }
+    if (p.display && p.display !== p.name) {
+      const as = document.createElement('span');
+      as.className = 'as';
+      as.textContent = ` airs as ${p.display}`;
+      who.append(as);
+    }
+
+    // Toggling this is not an edit anyone should have to go looking for: a
+    // student walks up to the desk and the operator has one press to make.
+    const stu = document.createElement('button');
+    stu.className = 'btn stu';
+    stu.textContent = 'Student';
+    stu.setAttribute('aria-pressed', String(!!p.student));
+    stu.onclick = async e => {
+      e.preventDefault();
+      await fetch('/api/profiles', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id, name: p.name, role: p.role, team: p.team,
+          student: !p.student }),
+      });
+      await loadProfiles();
+      // The graphic may already be on air with the old name on it. Re-push so
+      // the correction lands immediately rather than at the next segment,
+      // which is the one moment it actually matters.
+      if (onAir.includes(p.id)) $('panelShow').click();
+      paintOnAir();
+    };
 
     const kill = document.createElement('button');
     kill.className = 'btn kill';
@@ -426,7 +455,7 @@ function paintBook() {
       paintOnAir();
     };
 
-    label.append(box, who, kill);
+    label.append(box, who, stu, kill);
     return label;
   }));
 }
@@ -512,11 +541,15 @@ $('pAdd').onclick = async () => {
   try {
     const res = await fetch('/api/profiles', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, role: $('pRole').value.trim(), team: $('pTeam').value }),
+      body: JSON.stringify({ name, role: $('pRole').value.trim(), team: $('pTeam').value,
+        student: $('pStudent').checked }),
     });
     const p = await res.json();
     if (!res.ok) throw new Error(p.error ?? `HTTP ${res.status}`);
     $('pName').value = ''; $('pRole').value = ''; $('pTeam').value = '';
+    // The checkbox is deliberately NOT cleared: guests arrive in runs. Three
+    // students from the same team is the normal case, and re-ticking it for
+    // each one is how the third one ends up on air under their full name.
     await loadProfiles();
     toggle(p.id, true);
   } catch (err) {
@@ -536,9 +569,8 @@ $('panelShow').onclick = async () => {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-    $('panelHint').textContent = body.on
-      ? `${body.on} on air, left to right.`
-      : 'Panel cleared.';
+    $('panelHint').textContent = body.warning
+      ?? (body.on ? `${body.on} on air, left to right.` : 'Panel cleared.');
     await loadProfiles();
   } catch (err) {
     $('panelHint').textContent = err.message;

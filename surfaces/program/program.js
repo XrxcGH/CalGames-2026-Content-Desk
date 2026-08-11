@@ -586,7 +586,10 @@ function paintPanel(panel) {
 
     const name = document.createElement('div');
     name.className = 'an-name';
-    name.textContent = p.name;
+    // The core already shortened a student's name before this reached the
+    // event payload, so this prints what it is given. `display` is checked
+    // first only for a panel pushed straight through the API.
+    name.textContent = p.display || p.name;
     card.append(name);
 
     // The role line is skipped entirely when there is nothing to say, rather

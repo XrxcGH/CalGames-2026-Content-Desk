@@ -19,7 +19,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,18 +168,22 @@ const SHOTS = [
   {
     name: 'program-analysis-panel',
     url: '/s/program',
-    note: 'Analysis segment: one card per person, in screen order.',
-    setup: emit => {
-      emit({
-        type: 'panel.show', source: 'manual',
-        payload: {
-          title: 'Match preview',
-          people: [
-            { name: 'Priya Raman', role: 'Analyst' },
-            { name: 'Marcus Webb', role: 'Play-by-play' },
-            { name: 'Dana Okafor', role: 'Drive coach', team: 254 },
-          ],
-        },
+    note: 'Analysis segment: one card per person, in screen order. The two ' +
+      'students are marked as such at the desk, so their cards carry a given ' +
+      'name and a family initial.',
+    // Through the real route rather than a hand-built event, because the name
+    // shortening happens in the profile book and a hand-built panel.show would
+    // render a picture of a code path nobody uses.
+    setup: async emit => {
+      await post('/api/panel', {
+        title: 'Match preview',
+        people: [
+          { name: 'Priya Raman', role: 'Analyst' },
+          { name: 'Marcus Webb', role: 'Play-by-play' },
+          { name: 'Dana Okafor', role: 'Drive coach', team: 254 },
+          { name: 'Alex Rivera', role: 'Driver', team: 846, student: true },
+          { name: 'Sofia Delgado', role: 'Human player', team: 846, student: true },
+        ],
       });
       emit({ type: 'screen.change', source: 'manual', payload: { screen: 'analysis' } });
     },
@@ -328,6 +332,19 @@ async function main() {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
 
+  // Every file the photographed desk will write to, put back afterwards.
+  //
+  // This desk runs against the REAL data directory — ROOT is fixed in
+  // index.ts — so a render posts its fixture people into the operator's
+  // profile book and its fixture question into their trivia bank. Rendering
+  // the site's own screenshots must not edit the event's live state, and a
+  // volunteer who runs this the morning of the event should not find five
+  // people who do not exist ticked into their on-camera list.
+  const restore = await snapshot([
+    join(ROOT, 'data', 'profiles.json'),
+    join(ROOT, 'data', 'trivia.json'),
+  ]);
+
   // Started with the gate explicitly OFF. That is the documented escape hatch
   // (an empty REMOTE_PIN, see access.ts) and it is the right tool here: this
   // desk lives for thirty seconds, binds a spare port on this machine, and
@@ -350,7 +367,7 @@ async function main() {
     const emit = await openSocket();
 
     for (const shot of SHOTS) {
-      if (shot.setup) shot.setup(emit);
+      if (shot.setup) await shot.setup(emit);
       for (const [path, body] of shot.api ?? []) await post(path, body);
       // Let the state land and any entrance animation settle.
       await sleep(700);
@@ -362,7 +379,37 @@ async function main() {
     console.log(`[previews] ${SHOTS.length} renders in previews/`);
   } finally {
     desk.kill();
+    // After the kill, not before: the desk saves on the way down.
+    await sleep(400);
+    await restore();
   }
+}
+
+/**
+ * Copy some files aside and hand back the function that puts them back.
+ *
+ * A file that did not exist is restored by being deleted again, which is the
+ * common case on a fresh clone and the one worth getting right: leaving an
+ * empty profile book behind would make the next `git status` look like the
+ * render had changed something.
+ */
+async function snapshot(files) {
+  const saved = [];
+  for (const file of files) {
+    const had = existsSync(file);
+    if (had) await copyFile(file, `${file}.preview-backup`);
+    saved.push({ file, had });
+  }
+  return async () => {
+    for (const { file, had } of saved) {
+      if (had) {
+        await copyFile(`${file}.preview-backup`, file);
+        await rm(`${file}.preview-backup`, { force: true });
+      } else {
+        await rm(file, { force: true });
+      }
+    }
+  };
 }
 
 async function waitForDesk() {
