@@ -109,6 +109,33 @@ foreach ($mod in $RuntimeModules) {
 }
 Say "$m dependency files"
 
+# ---- third-party licence texts --------------------------------------------
+# The exe embeds Node and vendors sharp's @img prebuilt binaries (libvips), so
+# it REDISTRIBUTES both and the licence texts have to travel with it. libvips
+# is LGPL, which makes this an obligation rather than a courtesy. NOTICE says
+# these files are here; this is what puts them here.
+Step 'Staging third-party licences'
+$thirdParty = @{
+    'NODE-LICENSE.txt' = 'https://raw.githubusercontent.com/nodejs/node/main/LICENSE'
+    'LIBVIPS-LICENSE.txt' = 'https://raw.githubusercontent.com/libvips/libvips/master/LICENSE'
+}
+foreach ($name in $thirdParty.Keys) {
+    $cached = Join-Path $Cache $name
+    if (-not (Test-Path $Cache)) { New-Item -ItemType Directory -Path $Cache -Force | Out-Null }
+    if (-not (Test-Path $cached)) {
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $thirdParty[$name] -OutFile $cached -UseBasicParsing -TimeoutSec 120
+        } catch {
+            throw ("Could not fetch $name ($($thirdParty[$name])). The exe redistributes this " +
+                   "component, so its licence text is not optional. Fetch it by hand into $cached " +
+                   'and run again.')
+        }
+    }
+    Copy-Into $cached $Stage ('third-party\' + $name)
+    Say "third-party/$name"
+}
+
 # A first-run note the volunteer sees if they open the folder before the desk.
 $readme = @"
 CalGames 2026 Content Desk

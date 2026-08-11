@@ -38,6 +38,25 @@ At run time it can talk to, but does not include or redistribute:
   OBS Studio and obs-websocket
   The Blue Alliance, FIRST Nexus, Statbotics, start.gg, YouTube, Spotify
 
-The bundled launcher downloads an official Node.js runtime at first run,
-verified against a pinned SHA-256; it is not redistributed in this repository.
+The bundled launcher: what the .exe actually carries
+---------------------------------------------------
+
+This paragraph used to say the launcher "downloads an official Node.js runtime
+at first run ... it is not redistributed in this repository". That is true of
+the repository and NOT true of the file people are handed. tools/launcher
+embeds the Node zip in the exe by default (-NoEmbedNode is the opt-out), and
+the payload also vendors sharp's prebuilt @img/* binaries, which contain
+libvips. So the CalGamesContentDesk.exe handed to a volunteer does redistribute
+both, and the file whose job is to state the licensing position should say so.
+
+  Node.js (https://nodejs.org) - MIT License. An official win-x64 build,
+    unmodified, verified against a pinned SHA-256 at build time. Its licence
+    text ships in the payload as third-party/NODE-LICENSE.txt.
+  libvips (https://libvips.org), via sharp's @img/* prebuilt binaries -
+    LGPL-3.0-or-later. Unmodified upstream binaries, dynamically linked by
+    sharp. Its licence text ships as third-party/LIBVIPS-LICENSE.txt, and the
+    corresponding source is available from libvips.org.
+
+Build with -NoEmbedNode and the exe carries neither: Node is fetched on first
+run instead, and the licence texts go with whatever is actually included.
 Node.js is MIT licensed.

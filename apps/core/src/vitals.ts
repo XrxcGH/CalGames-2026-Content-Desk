@@ -124,8 +124,14 @@ export class Vitals {
     try {
       const fs = await statfs(this.#d.root);
       const freeBytes = fs.bavail * fs.bsize;
+      // The sources the recorder will actually open, not every source in the
+      // file. It skips `enabled: false` ones, so four configured with three
+      // disabled reported a QUARTER of the true hours — enough to trip the
+      // blocking "under two hours" fail on a disk that comfortably holds the
+      // day, on a check whose entire premise is giving an honest number.
+      const live = this.#d.config.recording.sources.filter(src => src.enabled !== false);
       const perSec = (this.#d.recordBytesPerSec ?? DEFAULT_BYTES_PER_SEC)
-        * Math.max(1, this.#d.config.recording.sources.length || 1);
+        * Math.max(1, live.length);
       const hours = freeBytes / perSec / 3600;
       const gb = Math.round(freeBytes / GB);
 

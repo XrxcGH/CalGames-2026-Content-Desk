@@ -195,6 +195,14 @@ export class ArcadeStore {
         || racers.some(r => typeof r?.id !== 'string' || typeof r?.name !== 'string')) {
       throw new Error('Racers must be objects with an id and a name.');
     }
+    // And the ids have to be distinct. standings() keys by id, so two racers
+    // registered under the same one silently collapsed into a single row
+    // accruing both their points — the same wrong-leaderboard-with-no-error
+    // failure the duplicate guard in recordRace was added to stop.
+    const ids = new Set(racers.map(r => r.id));
+    if (ids.size !== racers.length) {
+      throw new Error('Two racers share an id, so their scores would be added together.');
+    }
     this.#gp = { game: 'mariokart', name, racers, races: [], raceCount };
     this.#publish('arcade.bracket_updated');
     return this.#gp;

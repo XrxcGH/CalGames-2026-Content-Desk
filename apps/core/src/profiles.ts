@@ -193,6 +193,11 @@ export class ProfileBook {
         // is what belongs on the graphic.
         if (role && role !== profile.role) { profile.role = role; dirty = true; }
         if (name !== profile.name) { profile.name = name; dirty = true; }
+        // The team too. Name and role propagated and this did not, so an
+        // operator fixing a wrong team number in the panel form had the fix
+        // silently discarded — the lower third kept airing the wrong gold
+        // numeral on every push until somebody found the book editor.
+        if (team !== profile.team) { profile.team = team; dirty = true; }
         // Only an explicit flag moves this. A desk that omits the field is not
         // saying "this person is an adult", it is saying nothing, and a stray
         // omission must not quietly restore a student's full surname.

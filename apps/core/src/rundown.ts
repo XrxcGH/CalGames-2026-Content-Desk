@@ -202,9 +202,14 @@ export class Rundown {
     const liveIndex = live ? segments.findIndex(s => s.id === live.id) : -1;
     const next = segments.slice(liveIndex + 1).find(s => s.state === 'pending') ?? null;
 
-    // A countdown belongs to a break, not to matches. During matches the room
-    // already has a clock, and a second one competing with it is noise.
-    const countdownKinds: SegmentKind[] = ['break', 'ceremony', 'gap'];
+    // A countdown belongs to anything that is not a match. During matches the
+    // room already has a clock and a second one competing with it is noise;
+    // everywhere else the audience is waiting and wants to know for how long.
+    //
+    // 'selection' and 'awards' were missing, which meant no countdown during
+    // alliance selection and the awards ceremony — the two longest
+    // audience-facing waits of the weekend, and the two people ask about.
+    const countdownKinds: SegmentKind[] = ['break', 'ceremony', 'gap', 'selection', 'awards'];
     const countdown = live && countdownKinds.includes(live.kind) && next?.projectedAt
       ? { label: live.audience ?? `${next.label} at`, at: next.projectedAt }
       : null;

@@ -5,7 +5,7 @@
  * to be debuggable at 11pm on a Saturday by whoever is still awake.
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -307,6 +307,19 @@ export function startServer(opts: ServerOpts) {
   const authBlocked = (addr: string): boolean =>
     (authFails.get(addr)?.blockedUntil ?? 0) > Date.now();
 
+  /**
+   * Constant-time PIN comparison.
+   *
+   * The lengths are compared first and that leak is fine — a PIN's length is
+   * not the secret — but the digits are compared with timingSafeEqual so the
+   * number of correct leading characters is not readable off the clock.
+   */
+  function pinMatches(sent: string): boolean {
+    const a = Buffer.from(sent, 'utf8');
+    const b = Buffer.from(REMOTE_PIN, 'utf8');
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
   function noteAuthFail(addr: string): void {
     const rec = authFails.get(addr) ?? { count: 0, blockedUntil: 0 };
     rec.count += 1;
@@ -329,8 +342,44 @@ export function startServer(opts: ServerOpts) {
   const SESSION = randomUUID();
   const AUTH_COOKIE = 'desk_auth';
 
-  const isAuthed = (req: IncomingMessage): boolean =>
-    !REMOTE_PIN || cookie(req.headers.cookie, AUTH_COOKIE) === SESSION;
+  /**
+   * The hardware door, and why there are two.
+   *
+   * The cookie is a browser mechanism: a per-process UUID handed out by
+   * /api/auth, HttpOnly, never printed. A Stream Deck cannot use it. Bitfocus
+   * Companion's stock generic-HTTP module sends a request; it does not run a
+   * sign-in flow or keep a cookie jar, and the session rotates on every
+   * restart. So with a PIN set — which is what docs/06 tells the crew to do —
+   * every physical button 422'd, and the only workaround an on-site volunteer
+   * would find is REMOTE_PIN="", which opens the whole desk to a gym full of
+   * phones. The control map's entire reason for existing was unreachable
+   * behind the gate it shipped with.
+   *
+   * So a header is accepted too, carrying the SAME event PIN the operators
+   * type. Not a second secret to distribute: the PIN is already written on the
+   * whiteboard, and a device that can be told a URL can be told a header.
+   *
+   * Deliberately not a query parameter. That would put the PIN in every access
+   * log, in the browser history of anyone who pasted the URL, and in the
+   * Referer of anything the page later loaded.
+   */
+  const PIN_HEADER = 'x-desk-pin';
+
+  const isAuthed = (req: IncomingMessage): boolean => {
+    if (!REMOTE_PIN) return true;
+    if (cookie(req.headers.cookie, AUTH_COOKIE) === SESSION) return true;
+
+    const sent = req.headers[PIN_HEADER];
+    if (typeof sent !== 'string') return false;
+    const addr = req.socket.remoteAddress ?? 'unknown';
+    // The same lockout /api/auth uses. A door with no counter is a door that
+    // can be brute-forced at line rate, and a four-digit PIN does not survive
+    // that for long.
+    if (authBlocked(addr)) return false;
+    if (pinMatches(sent)) return true;
+    noteAuthFail(addr);
+    return false;
+  };
 
   const http = createServer(async (req, res) => {
     // Host is client-supplied junk until proven otherwise. `??` keeps an
@@ -631,7 +680,16 @@ export function startServer(opts: ServerOpts) {
       // cameras, and every version of Companion can already send an HTTP
       // request with no module installed. See control-map.ts.
       if (path === '/api/control-map') {
-        return json(res, 200, { actions: CONTROL_ACTIONS, groups: controlGroups() });
+        return json(res, 200, {
+          actions: CONTROL_ACTIONS,
+          groups: controlGroups(),
+          // How a device that cannot hold a cookie gets in. Published with the
+          // actions because a button configured without it just 401s, and the
+          // volunteer's next move would be to turn the PIN off entirely.
+          auth: REMOTE_PIN
+            ? { header: PIN_HEADER, note: 'Send the event PIN in this header on every request.' }
+            : { header: null, note: 'No PIN is set on this desk, so no header is needed.' },
+        });
       }
 
       /**
@@ -1367,7 +1425,30 @@ export function startServer(opts: ServerOpts) {
       ];
       for (const [prefix, base] of mounts) {
         if (!path.startsWith(prefix)) continue;
-        const file = safeJoin(base, path.slice(prefix.length));
+        const rel = path.slice(prefix.length);
+        /*
+         * A declined team's photo is not served, even though the file is
+         * still on disk.
+         *
+         * `airable` correctly keeps them off every overlay, but the file sat
+         * at /media/teams/<team>/robot.v1.png — an open prefix, and a URL
+         * guessable from the team number alone — so anyone on the venue
+         * network, the same network the trivia QR code advertises to the
+         * whole gym, could still fetch it. The page that takes the request
+         * promises the team it "comes off every screen immediately", and
+         * "unless you type the URL" is not what that means.
+         *
+         * The file stays on disk: this is a consent decision, not a deletion,
+         * and it has to be reversible from the media console.
+         */
+        if (prefix === '/media/') {
+          const team = Number(/^teams\/(\d+)\//.exec(rel)?.[1]);
+          if (Number.isInteger(team) && media.manifest[team]?.consent === 'declined') {
+            res.writeHead(404).end('Not found');
+            return;
+          }
+        }
+        const file = safeJoin(base, rel);
         if (file && await sendFile(res, file)) return;
         res.writeHead(404).end('Not found');
         return;
