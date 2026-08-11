@@ -295,7 +295,9 @@ export function cardFromState(state, opts = {}) {
     thresholds: state.thresholds,
     // Shadow-scored (desk-typed) totals render outlined, same contract as the
     // score bar. A card built from estimated numbers must say so visibly.
-    estimated: state.confidence === 'estimated',
+    // totalConfidence, not confidence: this card shows the FINAL SCORE, and
+    // an official total posted over a typed-in breakdown is not a guess.
+    estimated: state.totalConfidence === 'estimated',
     red: side('red'),
     blue: side('blue'),
     footer: opts.footer ?? 'calgames.org',

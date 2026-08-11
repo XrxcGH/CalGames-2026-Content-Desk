@@ -315,13 +315,20 @@ function paintRp(container, rp) {
 }
 
 function paintScore(state) {
-  const est = state.confidence === 'estimated';
+  // Two flags, because they are two different claims. When the field posts a
+  // result the TOTAL is official while the fuel and tower under it may still
+  // be what somebody typed at the desk with the bridge down. One flag for
+  // both meant an official total silently promoted the guesses beside it.
+  const estTotal = String(state.totalConfidence === 'estimated');
+  const estParts = String(state.confidence === 'estimated');
   for (const side of ['red', 'blue']) {
     const s = state.score[side];
     roll($(`${side}Fuel`), s.fuel);
     roll($(`${side}Tower`), s.tower);
     roll($(`${side}Total`), s.total);
-    $(`${side}Total`).dataset.est = String(est);
+    $(`${side}Total`).dataset.est = estTotal;
+    $(`${side}Fuel`).dataset.est = estParts;
+    $(`${side}Tower`).dataset.est = estParts;
     paintRp($(`${side}Pips`), s.rp);
   }
 }
@@ -383,9 +390,15 @@ function paintFinal(state) {
   // Shadow-scored totals render OUTLINED here too, same contract as the score
   // bar: the final screen is the one everyone screenshots, and it must never
   // dress a desk-typed guess up as an official result.
-  const est = String(state.confidence === 'estimated');
-  $('finalRed').dataset.est = est;
-  $('finalBlue').dataset.est = est;
+  const estTotal = String(state.totalConfidence === 'estimated');
+  $('finalRed').dataset.est = estTotal;
+  $('finalBlue').dataset.est = estTotal;
+  // The itemization carries its own flag, so an official total can sit above
+  // an outlined breakdown — which is exactly the state a desk that
+  // shadow-scored a match is in when the field finally posts the result.
+  const estParts = String(state.confidence === 'estimated');
+  $('finalRedBreak').dataset.est = estParts;
+  $('finalBlueBreak').dataset.est = estParts;
   // The whole alliance, not just the three on the field: in a playoff the
   // fourth pick won this match too, and the social card already names them.
   // The on-air final screen and the card must agree.

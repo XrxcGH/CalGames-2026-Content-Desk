@@ -322,3 +322,55 @@ test('surrogates ride on the loaded match and do not stick', () => {
   s = reduce(s, ev('match.loaded', T0 + 1, { id: 'q2', displayName: 'Q2', red: [], blue: [] }));
   assert.deepEqual(s.surrogates, []);
 });
+
+test('posting an official score does not promote the guesses under it', () => {
+  // The whole point of the outlined numeral. An operator shadow-scores while
+  // the bridge is down, then the field comes back and posts the result: the
+  // TOTAL is now official and the period splits are still typed in. This used
+  // to stamp the entire state authoritative and render the guesses solid on
+  // the one screen everybody screenshots.
+  let s = reduce(initialState(), ev('match.loaded', 1000, { displayName: 'Q12' }));
+  s = reduce(s, { ...ev('score.delta', 2000, { alliance: 'red', field: 'fuel', amount: 40 }),
+    confidence: 'estimated' });
+  assert.equal(s.confidence, 'estimated');
+  assert.equal(s.totalConfidence, 'estimated');
+
+  s = reduce(s, ev('match.score_posted', 3000, {
+    red: { score: 96, rp: 3 }, blue: { score: 88, rp: 1 },
+  }));
+  assert.equal(s.totalConfidence, 'authoritative', 'the field posted the total');
+  assert.equal(s.confidence, 'estimated', 'nobody posted the breakdown');
+  assert.equal(s.score.red.total, 96, 'and the official total is USED, not discarded');
+  assert.equal(s.score.blue.total, 88);
+});
+
+test('a score_posted with no totals reveals without claiming anything', () => {
+  // The desk's own "Post score" button carries no payload, because the score
+  // comes from the field. It must not promote confidence on the way past.
+  let s = reduce(initialState(), ev('match.loaded', 1000, { displayName: 'Q12' }));
+  s = reduce(s, { ...ev('score.delta', 2000, { alliance: 'red', field: 'tower', amount: 8 }),
+    confidence: 'estimated' });
+  s = reduce(s, ev('match.score_posted', 3000, {}));
+  assert.equal(s.totalConfidence, 'estimated');
+  assert.equal(s.confidence, 'estimated');
+  assert.ok(s.scorePostedAt, 'but it does still reveal');
+});
+
+test('a partial snapshot cannot restore authority', () => {
+  // score.realtime is typed Partial twice over and withScore MERGES, so a
+  // patch carrying one field used to stamp the whole state authoritative with
+  // a shadow-scored number sitting untouched inside it.
+  let s = reduce(initialState(), ev('match.loaded', 1000, { displayName: 'Q12' }));
+  s = reduce(s, { ...ev('score.delta', 2000, { alliance: 'red', field: 'fuel', amount: 40 }),
+    confidence: 'estimated' });
+  s = reduce(s, ev('score.realtime', 3000, { red: { teleopFuel: 12 } }));
+  assert.equal(s.confidence, 'estimated', 'a patch is not a replacement');
+
+  // A COMPLETE one does, which is what the bridge actually sends.
+  const full = (n: number) => ({
+    autoFuel: n, teleopFuel: n, autoTower: n, teleopTower: n, fouls: 0,
+  });
+  s = reduce(s, ev('score.realtime', 4000, { red: full(10), blue: full(8) }));
+  assert.equal(s.confidence, 'authoritative');
+  assert.equal(s.totalConfidence, 'authoritative');
+});

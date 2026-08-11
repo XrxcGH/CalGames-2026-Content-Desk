@@ -197,3 +197,34 @@ test('a stale loaded match does not swallow the next match\'s result', () => {
   assert.deepEqual(real.score, { red: 91, blue: 84 });
   assert.equal(ledger.report().played, 1);
 });
+
+test('a playoff match joins its upload, and the score column fills', async () => {
+  // Two bugs that only showed up on Sunday afternoon. The rows are keyed on
+  // the raw name the field sends — Cheesy's playoff LongName is a bare
+  // "Match 7" — while the publish queue labels its items identify()'d to
+  // "Match 7 (R2)", so the join missed and every playoff match reported
+  // never-queued while its upload was succeeding. And the score was read from
+  // payload.red.total, which no live emitter produces; the field sends
+  // `score`, so the column was permanently null.
+  const bus = new EventBus();
+  const fake = {
+    items: [{ id: 'i1', kind: 'match', label: 'Match 7 (R2)', state: 'done',
+      videoId: 'abc123', error: null }],
+  } as unknown as PublishQueue;
+  const ledger = new CoverageLedger(fake);
+  ledger.attach(bus);
+
+  bus.emit({ type: 'match.loaded', source: 'cheesy',
+    payload: { displayName: 'Match 7', red: [{ number: 254 }], blue: [{ number: 846 }] } });
+  bus.emit({ type: 'match.start', source: 'cheesy', payload: {} });
+  bus.emit({ type: 'match.end', source: 'cheesy', payload: {} });
+  bus.emit({ type: 'match.score_posted', source: 'cheesy',
+    payload: { red: { score: 96, rp: 3 }, blue: { score: 88, rp: 1 } } });
+
+  const report = ledger.report();
+  const row = report.rows.find(r => r.name === 'Match 7')!;
+  assert.deepEqual(row.score, { red: 96, blue: 88 }, 'the field sends `score`');
+  assert.equal(row.publish?.videoId, 'abc123', 'and the upload is found despite the rename');
+  assert.equal(report.gaps.some(g => g.problem === 'never-queued'), false,
+    'so it does not warn about a video that exists');
+});

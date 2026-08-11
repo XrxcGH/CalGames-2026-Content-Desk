@@ -9,7 +9,8 @@
 import { clockDisplay, clockFrom, hubActiveAt, isLockdown, phaseAt } from './clock.ts';
 import {
   emptyAllianceScore, REBUILT,
-  type Alliance, type AllianceScore, type CardCall, type DeskEvent, type DeskState,
+  type Alliance, type AllianceScore, type CardCall, type Confidence,
+  type DeskEvent, type DeskState,
   type PanelState,
   type RpThresholds,
 } from './types.ts';
@@ -86,6 +87,15 @@ function retime(state: DeskState, now: number): DeskState {
 const auto = (state: DeskState, screen: string): string =>
   state.screenHold ? state.screen : screen;
 
+/** The five numbers that make up a breakdown. A snapshot missing any of them
+ *  is a patch, not a replacement, and cannot restore authority. */
+const BREAKDOWN = ['autoFuel', 'teleopFuel', 'autoTower', 'teleopTower', 'fouls'] as const;
+
+const RANK: Record<Confidence, number> = { estimated: 0, derived: 1, authoritative: 2 };
+
+/** The less confident of two, so a partial update can lower but never raise. */
+const weaker = (a: Confidence, b: Confidence): Confidence => (RANK[a] <= RANK[b] ? a : b);
+
 export function reduce(state: DeskState, ev: DeskEvent): DeskState {
   const next = ((): DeskState => {
     switch (ev.type) {
@@ -103,6 +113,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           hubAuthoritative: null,
           score: { red: emptyAllianceScore(), blue: emptyAllianceScore() },
           confidence: ev.confidence,
+          totalConfidence: ev.confidence,
           // Per-match card state resets; the running per-team totals do not,
           // because a yellow from match 12 is still live in match 40.
           cards: { ...state.cards, thisMatch: [] },
@@ -177,16 +188,63 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'match.end':
         return { ...state, matchEndedAt: ev.ts, matchStartedAt: null };
 
-      case 'match.score_posted':
-        return { ...state, scorePostedAt: ev.ts, screen: auto(state, 'score'), confidence: ev.confidence };
+      /**
+       * The reveal, and — from the field — the official totals.
+       *
+       * This case used to take ev.confidence and no numbers at all, which was
+       * wrong twice over. It threw away the one authoritative figure in the
+       * whole event (Cheesy sends RedScoreSummary.Score here), and it stamped
+       * the state authoritative anyway, so a match the desk had shadow-scored
+       * revealed its guesses as an official result on the screen everybody
+       * screenshots.
+       *
+       * Now the totals are adopted when they are sent, and adopting them is
+       * the only thing that promotes totalConfidence. The BREAKDOWN keeps
+       * whatever confidence it earned: an official total does not make the
+       * period splits under it any less typed-in.
+       */
+      case 'match.score_posted': {
+        const p = (ev.payload ?? {}) as Partial<Record<Alliance, { score?: unknown }>>;
+        let s: DeskState = { ...state, scorePostedAt: ev.ts, screen: auto(state, 'score') };
+        let official = false;
+        for (const side of ['red', 'blue'] as Alliance[]) {
+          const total = Number(p[side]?.score);
+          if (!Number.isFinite(total)) continue;
+          official = true;
+          s = { ...s, score: { ...s.score, [side]: { ...s.score[side], total } } };
+        }
+        return official ? { ...s, totalConfidence: ev.confidence } : s;
+      }
 
-      // A full snapshot can restore authority: it replaces every number.
+      /**
+       * A COMPLETE snapshot restores authority. A partial one cannot.
+       *
+       * The old comment here asserted "it replaces every number" and the code
+       * took ev.confidence unconditionally — but the payload type is Partial
+       * twice over and withScore MERGES. A patch carrying one alliance's
+       * teleopFuel therefore stamped the whole state authoritative while a
+       * shadow-scored autoFuel sat untouched inside it, rendering solid.
+       *
+       * So completeness is checked rather than assumed: both alliances, every
+       * breakdown field. Anything less can lower confidence but never raise
+       * it, which is the same rule score.delta has always followed.
+       */
       case 'score.realtime': {
         const p = ev.payload as Partial<Record<Alliance, Partial<AllianceScore>>>;
-        let s = { ...state, confidence: ev.confidence };
+        let s = state;
         if (p.red) s = withScore(s, 'red', p.red);
         if (p.blue) s = withScore(s, 'blue', p.blue);
-        return s;
+        const complete = (['red', 'blue'] as Alliance[]).every(side => {
+          const patch = p[side];
+          return !!patch && BREAKDOWN.every(f => typeof patch[f] === 'number');
+        });
+        return {
+          ...s,
+          confidence: complete ? ev.confidence : weaker(state.confidence, ev.confidence),
+          totalConfidence: complete
+            ? ev.confidence
+            : weaker(state.totalConfidence, ev.confidence),
+        };
       }
 
       // A delta cannot. Once a shadow-scored guess is folded into the total,
@@ -207,8 +265,10 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           : p.field === 'fuel' ? (inAuto ? 'autoFuel' as const : 'teleopFuel' as const)
           : (inAuto ? 'autoTower' as const : 'teleopTower' as const);
         const scored = withScore(state, p.alliance, { [part]: cur[part] + p.amount });
+        // A delta lands in the breakdown AND is summed into the total, so an
+        // estimated one taints both. Nothing here can raise either.
         return ev.confidence === 'estimated'
-          ? { ...scored, confidence: 'estimated' }
+          ? { ...scored, confidence: 'estimated', totalConfidence: 'estimated' }
           : scored;
       }
 

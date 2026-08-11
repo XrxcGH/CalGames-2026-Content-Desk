@@ -27,7 +27,7 @@ test('every emit action names a real event type', () => {
     'match.score_posted', 'match.aborted', 'screen.change', 'replay.marker',
   ];
   for (const a of CONTROL_ACTIONS.filter(x => x.path === '/api/emit')) {
-    const type = (a.body as { type?: string } | undefined)?.type;
+    const type = a.emits?.type;
     assert.ok(type, `${a.id} posts to /api/emit with no type`);
     assert.ok(known.includes(type as DeskEventType),
       `${a.id} emits "${type}", which is not in the button allowlist`);
@@ -67,12 +67,29 @@ test('a button carries its own payload, so the caller cannot supply one', () => 
   // equivalent: "Post score" is a legitimate button, so match.score_posted was
   // allowlisted, so anything reaching the route could post a fabricated score.
   const post = CONTROL_ACTIONS.find(a => a.id === 'match.score')!;
-  assert.equal((post.body as { type: string }).type, 'match.score_posted');
-  assert.equal((post.body as { payload?: unknown }).payload, undefined,
+  assert.equal(post.emits?.type, 'match.score_posted');
+  assert.equal(post.emits?.payload, undefined,
     'the score comes from the field, never from a button');
 
   // Screen buttons DO carry a payload, and it must be baked into the map
   // rather than left for the caller to choose.
   const screen = CONTROL_ACTIONS.find(a => a.id === 'screen.match')!;
-  assert.deepEqual((screen.body as { payload: unknown }).payload, { screen: 'match' });
+  assert.deepEqual(screen.emits?.payload, { screen: 'match' });
+});
+
+test('the published request is the one the route accepts', () => {
+  // The contract, and it was broken: the map published {type} for every emit
+  // action while /api/emit accepts only {id}, so a Stream Deck configured
+  // exactly as documented 422'd on the match row — the six buttons pressed
+  // forty times a day. The route takes an id so a caller cannot choose a
+  // payload, which means the id is what the map has to publish.
+  for (const a of CONTROL_ACTIONS.filter(x => x.path === '/api/emit')) {
+    assert.deepEqual(a.body, { id: a.id },
+      `${a.id} publishes a body /api/emit will refuse`);
+  }
+  // And the reverse: nothing outside /api/emit should be carrying `emits`,
+  // which would mean an action whose effect is not what its route does.
+  for (const a of CONTROL_ACTIONS.filter(x => x.path !== '/api/emit')) {
+    assert.equal(a.emits, undefined, `${a.id} declares an emit it does not make`);
+  }
 });

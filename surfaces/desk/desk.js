@@ -41,7 +41,10 @@ desk.on('state', s => {
     $('screenSel').value = s.screen;
   }
   $('nMatch').textContent = s.match
-    ? `${s.match.displayName} · screen: ${s.screen} · ${s.confidence}`
+    // Both, and only both when they differ — which is the state worth
+    // noticing: an official total sitting over a typed-in breakdown.
+    ? `${s.match.displayName} · screen: ${s.screen} · ${s.totalConfidence}`
+      + (s.confidence === s.totalConfidence ? '' : ` (breakdown ${s.confidence})`)
     : 'No match loaded';
   $('nRedTeams').textContent = (s.match?.red ?? []).map(t => t.number).join(' · ') || '-';
   $('nBlueTeams').textContent = (s.match?.blue ?? []).map(t => t.number).join(' · ') || '-';

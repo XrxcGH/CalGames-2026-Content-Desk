@@ -221,10 +221,20 @@
   color: var(--cg-white); letter-spacing: -.03em;
 }
 /* Estimated data renders outlined, never solid. We never present a guess as
-   official: see the `confidence` field in docs/02-architecture.md. */
+   official: see the `confidence` field in docs/02-architecture.md.
+   The BREAKDOWN gets the same treatment as the total and for the same reason:
+   the rule is about a value, not about a sum. An outlined 80 sitting beside a
+   solid "61 FUEL - 16 TOWER" is the overlay asserting two of the numbers it
+   just admitted it was guessing. */
 .bar-total[data-est="true"] {
   color: transparent;
   -webkit-text-stroke: 3px var(--cg-white);
+}
+.bar-sub .num[data-est="true"] {
+  color: transparent;
+  /* Thinner than the total's 3px: this type is smaller, and a stroke that
+     does not scale down closes the counters up into a smudge at 28px. */
+  -webkit-text-stroke: 1.5px var(--cg-white);
 }
 .bar-sub {
   font-family: var(--font-cond); font-weight: 600; font-size: var(--t-label);
@@ -439,6 +449,13 @@
 .final-score[data-est="true"] {
   color: transparent;
   -webkit-text-stroke: 5px var(--cg-white);
+}
+/* And the itemization under it. An official total does NOT make the period
+   splits beneath it official — with the bridge down they are what an operator
+   typed — so the two carry separate confidence and can differ on screen. */
+.final-break[data-est="true"] .fb-n {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--cg-white);
 }
 /* Where the points came from: fuel/tower by period, plus opponent fouls.
    A recessed plate so the itemization reads as detail under the hero total. */

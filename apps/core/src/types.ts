@@ -439,7 +439,21 @@ export interface DeskState {
    */
   autoWinnerKnown: boolean;
   score: Record<Alliance, AllianceScore>;
+  /**
+   * How the score BREAKDOWN was arrived at: the per-period fuel and tower
+   * splits the final screen itemizes.
+   *
+   * Separate from totalConfidence because the two are genuinely different
+   * claims and the desk regularly holds one of each. When the field posts a
+   * result the TOTAL is official; the breakdown beside it may still be what
+   * an operator typed while the bridge was down. One flag for both meant the
+   * arrival of an official total silently promoted every shadow-scored
+   * period split to solid, official-looking numerals on the one screen
+   * everybody screenshots.
+   */
   confidence: Confidence;
+  /** How the alliance TOTALS were arrived at. See confidence above. */
+  totalConfidence: Confidence;
   /** Which surface screen is live: overview, match, score, blank... */
   screen: string;
   /**
@@ -521,6 +535,7 @@ export const initialState = (): DeskState => ({
   autoWinnerKnown: false,
   score: { red: emptyAllianceScore(), blue: emptyAllianceScore() },
   confidence: 'estimated',
+  totalConfidence: 'estimated',
   screen: 'blank',
   scene: null,
   screenHold: false,

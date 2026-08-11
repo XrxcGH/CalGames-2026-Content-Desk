@@ -19,6 +19,7 @@
 
 import type { EventBus } from './bus.ts';
 import type { PublishQueue } from './publish/queue.ts';
+import { identify } from './publish/naming.ts';
 import type { DeskEvent } from './types.ts';
 
 /** What we know happened to one match. */
@@ -127,10 +128,18 @@ export class CoverageLedger {
         if (!name) return;
         const row = this.#row(name);
         row.scorePostedAt = ev.ts;
-        const p = ev.payload as { red?: { total?: number }; blue?: { total?: number } };
-        if (typeof p.red?.total === 'number' && typeof p.blue?.total === 'number') {
-          row.score = { red: p.red.total, blue: p.blue.total };
-        }
+        // `score` is what the field actually sends (Cheesy's ScorePosted
+        // carries RedScoreSummary.Score). This read `total` only, which no
+        // live emitter has ever produced, so the score column on the report
+        // and on the audience-facing team page was permanently null — while
+        // the tests, which fabricated `{red:{total}}`, passed.
+        const p = ev.payload as Record<string, { total?: unknown; score?: unknown } | undefined>;
+        const num = (side: string): number | null => {
+          const v = p[side]?.score ?? p[side]?.total;
+          return typeof v === 'number' && Number.isFinite(v) ? v : null;
+        };
+        const red = num('red'), blue = num('blue');
+        if (red !== null && blue !== null) row.score = { red, blue };
         return;
       }
 
@@ -182,10 +191,19 @@ export class CoverageLedger {
    */
   report(): CoverageReport {
     const items = this.#publish?.items ?? [];
+    // Both sides of the join go through identify(), because the queue labels
+    // its items with identify(displayName).name and the rows here are keyed on
+    // the raw name the field sent. Those agree for quals and DISAGREE for
+    // every playoff match: Cheesy's LongName for a playoff is a bare "Match 7"
+    // with the round in a separate field, and identify turns that into
+    // "Match 7 (R2)". So on Sunday every played match reported never-queued,
+    // the report warned about missing videos that were uploading fine, and the
+    // per-team page showed no links — noise at exactly the moment the report
+    // is supposed to be worth reading.
     const byLabel = new Map<string, typeof items[number]>();
     for (const item of items) {
       if (item.kind !== 'match') continue;
-      byLabel.set(item.label.trim(), item);
+      byLabel.set(identify(item.label).name, item);
     }
 
     const rows: CoverageRow[] = [];
@@ -194,7 +212,7 @@ export class CoverageLedger {
 
     for (const row of [...this.#rows.values()].sort((a, b) =>
       (a.playedAt ?? Infinity) - (b.playedAt ?? Infinity))) {
-      const item = byLabel.get(row.name);
+      const item = byLabel.get(identify(row.name).name);
       const joined: CoverageRow = {
         ...row,
         publish: item

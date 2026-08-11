@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from './bus.ts';
-import { CardLedger } from './cards.ts';
+import { CardLedger, phaseOf } from './cards.ts';
 
 const load = (bus: EventBus, name: string, surrogates: number[] = []): void => {
   bus.emit({
@@ -31,22 +31,53 @@ test('a yellow carries forward all event, which is the whole point', () => {
   assert.equal(t.cards[0]!.match, 'Qualification 12', 'and we know where it came from');
 });
 
-test('a red supersedes rather than adds to a yellow', () => {
-  // "Carrying a yellow AND has a red" muddles it on air. The worse thing
-  // happened; say that.
+test('a red leaves a team carrying, same as a yellow', () => {
+  // This test used to assert the opposite, on the reasoning that "a red
+  // supersedes rather than adds". That is a defensible thing to say about
+  // severity and it is not what the rule says: manual S6.6 displays the
+  // indicator once a team has received a yellow OR a red. Asserting `false`
+  // here told the announcer a red-carded team had a clean slate.
+  const bus = new EventBus();
+  const ledger = new CardLedger();
+  ledger.attach(bus);
+
+  load(bus, 'Qualification 12');
+  card(bus, 254, 'red');
+
+  const t = ledger.forTeam(254)!;
+  assert.equal(t.reds, 1);
+  assert.equal(t.carrying, true, 'still carrying, and one more yellow is another red');
+});
+
+test('cards do not carry across a tournament phase', () => {
+  // S6.6 clears the indicator at the end of Practice, Qualification and
+  // Playoff. A yellow from Q12 is spent by Sunday, and telling the announcer
+  // a playoff team is one card from a red is telling them something untrue.
   const bus = new EventBus();
   const ledger = new CardLedger();
   ledger.attach(bus);
 
   load(bus, 'Qualification 12');
   card(bus, 254, 'yellow');
-  load(bus, 'Playoff 3');
-  card(bus, 254, 'red');
+  assert.equal(ledger.forTeam(254)!.carrying, true, 'live through quals');
 
+  load(bus, 'Match 7');           // what Cheesy actually calls a playoff match
   const t = ledger.forTeam(254)!;
-  assert.equal(t.yellows, 1);
-  assert.equal(t.reds, 1);
-  assert.equal(t.carrying, false);
+  assert.equal(t.carrying, false, 'a new phase starts clean');
+  assert.equal(t.yellows, 1, 'but the weekend total is still sayable on air');
+});
+
+test('an unrecognised match name is treated as a playoff', () => {
+  // Cheesy sends bare "Match 7" for playoffs and puts the round elsewhere, so
+  // playoff names are the ones that do not say what they are. Guessing
+  // "qualification" for an unknown name would carry a spent card into Sunday,
+  // which is the failure this whole rule exists to stop.
+  assert.equal(phaseOf('Qualification 12'), 'qualification');
+  assert.equal(phaseOf('Q12'), 'qualification');
+  assert.equal(phaseOf('Practice 3'), 'practice');
+  assert.equal(phaseOf('Match 7'), 'playoff');
+  assert.equal(phaseOf('Final 2'), 'playoff');
+  assert.equal(phaseOf(''), 'playoff');
 });
 
 test('the same card re-announced on a reconnect is not a second card', () => {

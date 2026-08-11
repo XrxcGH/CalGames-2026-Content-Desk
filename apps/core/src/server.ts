@@ -659,7 +659,10 @@ export function startServer(opts: ServerOpts) {
               error: `"${body.id}" is not a button. See GET /api/control-map.`,
             });
           }
-          const mapped = action.body as { type?: string; payload?: unknown } | undefined;
+          // `emits`, not `body`: body is what the CALLER sends ({id}), emits
+            // is what the desk does about it. They were the same field once,
+            // which made the map publish a request shape this route rejects.
+          const mapped = action.emits;
           bus.emit({
             type: mapped?.type as DeskEventType,
             source: 'manual',

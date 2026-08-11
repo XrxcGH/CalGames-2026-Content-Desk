@@ -29,8 +29,21 @@ export interface ControlAction {
   does: string;
   method: 'POST' | 'GET';
   path: string;
-  /** JSON body, when there is one. */
+  /**
+   * The literal JSON body a client sends. This is a CONTRACT: a button
+   * configured from this field must work, and for /api/emit actions it did
+   * not — the map published `{type}` while the route accepts only `{id}`, so
+   * every match-lifecycle button 422'd on the first press. The route takes an
+   * id precisely so a caller cannot choose a payload, which means the id is
+   * what the map has to publish.
+   */
   body?: Record<string, unknown>;
+  /**
+   * What the desk emits when this action runs. NOT part of the request: the
+   * caller cannot influence it, which is the whole point. Published so a
+   * reader (and the test below) can see what a button does.
+   */
+  emits?: { type: string; payload?: Record<string, unknown> };
   /** True when the action needs a value typed in rather than a fixed body. */
   needsInput?: boolean;
 }
@@ -45,17 +58,23 @@ export interface ControlAction {
 export const CONTROL_ACTIONS: ControlAction[] = [
   // ---- the match, the row pressed most ----
   { id: 'match.preview', group: 'Match', label: 'Preview', does: 'Alliance overview on the program.',
-    method: 'POST', path: '/api/emit', body: { type: 'match.preview' } },
+    method: 'POST', path: '/api/emit', body: { id: 'match.preview' },
+    emits: { type: 'match.preview' } },
   { id: 'match.armed', group: 'Match', label: 'Arm', does: 'Score bar in, before the countdown.',
-    method: 'POST', path: '/api/emit', body: { type: 'match.armed' } },
+    method: 'POST', path: '/api/emit', body: { id: 'match.armed' },
+    emits: { type: 'match.armed' } },
   { id: 'match.start', group: 'Match', label: 'Start', does: 'Start the match clock.',
-    method: 'POST', path: '/api/emit', body: { type: 'match.start' } },
+    method: 'POST', path: '/api/emit', body: { id: 'match.start' },
+    emits: { type: 'match.start' } },
   { id: 'match.end', group: 'Match', label: 'End', does: 'Buzzer.',
-    method: 'POST', path: '/api/emit', body: { type: 'match.end' } },
+    method: 'POST', path: '/api/emit', body: { id: 'match.end' },
+    emits: { type: 'match.end' } },
   { id: 'match.score', group: 'Match', label: 'Post score', does: 'Reveal the final score.',
-    method: 'POST', path: '/api/emit', body: { type: 'match.score_posted' } },
+    method: 'POST', path: '/api/emit', body: { id: 'match.score' },
+    emits: { type: 'match.score_posted' } },
   { id: 'match.abort', group: 'Match', label: 'Abort', does: 'Stop the clock, hold the screen.',
-    method: 'POST', path: '/api/emit', body: { type: 'match.aborted' } },
+    method: 'POST', path: '/api/emit', body: { id: 'match.abort' },
+    emits: { type: 'match.aborted' } },
 
   // ---- screens ----
   ...['overview', 'match', 'score', 'analysis', 'arcade', 'selection', 'explain', 'sponsor', 'blank']
@@ -63,11 +82,13 @@ export const CONTROL_ACTIONS: ControlAction[] = [
       id: `screen.${screen}`, group: 'Screen', label: screen,
       does: `Take the ${screen} screen.`,
       method: 'POST', path: '/api/emit',
-      body: { type: 'screen.change', payload: { screen } },
+      body: { id: `screen.${screen}` },
+      emits: { type: 'screen.change', payload: { screen } },
     })),
   { id: 'screen.auto', group: 'Screen', label: 'Auto',
     does: 'Hand the screen back to the match lifecycle.',
-    method: 'POST', path: '/api/emit', body: { type: 'screen.change', payload: { screen: 'auto' } } },
+    method: 'POST', path: '/api/emit', body: { id: 'screen.auto' },
+    emits: { type: 'screen.change', payload: { screen: 'auto' } } },
 
   // ---- cameras ----
   ...['CG_INTRO', 'CG_MATCH', 'CG_SCORE', 'CG_REPLAY', 'CG_DESK', 'CG_ARCADE']
@@ -95,8 +116,8 @@ export const CONTROL_ACTIONS: ControlAction[] = [
 
   // ---- replay ----
   { id: 'replay.mark', group: 'Replay', label: 'Mark', does: 'Drop a replay marker at now minus two seconds.',
-    method: 'POST', path: '/api/emit',
-    body: { type: 'replay.marker', payload: { kind: 'manual' } } },
+    method: 'POST', path: '/api/emit', body: { id: 'replay.mark' },
+    emits: { type: 'replay.marker', payload: { kind: 'manual' } } },
 
   // ---- the gaps ----
   { id: 'sponsor.next', group: 'Gaps', label: 'Sponsor', does: 'Next sponsor in the rotation.',
