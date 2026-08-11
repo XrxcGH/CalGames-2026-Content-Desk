@@ -150,3 +150,15 @@ test('a team can read its own matches; the coverage report stays gated', () => {
   // And it stays a READ: a POST to the same path is still closed.
   assert.equal(needsAuth({ method: 'POST', path: '/api/coverage/team/846' }), true);
 });
+
+test('the static asset trees are open to READS, not to every verb', () => {
+  // The prefix exemption ran ahead of the method split, so /theme/, /shared/
+  // and /media/ were open for POST and DELETE too. Harmless only while the
+  // static file sender is the sole handler matching those paths — and the
+  // moment a write route is mounted under one, it ships pre-opened. That is
+  // the same shape as the OPTIONS hole this file already has a test for.
+  assert.equal(needsAuth({ method: 'GET', path: '/theme/tokens.css' }), false);
+  assert.equal(needsAuth({ method: 'GET', path: '/media/teams/846/robot.v1.png' }), false);
+  assert.equal(needsAuth({ method: 'POST', path: '/media/teams/846/robot.v1.png' }), true);
+  assert.equal(needsAuth({ method: 'DELETE', path: '/theme/tokens.css' }), true);
+});

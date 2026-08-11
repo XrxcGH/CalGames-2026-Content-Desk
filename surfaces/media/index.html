@@ -85,6 +85,7 @@ input:focus { outline: none; border-color: var(--accent); }
     <p class="sub">If a team asks for their photo not to be shown, set them to
       <b>declined</b>. It comes off every screen immediately, and stays off if
       somebody re-uploads the photo later. Nothing is deleted.</p>
+    <p class="err" id="consentErr" hidden aria-live="assertive"></p>
     <div id="consentList"></div>
   </div>
 
@@ -231,10 +232,26 @@ async function loadConsent() {
         b.textContent = value;
         b.disabled = (m.consent ?? 'unknown') === value;
         b.onclick = async () => {
-          await fetch('/api/media/consent', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ team: m.team, consent: value }),
-          });
+          // Checked, because this page promises the team standing at the pit
+          // desk that their photo "comes off every screen immediately". A
+          // failed POST used to look exactly like a successful one: the list
+          // repainted unchanged and the volunteer told them it was done.
+          try {
+            const res = await fetch('/api/media/consent', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ team: m.team, consent: value }),
+            });
+            if (!res.ok) {
+              const body = await res.json().catch(() => ({}));
+              throw new Error(body.error ?? `HTTP ${res.status}`);
+            }
+            $('consentErr').hidden = true;
+          } catch (err) {
+            const box = $('consentErr');
+            box.hidden = false;
+            box.textContent = `Team ${m.team} was NOT changed: ${err.message}. `
+              + 'Their photo is still where it was. Try again.';
+          }
           void loadConsent();
         };
         row.append(b);

@@ -153,13 +153,29 @@ export class TriviaStore {
    * picking a half-finished round after a match resumes it rather than
    * replaying it. Refuses while a question is open: the host would be
    * abandoning a question the whole gym is currently answering.
+   *
+   * And refuses a round that is already finished, which used to rewind
+   * silently to its first question. After lunch the host mis-taps the played
+   * "Round 1" instead of "Round 4"; question one re-airs, reveal pays every
+   * correct answer a second time, and the day-long leaderboard is quietly
+   * wrong with nothing on screen having looked unusual.
    */
   startSession(name: string): TriviaSnapshot {
     if (this.#phase === 'open') {
       throw new Error('A question is open. Reveal it before changing rounds.');
     }
-    const run = this.#sessionRuns().find(r => r.name === name);
-    if (!run) throw new Error(`There is no round called "${name}".`);
+    // The first run with anything left in it, not simply the first run with
+    // this name: a question added mid-round splits the round in two, and
+    // find() always handed back the played half.
+    const runs = this.#sessionRuns().filter(r => r.name === name);
+    if (!runs.length) throw new Error(`There is no round called "${name}".`);
+    const run = runs.find(r => this.#questions
+      .slice(r.start, r.start + r.size)
+      .some(q => !this.#askedIds.has(q.id)));
+    if (!run) {
+      throw new Error(`"${name}" has already been played all the way through. ` +
+        'Pick a round with questions left, or reset the scores to start over.');
+    }
 
     const slice = this.#questions.slice(run.start, run.start + run.size);
     const fresh = slice.findIndex(q => !this.#askedIds.has(q.id));
@@ -282,7 +298,12 @@ export class TriviaStore {
     if (this.#questions.some(existing => existing.id === q.id)) {
       throw new Error(`${name} has already been picked.`);
     }
-    this.#questions.splice(this.#index, 0, q);
+    // It joins the round it lands in rather than carrying its own name.
+    // Splicing a differently-named question into the middle of a round SPLIT
+    // that round in two: the picker listed it twice, and resuming it after the
+    // next match jumped back into the half already played.
+    this.#questions.splice(this.#index, 0,
+      { ...q, session: this.#questions[this.#index]?.session ?? q.session });
     this.#publish();
     return this.snapshot();
   }

@@ -124,11 +124,16 @@ function score(spec) {
 }
 
 function showThird(pinned) {
-  emit('lower_third.show', {
-    line1: $('t1').value || $('t1').placeholder,
-    line2: $('t2').value || $('t2').placeholder,
-    pinned,
-  });
+  // The placeholder is a sample, not a default. It used to be the fallback, so
+  // pressing T before typing anything put a lower third naming a specific
+  // (invented) person on the broadcast — a one-keystroke mistake with no undo
+  // shorter than pressing T again.
+  const line1 = $('t1').value.trim();
+  if (!line1) {
+    $('thirdHint').textContent = 'Type a name first. The grey text is an example.';
+    return;
+  }
+  emit('lower_third.show', { line1, line2: $('t2').value.trim(), pinned });
 }
 $('thirdShow').onclick = () => showThird(false);
 $('thirdPin').onclick = () => showThird(true);
@@ -581,13 +586,25 @@ $('panelShow').onclick = async () => {
 };
 
 $('panelHide').onclick = async () => {
-  onAir = [];
-  paintOnAir();
-  paintBook();
-  await fetch('/api/panel', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ people: [] }),
-  }).catch(() => {});
+  // The server first, the local list after. Clearing optimistically and
+  // swallowing the failure showed "Nobody on air" on a console whose graphic
+  // still had five faces up — and threw away the ordering, so recovery meant
+  // re-ticking five people from memory while they were still on camera.
+  const had = [...onAir];
+  try {
+    const res = await fetch('/api/panel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ people: [] }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    onAir = [];
+    paintOnAir();
+    paintBook();
+  } catch (err) {
+    onAir = had;
+    $('panelHint').textContent =
+      `Still on air: ${err.message}. Press Clear again.`;
+  }
 };
 
 void loadProfiles();
@@ -832,6 +849,15 @@ async function loadScenes() {
           });
           const body = await r.json();
           if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`);
+          // A 200 with obs:false means the desk recorded the cut and OBS
+          // never saw it. The button would light up "live" off bus state
+          // while the broadcast stayed on the field wide, with nothing on
+          // this panel saying why. The note is also refreshed from the same
+          // answer, because it was fetched once at page load and never again.
+          $('sceneNote').textContent = body.obs
+            ? '· OBS connected'
+            : '· OBS is not connected, so nothing was cut';
+          $('sceneNote').toggleAttribute('data-warn', !body.obs);
         } catch (err) {
           $('sceneNote').textContent = '· ' + err.message;
           $('sceneNote').setAttribute('data-warn', '');
@@ -856,7 +882,33 @@ void loadScenes();
 // ---- safety message ---------------------------------------------------------
 // Every screen at once, latched until cleared. Deliberately separate from the
 // status card: that explains a delay and retires itself, this does neither.
+/**
+ * A failure here is sticky, and that is the whole point.
+ *
+ * The state subscriber below repaints emergState on EVERY bus event, which
+ * during a match is several a second. An error written straight into that
+ * element survived about one frame: the operator pressed "Put on every
+ * screen" during a desk restart, the POST failed, the message flashed, the
+ * next score tick wiped it, and they walked away believing an evacuation
+ * notice was on every screen when nothing was.
+ *
+ * So a failure latches here and the repaint leaves it alone until the next
+ * attempt clears it.
+ */
+let emergError = '';
+
+function emergPaint(state) {
+  const e = state?.emergency ?? null;
+  $('emergSection').toggleAttribute('data-live', !!e);
+  $('emergState').toggleAttribute('data-live', !!e);
+  $('emergState').toggleAttribute('data-failed', !!emergError);
+  $('emergState').textContent = emergError || (e
+    ? `LIVE on every screen since ${new Date(e.raisedAt).toLocaleTimeString()}. Clear it when the room is back to normal.`
+    : '');
+}
+
 async function emergency(body) {
+  emergError = '';
   try {
     const res = await fetch('/api/emergency', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -865,13 +917,18 @@ async function emergency(body) {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
   } catch (err) {
-    $('emergState').textContent = err.message;
+    emergError = `NOT SENT: ${err.message}. Nothing is on the screens. Try again.`;
   }
+  emergPaint(desk.state);
 }
 
 $('emergRaise').onclick = () => {
   const message = $('emergMsgIn').value.trim();
-  if (!message) { $('emergState').textContent = 'Type what the room needs to do.'; return; }
+  if (!message) {
+    emergError = 'Type what the room needs to do.';
+    emergPaint(desk.state);
+    return;
+  }
   void emergency({
     kind: $('emergKindSel').value,
     message,
@@ -880,17 +937,10 @@ $('emergRaise').onclick = () => {
 };
 $('emergClear').onclick = () => void emergency({ clear: true });
 
-desk.on('state', state => {
-  const e = state?.emergency ?? null;
-  // The console itself changes appearance while one is live, because the
-  // person who raised it may have walked away and somebody else is now
-  // looking at this screen wondering why the overlay is covered.
-  $('emergSection').toggleAttribute('data-live', !!e);
-  $('emergState').toggleAttribute('data-live', !!e);
-  $('emergState').textContent = e
-    ? `LIVE on every screen since ${new Date(e.raisedAt).toLocaleTimeString()}. Clear it when the room is back to normal.`
-    : '';
-});
+// The console itself changes appearance while one is live, because the person
+// who raised it may have walked away and somebody else is now looking at this
+// screen wondering why the overlay is covered.
+desk.on('state', emergPaint);
 
 // ---- the card call ----------------------------------------------------------
 // The screen the announcer talks over between the buzzer and the score. The
@@ -929,14 +979,30 @@ $('ccShow').onclick = async () => {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     $('ccReasonIn').value = '';
+    $('ccHint').textContent = 'Card is up. Clear it before the score reveal.';
   } catch (err) {
-    $('ccReasonIn').value = err.message;
+    // The error goes in the HINT, not in the reason input. It used to
+    // overwrite what the operator had typed, so the obvious response to a
+    // transient failure — press the button again — put "HTTP 500" on the
+    // program under a 200px team number as the reason for the card.
+    $('ccHint').textContent = err.message;
   }
 };
 
-$('ccClear').onclick = () => fetch('/api/cardcall', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ clear: true }),
-}).catch(() => {});
+$('ccClear').onclick = async () => {
+  // Not swallowed. A failed clear used to report nothing at all, which leaves
+  // a red card latched over the score reveal while the operator, having
+  // pressed Clear, has already moved on to the next match.
+  try {
+    const res = await fetch('/api/cardcall', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    $('ccHint').textContent = 'Cleared.';
+  } catch (err) {
+    $('ccHint').textContent = `The card is still up: ${err.message}. Press Clear again.`;
+  }
+};
 
 desk.on('state', paintCardTeams);

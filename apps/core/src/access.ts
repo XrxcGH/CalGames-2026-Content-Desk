@@ -104,7 +104,15 @@ export interface AccessQuery {
  * otherwise, which is the safe direction for a mistake to fall.
  */
 export function needsAuth({ method, path }: AccessQuery): boolean {
-  if (OPEN_PREFIXES.some(p => path.startsWith(p))) return false;
+  const reading = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+
+  // Static asset trees. Inside the read branch, not ahead of it: these opened
+  // /theme/, /shared/ and /media/ for EVERY verb, which is harmless only for
+  // as long as the sole handler matching those paths is the static file
+  // sender. The moment a write route is mounted under one of them it ships
+  // pre-opened — the exact mechanism behind the OPTIONS hole below, and the
+  // file's own "a verb is not a permission" test does not hold on this branch.
+  if (reading && OPEN_PREFIXES.some(p => path.startsWith(p))) return false;
 
   // The surface pages themselves.
   if (path === '/' ) return false;                       // the index just lists them
@@ -124,7 +132,7 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // `curl -X OPTIONS /s/desk` served the whole operator console and
   // `-X OPTIONS /api/trivia/bank` handed out unrevealed answers. A verb is not
   // a permission.
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+  if (reading) {
     if (OPEN_GET_PREFIXES.some(p => path.startsWith(p))) return false;
     return !OPEN_GET.has(path);
   }

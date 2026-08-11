@@ -89,3 +89,56 @@ test('the host can take a name off the big screen in one action', () => {
   assert.deepEqual(store.kick('nobody'), { removed: 0 });
   assert.throws(() => store.kick('  '), /Name the player/);
 });
+
+test('digit-separated slurs do not walk past the folder', () => {
+  // '6' was the one common leet substitution missing from the fold table, and
+  // it is the highest-traffic one for exactly the category this file says it
+  // is strict about. Unfolded it read as a separator, so "ni66a" screened as
+  // the two harmless words "ni" and "a".
+  for (const name of ['ni66a', 'ni66er', 'fa66ot']) {
+    assert.equal(screenName(name).ok, false, `${name} reached the projector`);
+  }
+});
+
+test('folding cannot destroy a match either', () => {
+  // The mirror of the above, and it bit the other way: "fuck1" folds its
+  // trailing digit to a letter, giving "fucki" — no stem plus any real suffix
+  // — so it passed while bare "fuck" was refused. The raw letter-split is
+  // screened alongside the folded one.
+  for (const name of ['fuck1', 'shit1', 'bitch1', 'fuck3']) {
+    assert.equal(screenName(name).ok, false, `${name} reached the projector`);
+  }
+});
+
+test('spelling it out does not work, with or without decoration', () => {
+  // The whole-name join only ever compared the ENTIRE name, so one extra word
+  // defeated it.
+  for (const name of ['F U C K', 'f.u.c.k', 'F U C K yeah', 'xX F U C K Xx']) {
+    assert.equal(screenName(name).ok, false, `${name} reached the projector`);
+  }
+});
+
+test('a real name plus an initial is not a slur', () => {
+  // The collapse pass introduced its own Scunthorpe: "Anu S" joins to a banned
+  // word. Anu is a common given name, and name-plus-initial is the exact shape
+  // the profile book prints for a student, so it turns up here constantly.
+  assert.equal(screenName('Anu S').ok, true);
+  assert.equal(screenName('J R Smith').ok, true);
+  assert.equal(screenName('Mia K').ok, true);
+});
+
+test('the reserved list survives punctuation and leetspeak', () => {
+  // It compared the raw lowercased string, so "admin" was refused while
+  // "Admin.", "@dmin" and "4dmin" impersonated staff on the leaderboard.
+  for (const name of ['Admin.', '@dmin', '4dmin', 'a d m i n']) {
+    assert.equal(screenName(name).ok, false, `${name} could pose as staff`);
+  }
+});
+
+test('the names it was always meant to allow still pass', () => {
+  // Guarding the neighbours: every change above widens what gets refused.
+  for (const name of ['Dickinson', 'Shitake', 'Scunthorpe', 'Cockburn', 'Hancock',
+    'Penistone', 'Essex', 'bookkeeper', 'Matsushita', 'Priya Raman']) {
+    assert.equal(screenName(name).ok, true, `${name} is somebody's actual name`);
+  }
+});

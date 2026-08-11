@@ -721,13 +721,22 @@ export function startServer(opts: ServerOpts) {
           if (body.color !== 'yellow' && body.color !== 'red') {
             return json(res, 400, { error: 'A card is yellow or red.' });
           }
+          // Refused rather than coerced. `alliance === 'blue' ? 'blue' :
+          // 'red'` meant an omitted field, a typo, or a capitalised "Blue" put
+          // the card on the RED alliance, on the program, in front of the gym,
+          // with a 200 back and nothing saying it had gone wrong. The team and
+          // the colour beside it are both refused when malformed; this was the
+          // one enum that guessed.
+          if (body.alliance !== 'red' && body.alliance !== 'blue') {
+            return json(res, 400, { error: 'Which alliance: red or blue?' });
+          }
           bus.emit({
             type: 'card.call',
             source: 'manual',
             payload: {
               team,
               color: body.color,
-              alliance: body.alliance === 'blue' ? 'blue' : 'red',
+              alliance: body.alliance,
               reason: body.reason ?? '',
             },
           });

@@ -32,7 +32,7 @@
 /** Leet and lookalike folding, applied before any comparison. */
 const FOLD: Record<string, string> = {
   '0': 'o', '1': 'i', '!': 'i', '|': 'i', '3': 'e', '4': 'a', '@': 'a',
-  '5': 's', '$': 's', '7': 't', '8': 'b', '9': 'g', '+': 't',
+  '5': 's', '$': 's', '6': 'g', '7': 't', '8': 'b', '9': 'g', '+': 't',
 };
 
 /**
@@ -111,7 +111,11 @@ export function screenName(raw: string): NameVerdict {
   if (!trimmed) return { ok: false, reason: 'A name is required.' };
 
   const flat = trimmed.toLowerCase();
-  if (RESERVED.some(r => flat === r || flat.startsWith(`${r} `))) {
+  // Checked on the FOLDED form as well as the raw one. "Admin.", "admin_",
+  // "@dmin" and "4dmin" all sailed past a raw equality test and impersonated
+  // staff on the leaderboard while plain "admin" was refused.
+  const reservedForms = [flat, normalizeName(trimmed)];
+  if (RESERVED.some(r => reservedForms.some(f => f === r || f.startsWith(`${r} `)))) {
     return { ok: false, reason: 'That name is reserved for event staff. Pick another one.' };
   }
 
@@ -125,14 +129,49 @@ export function screenName(raw: string): NameVerdict {
   // Pass one: any single word that IS a banned word, with or without an
   // ordinary ending. Word by word, so a stem buried inside a longer real word
   // is left alone.
-  if (words.some(isBannedWord)) {
+  //
+  // Run over the raw letter-split as well as the folded split, because folding
+  // can DESTROY a match as easily as it creates one: "fuck1" folds its trailing
+  // digit to a letter, giving "fucki", which is no stem plus any real suffix —
+  // so it passed, while bare "fuck" was refused. Unfolded, the digit is a
+  // separator and the word is plainly there.
+  const rawWords = trimmed.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  if ([...words, ...rawWords].some(isBannedWord)) {
     return { ok: false, reason: 'Pick a different name for the big screen.' };
   }
 
-  // Pass two: the whole name with the spacing taken out, for the "F U C K"
-  // technique. Only an exact match counts here, because substring matching on
-  // this form is what would reject Scunthorpe.
-  if (words.length > 1 && isBannedWord(words.join(''))) {
+  // Pass two: the spacing taken back out, for the "F U C K" technique.
+  //
+  // Only ever an exact match against a whole banned word — substring matching
+  // on this form is what would reject Scunthorpe — and only on the joins that
+  // are themselves evidence of somebody spelling something out. A blanket
+  // whole-name join is both too weak and too strong: it missed "F U C K yeah"
+  // (one extra word defeats it) while refusing "Anu S", which is a real given
+  // name plus a real initial.
+  const singles = words.every(w => w.length === 1);
+  const joins: string[] = [];
+  if (singles) {
+    // Every letter separated: that IS the technique, whatever it spells.
+    joins.push(words.join(''));
+  } else {
+    // A run of three or more single letters inside a longer name. Three is the
+    // floor that leaves initials alone: "Anu S" is a run of one and "J R
+    // Smith" a run of two, while nobody's actual name contains three
+    // consecutive initials that spell a slur.
+    let run: string[] = [];
+    for (const w of [...words, '']) {
+      if (w.length === 1) { run.push(w); continue; }
+      if (run.length >= 3) joins.push(run.join(''));
+      run = [];
+    }
+    // And the plain whole-name join, unless the name ends in an initial —
+    // the "Anu S" shape, and the same shape the profile book prints for a
+    // student, so it turns up on this leaderboard constantly.
+    if (words.length > 1 && words[words.length - 1]!.length > 1) {
+      joins.push(words.join(''));
+    }
+  }
+  if (joins.some(isBannedWord)) {
     return { ok: false, reason: 'Pick a different name for the big screen.' };
   }
 

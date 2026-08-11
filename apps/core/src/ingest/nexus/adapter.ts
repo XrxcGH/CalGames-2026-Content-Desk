@@ -79,6 +79,8 @@ export class NexusAdapter {
   #seenAnnouncements = new Set<string>();
   #lastNowQueuing: string | null = null;
   #failures = 0;
+  /** Per-half apply failures, so a broken feed is loud once and then quiet. */
+  #applyFails = new Map<string, number>();
   #started = false;
 
   constructor(opts: NexusAdapterOpts) {
@@ -104,8 +106,13 @@ export class NexusAdapter {
   async poll(): Promise<void> {
     try {
       const status = await this.#client.status();
-      this.#failures = 0;
       this.apply(status);
+      // After apply, not before. Resetting first meant an apply that threw
+      // counted as failure #1 every single time, so the "loud once, then
+      // quiet" throttle fired every twenty seconds all afternoon — precisely
+      // the spam it exists to prevent. (apply() no longer throws, but the
+      // ordering was wrong on its own terms.)
+      this.#failures = 0;
     } catch (err) {
       this.#failures++;
       // Loud once, then quiet: a venue whose uplink is down would otherwise
@@ -124,13 +131,34 @@ export class NexusAdapter {
     if (asOf && asOf < this.#lastData) return;
     this.#lastData = asOf || this.#lastData;
 
-    this.#applyQueue(status);
-    this.#applyAnnouncements(status);
+    // Each half is caught on its own, and #started latches BEFORE either runs.
+    //
+    // This used to be three bare statements. One malformed item — an
+    // `announcements: [null]`, or `matches` arriving as an object rather than
+    // an array — threw out of apply() before the last line, so #started stayed
+    // false forever. queue.called is gated on #started, so "teams to the
+    // field" never fired again for the rest of the day, while queue.updated
+    // kept flowing and everything looked alive.
+    const wasStarted = this.#started;
     this.#started = true;
+    try { this.#applyQueue(status); } catch (err) { this.#warn('queue', err); }
+    try {
+      this.#applyAnnouncements(status, wasStarted);
+    } catch (err) { this.#warn('announcements', err); }
+  }
+
+  /** Loud once per kind, then quiet. A broken feed must not fill the log. */
+  #warn(what: string, err: unknown): void {
+    const n = (this.#applyFails.get(what) ?? 0) + 1;
+    this.#applyFails.set(what, n);
+    if (n === 1 || n % 15 === 0) {
+      console.warn(`[nexus] could not read ${what} (${n}x): ${(err as Error).message}`);
+    }
   }
 
   #applyQueue(status: NexusEventStatus): void {
-    const pending = (status.matches ?? []).filter(m => {
+    const matches = Array.isArray(status.matches) ? status.matches : [];
+    const pending = matches.filter(m => {
       const label = (m.label ?? '').trim();
       if (!label) return false;
       // No status at all is treated as pending: an event that has not started
@@ -151,7 +179,11 @@ export class NexusAdapter {
       blue: teamNumbers(m.blueTeams),
     }));
 
-    if (upcoming.length) {
+    // Emitted even when empty. It used to return early on an empty list, so
+    // once Nexus marked the last qual Completed the side screens went on
+    // advertising a played match as "up next" through alliance selection and
+    // into the playoffs, with nothing able to clear it short of a restart.
+    {
       this.#bus.emit({
         type: 'queue.updated',
         source: 'nexus',
@@ -168,11 +200,15 @@ export class NexusAdapter {
 
     // A change in who is being called is the event worth announcing on its
     // own, separately from the list: it is what drives "teams to the field".
+    // Not gated on the first poll: unlike the announcement backlog, the CURRENT
+    // call is news the moment the desk learns it, and suppressing it meant a
+    // desk started mid-session showed nobody being called until the queuer
+    // moved on.
     const now = (status.nowQueuing ?? '').trim() || null;
     if (now !== this.#lastNowQueuing) {
       this.#lastNowQueuing = now;
-      if (now && this.#started) {
-        const match = (status.matches ?? []).find(m => (m.label ?? '').trim() === now);
+      if (now) {
+        const match = matches.find(m => (m.label ?? '').trim() === now);
         this.#bus.emit({
           type: 'queue.called',
           source: 'nexus',
@@ -187,17 +223,19 @@ export class NexusAdapter {
     }
   }
 
-  #applyAnnouncements(status: NexusEventStatus): void {
-    for (const a of status.announcements ?? []) {
-      const text = (a.announcement ?? '').trim();
+  #applyAnnouncements(status: NexusEventStatus, wasStarted: boolean): void {
+    const list = Array.isArray(status.announcements) ? status.announcements : [];
+    for (const a of list) {
+      const text = (a?.announcement ?? '').trim();
       if (!text) continue;
       const id = a.id ?? `${a.postedTime ?? 0}:${text}`;
       if (this.#seenAnnouncements.has(id)) continue;
       this.#seenAnnouncements.add(id);
       // On the first poll the whole backlog is already "seen": mirroring
       // this morning's announcements onto the screens at 2pm would be worse
-      // than useless.
-      if (!this.#started) continue;
+      // than useless. The pre-latch value, since apply() now sets the flag
+      // before calling either half.
+      if (!wasStarted) continue;
 
       this.#bus.emit({
         type: 'announcement.posted',

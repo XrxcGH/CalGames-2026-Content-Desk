@@ -20,7 +20,7 @@
 
 import { spawn } from 'node:child_process';
 import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -343,7 +343,16 @@ async function main() {
   const restore = await snapshot([
     join(ROOT, 'data', 'profiles.json'),
     join(ROOT, 'data', 'trivia.json'),
+    // The publish queue too, and this one bites hardest. The shots emit a
+    // whole match lifecycle, auto-queueing is on by default, so a render
+    // persisted a held "Qualification 12" — and the queue refuses a second
+    // item with the same label, so the event's REAL Qualification 12 would
+    // silently never be queued. A volunteer re-rendering previews on Saturday
+    // morning, exactly as the README tells them to, would lose that match's
+    // video with nothing anywhere reporting it.
+    join(ROOT, 'data', 'publish-queue.json'),
   ]);
+  const restoreNow = restoreOnExit(restore);
 
   // Started with the gate explicitly OFF. That is the documented escape hatch
   // (an empty REMOTE_PIN, see access.ts) and it is the right tool here: this
@@ -356,7 +365,15 @@ async function main() {
   ], {
     cwd: ROOT,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, REMOTE_PIN: '' },
+    env: {
+      ...process.env,
+      REMOTE_PIN: '',
+      // Loopback, explicitly. The desk defaults to 0.0.0.0, so an ungated
+      // full-control desk was reachable from the venue LAN for the length of
+      // every render — and the comment above claimed it merely "binds a spare
+      // port on this machine", which 0.0.0.0 is not.
+      HOST: '127.0.0.1',
+    },
   });
   desk.stdout.on('data', () => {});
   desk.stderr.on('data', d => process.stderr.write(`[desk] ${d}`));
@@ -381,7 +398,7 @@ async function main() {
     desk.kill();
     // After the kill, not before: the desk saves on the way down.
     await sleep(400);
-    await restore();
+    restoreNow();
   }
 }
 
@@ -393,6 +410,27 @@ async function main() {
  * empty profile book behind would make the next `git status` look like the
  * render had changed something.
  */
+/**
+ * Put the files back on the ways out that skip `finally`.
+ *
+ * Ctrl+C on a slow render used to leave the fixture people in the live profile
+ * book — and then the NEXT run snapshotted the polluted file as its baseline,
+ * so the pollution became the thing faithfully restored.
+ */
+function restoreOnExit(restore) {
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    restore();
+  };
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+    process.on(sig, () => { once(); process.exit(130); });
+  }
+  process.on('exit', once);
+  return once;
+}
+
 async function snapshot(files) {
   const saved = [];
   for (const file of files) {
@@ -400,13 +438,23 @@ async function snapshot(files) {
     if (had) await copyFile(file, `${file}.preview-backup`);
     saved.push({ file, had });
   }
-  return async () => {
+  // Synchronous, so the same function works from an `exit` handler, where
+  // nothing asynchronous gets a chance to run.
+  return () => {
     for (const { file, had } of saved) {
-      if (had) {
-        await copyFile(`${file}.preview-backup`, file);
-        await rm(`${file}.preview-backup`, { force: true });
-      } else {
-        await rm(file, { force: true });
+      try {
+        if (had) {
+          copyFileSync(`${file}.preview-backup`, file);
+          rmSync(`${file}.preview-backup`, { force: true });
+        } else {
+          // A file that did not exist is restored by being deleted again,
+          // which is the common case on a fresh clone and the one worth
+          // getting right: an empty profile book left behind would make the
+          // next `git status` look like the render had changed something.
+          rmSync(file, { force: true });
+        }
+      } catch (err) {
+        console.error(`[previews] could not restore ${file}: ${err.message}`);
       }
     }
   };

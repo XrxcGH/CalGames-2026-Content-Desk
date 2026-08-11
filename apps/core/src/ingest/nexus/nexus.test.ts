@@ -145,3 +145,35 @@ test('the best estimate prefers the latest stage the queuers have reached', () =
   assert.equal(bestStartEstimate({ times: { estimatedQueueTime: 1 } }), 1);
   assert.equal(bestStartEstimate({}), null, 'no estimate is honest; a made-up one is not');
 });
+
+test('one bad item does not take the queue call down for the day', () => {
+  // apply() was three bare statements with `#started = true` last. A malformed
+  // announcement threw before that line, so #started stayed false forever;
+  // queue.called is gated on it, so "teams to the field" never fired again
+  // while queue.updated kept flowing and everything looked alive.
+  const bus = new EventBus();
+  const seen = collect(bus, ['queue.called', 'queue.updated']);
+  const nexus = adapter(bus);
+
+  nexus.apply(status({ announcements: [null] as never }));
+  nexus.apply(status({ dataAsOfTime: 2_000, nowQueuing: 'Qualification 13' }));
+
+  assert.ok(seen.some(e => e.type === 'queue.called'), 'the call still fires');
+  assert.ok(seen.some(e => e.type === 'queue.updated'), 'and so does the list');
+});
+
+test('the last match played stops being "up next"', () => {
+  // An empty pending list returned early, so once Nexus marked the final qual
+  // Completed the side screens advertised a played match through alliance
+  // selection and into the playoffs with no way to clear it but a restart.
+  const bus = new EventBus();
+  const seen = collect(bus, ['queue.updated']);
+  const nexus = adapter(bus);
+
+  nexus.apply(status());
+  nexus.apply(status({ dataAsOfTime: 2_000, nowQueuing: null, matches: [] }));
+
+  const last = seen[seen.length - 1]!;
+  assert.deepEqual((last.payload as { upcoming: unknown[] }).upcoming, [],
+    'an empty queue is news, not silence');
+});

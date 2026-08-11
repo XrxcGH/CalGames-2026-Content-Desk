@@ -526,3 +526,40 @@ test('an unknown round is refused rather than silently doing nothing', () => {
   const store = new TriviaStore(new EventBus());
   assert.throws(() => store.startSession('Round 9 · Nope'), /no round called/);
 });
+
+test('a round that has been played through refuses to replay', () => {
+  // After lunch the host mis-taps the finished "Round 1" instead of "Round 4".
+  // It used to rewind silently to question one, re-air it, and pay every
+  // correct answer a second time — a day-long leaderboard quietly wrong with
+  // nothing on screen having looked unusual.
+  const t = new TriviaStore(new EventBus(), [
+    { id: 'a1', session: 'Round 1', text: 'Q1?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+    { id: 'a2', session: 'Round 1', text: 'Q2?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+    { id: 'b1', session: 'Round 2', text: 'Q3?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+  ]);
+
+  t.startSession('Round 1');
+  t.open(); t.reveal(); t.next();
+  t.open(); t.reveal(); t.next();
+  assert.throws(() => t.startSession('Round 1'), /already been played/);
+
+  // The unplayed one is still fine.
+  t.startSession('Round 2');
+  t.open();
+  assert.equal(t.snapshot().question?.text, 'Q3?');
+});
+
+test('a match pick joins its round instead of splitting it', () => {
+  // A differently-named question spliced at the cursor broke the round in two:
+  // the picker listed it twice and resuming jumped back into the played half.
+  const t = new TriviaStore(new EventBus(), [
+    { id: 'a1', session: 'Round 1', text: 'Q1?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+    { id: 'a2', session: 'Round 1', text: 'Q2?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+    { id: 'a3', session: 'Round 1', text: 'Q3?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+  ]);
+  t.startSession('Round 1');
+  t.open(); t.reveal(); t.next();          // a1 played, cursor on a2
+
+  const names = t.sessions.map(s => s.name);
+  assert.deepEqual(names, ['Round 1'], 'one round, not two fragments');
+});
