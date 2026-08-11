@@ -18,6 +18,18 @@ something. Start with [CONTRIBUTING.md](CONTRIBUTING.md), and read
 [TRADEMARKS.md](TRADEMARKS.md) first: the code is yours to change, the CalGames and WRRF names
 are not.
 
+## Volunteers: read this instead
+
+If you are running the desk at an event rather than working on the code,
+**[RUN-THE-DESK.md](RUN-THE-DESK.md)** is the whole thing in one document:
+starting the desk, setting up OBS from nothing, pointing the side screens and
+pit monitors, running the show, and what to do when something breaks. It
+assumes you have never used any of it.
+
+A printable copy is committed alongside it as **RUN-THE-DESK.pdf** — hand that
+to people, because a gym has worse Wi-Fi than it has photocopiers. Rebuild it
+with `npm run handbook` after editing the Markdown.
+
 ## Run it in two minutes
 
 You do not need a terminal, and you do not need to install anything. You need one file,

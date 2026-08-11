@@ -156,7 +156,12 @@ which the READY message prints.
 Do not delete config.json or data/trivia.json: those are yours, and the
 launcher leaves them alone when it updates everything else.
 
-Full documentation is in the docs folder. Start with README.md.
+New to this? Open RUN-THE-DESK.pdf in this folder. It is the whole job,
+written for somebody who has never used any of it: starting the desk,
+setting up OBS, the side screens, running the show, and what to do when
+something breaks.
+
+The rest of the documentation is in the docs folder.
 "@
 Set-Content -Path (Join-Path $Stage 'READ-ME-FIRST.txt') -Value $readme -Encoding UTF8
 

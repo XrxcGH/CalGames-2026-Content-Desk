@@ -48,3 +48,9 @@ data/spotify-token.json.tmp
 # committed on purpose, because the whole point is showing somebody the
 # graphics without setting a desk up first.
 !previews/
+
+# Built from RUN-THE-DESK.md by `npm run handbook`. The PDF IS committed —
+# volunteers need it without running anything — but the HTML fallback and the
+# temp file are not.
+RUN-THE-DESK.html
+.handbook.tmp.html

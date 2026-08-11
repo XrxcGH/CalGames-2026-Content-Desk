@@ -36,7 +36,8 @@
     "test": "node --experimental-strip-types --test \"apps/core/src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "auth:spotify": "node --experimental-strip-types apps/core/src/audio/spotify-auth.ts",
-    "previews": "node tools/render-previews.mjs"
+    "previews": "node tools/render-previews.mjs",
+    "handbook": "node tools/make-handbook.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"
