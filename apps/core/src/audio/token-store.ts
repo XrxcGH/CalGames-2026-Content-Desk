@@ -15,8 +15,20 @@
  * The file is gitignored. It is a bearer credential for the music account.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+/**
+ * Which config token a stored rotation descends from.
+ *
+ * A hash, not the token: this file is already a bearer credential for the
+ * refresh token it holds, and there is no reason to make it a second one for
+ * the token in config.json as well. Truncated because all it has to do is
+ * tell two operator-pasted tokens apart.
+ */
+const seedOf = (token: string): string =>
+  createHash('sha256').update(token).digest('hex').slice(0, 16);
 
 const FILE = 'spotify-token.json';
 
@@ -29,8 +41,26 @@ const pathFor = (root: string): string => join(root, 'data', FILE);
  */
 export async function loadRefreshToken(root: string, fromConfig: string): Promise<string> {
   try {
-    const saved = JSON.parse(await readFile(pathFor(root), 'utf8')) as { refreshToken?: string };
-    if (saved.refreshToken) return saved.refreshToken;
+    const saved = JSON.parse(await readFile(pathFor(root), 'utf8')) as
+      { refreshToken?: string; seed?: string };
+    if (saved.refreshToken) {
+      // Unless the operator has pasted a NEW token into config.json, in which
+      // case that is them telling us the stored chain is dead — and it is the
+      // documented recovery, so it has to actually recover.
+      //
+      // Refresh tokens do die: revoked, or past the six-month life. The error
+      // says "run npm run auth:spotify", the operator does, pastes the result
+      // into config.json, restarts — and the old code loaded the dead rotation
+      // right back over it and failed identically, forever, with no way out
+      // that does not involve knowing this file exists. For a volunteer with
+      // no terminal experience that is not a recovery path at all.
+      //
+      // A stored file with no seed predates this check. It is trusted, because
+      // the alternative is throwing away a live rotation on upgrade.
+      if (!saved.seed || saved.seed === seedOf(fromConfig)) return saved.refreshToken;
+      console.log('[spotify] config.json has a new refresh token, dropping the stored rotation');
+      await rm(pathFor(root), { force: true });
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.warn('[spotify] stored token unreadable, using the one from config:',
@@ -44,13 +74,17 @@ export async function loadRefreshToken(root: string, fromConfig: string): Promis
  * Persist a rotation. Written to a temp file and renamed, so a crash mid-write
  * cannot leave a half-token that reads as valid JSON with a truncated string.
  */
-export async function saveRefreshToken(root: string, refreshToken: string): Promise<void> {
+export async function saveRefreshToken(
+  root: string, refreshToken: string, fromConfig: string,
+): Promise<void> {
   try {
     const dir = join(root, 'data');
     await mkdir(dir, { recursive: true });
     const file = pathFor(root);
     const tmp = `${file}.tmp`;
-    await writeFile(tmp, JSON.stringify({ refreshToken, savedAt: Date.now() }, null, 2));
+    await writeFile(tmp, JSON.stringify({
+      refreshToken, savedAt: Date.now(), seed: seedOf(fromConfig),
+    }, null, 2));
     await rename(tmp, file);
     console.log('[spotify] refresh token rotated and saved');
   } catch (err) {

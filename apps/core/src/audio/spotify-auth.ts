@@ -81,6 +81,10 @@ authUrl.search = new URLSearchParams({
 
 console.log(`\nOpen this in a browser on THIS machine, signed in as the music account:\n\n${authUrl}\n`);
 
+const escapeHtml = (s: string): string =>
+  s.replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
 const code = await new Promise<string>((resolve, reject) => {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
@@ -92,9 +96,13 @@ const code = await new Promise<string>((resolve, reject) => {
     const mismatch = back !== state;
 
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    // `err` is a query parameter, so it is escaped: it arrives from whatever
+    // opened this URL, which on a one-shot loopback listener is nothing
+    // valuable, but a page that interpolates a query string raw is a habit
+    // worth not having anywhere in the repo.
     res.end(`<body style="font-family:system-ui;padding:48px;background:#0E0113;color:#fff">
       <h1 style="color:#F0AF00">${err || mismatch ? 'Authorization failed' : 'Authorized'}</h1>
-      <p>${err ? err : mismatch ? 'The reply did not match this request.'
+      <p>${err ? escapeHtml(err) : mismatch ? 'The reply did not match this request.'
         : 'You can close this tab and go back to the terminal.'}</p></body>`);
 
     server.close();

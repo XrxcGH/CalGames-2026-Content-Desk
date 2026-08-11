@@ -382,7 +382,12 @@ if (config.audio.enabled) {
   // A rotation from a previous session beats the cold-start token in config.
   const refreshToken = await loadRefreshToken(ROOT, config.audio.spotify.refreshToken);
   const music = createSpotify({ ...config.audio.spotify, refreshToken }, {
-    onTokenRotated: token => { void saveRefreshToken(ROOT, token); },
+    // The config token is passed along so the store can record which one this
+    // rotation chain started from: pasting a fresh token into config.json is
+    // the documented way out of a dead one, and it has to win.
+    onTokenRotated: token => {
+      void saveRefreshToken(ROOT, token, config.audio.spotify.refreshToken);
+    },
   });
   audio = new HouseAudio(bus, {
     controller: music,

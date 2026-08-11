@@ -266,7 +266,16 @@ export class HouseAudio {
 
     try {
       this.#status = await music.status();
-      if (typeof this.#status.volume === 'number') this.#volume = this.#status.volume;
+      // Adopting the device's volume keeps the desk's slider honest when
+      // somebody turns it down on the music machine itself. NOT while ducked:
+      // the device is reporting DUCK_VOLUME, which is this code's own doing,
+      // not an intention. Without the guard every walk-up longer than one poll
+      // tick (five seconds, so all of them) captured 22 as the intended
+      // volume, and unducking "restored" the bed to 22%. After the first
+      // alliance introduction the room stayed quiet for the rest of the day.
+      if (!this.#ducked && typeof this.#status.volume === 'number') {
+        this.#volume = this.#status.volume;
+      }
       this.#reachable = true;
       this.#error = null;
       this.#failures = 0;
@@ -401,6 +410,13 @@ export class HouseAudio {
 
   async playPlaylist(uri: string): Promise<HouseAudioSnapshot> {
     if (!uri) throw new Error('Pick a playlist first.');
+    // Same clearing setSource does, and for the same reason: a clip left in
+    // the snapshot is a clip the house player can still decide to fire. An
+    // operator switching playlists over a running walk-up left the finished
+    // clip in every subsequent snapshot, and the house player — which nulls
+    // its own token when the audio ends — read it as one it had not seen and
+    // replayed the walk-up from the top over the new playlist.
+    this.#clip = null;
     this.#source = 'playlist';
     this.#resumeTo = 'playlist';
     this.#reason = 'Playlist changed at the desk';
@@ -453,8 +469,11 @@ export class HouseAudio {
     // fired back to back would otherwise have the first one's "done" arriving
     // during the second.
     if (token && this.#clip && this.#clip.token !== token) return this.snapshot;
-    if (this.#source !== 'clip') return this.snapshot;
+    // Cleared before the source check, not after. The clip is over either way,
+    // and leaving it set when the source has already moved on is what put a
+    // dead clip in every later snapshot.
     this.#clip = null;
+    if (this.#source !== 'clip') { this.#publish(); return this.snapshot; }
     return this.setSource(this.#resumeTo, this.#resumeTo === 'playlist'
       ? 'Back to the playlist'
       : 'Clip finished');

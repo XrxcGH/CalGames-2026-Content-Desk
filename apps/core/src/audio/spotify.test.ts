@@ -82,18 +82,55 @@ test('an idle Spotify app is woken and the command retried, not reported dead', 
 test('the wake retry happens once, never in a loop', async () => {
   // A device that will never wake must fail, not hang the desk.
   const fake = fakeSpotify({ idleUntilTransfer: true });
-  let woke = false;
+  let woke = 0;
+  let plays = 0;
   const stubborn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
-    if (u.includes('/me/player/play')) return new Response('', { status: 404 });
+    // Counted here rather than off fake.calls: this wrapper answers the play
+    // itself and never passes it down, so the fake never sees one.
+    if (u.includes('/me/player/play')) { plays++; return new Response('', { status: 404 }); }
     const res = await fake.fetchImpl(url as string, init);
-    if (/\/v1\/me\/player(\?|$)/.test(u) && (init?.method ?? 'GET') === 'PUT') woke = true;
+    if (/\/v1\/me\/player(\?|$)/.test(u) && (init?.method ?? 'GET') === 'PUT') woke++;
     return res;
   }) as unknown as typeof fetch;
 
   const spotify = new SpotifyController(cfg, { fetchImpl: stubborn });
   await assert.rejects(() => spotify.play(), /NO_ACTIVE_DEVICE/);
-  assert.ok(woke, 'it did try waking before giving up');
+  // The counts are the actual claim in the title. Without them, code that woke
+  // and retried three times passed this test, and only a truly infinite loop
+  // failed it — by timing the suite out.
+  assert.equal(woke, 1, 'woke exactly once');
+  assert.equal(plays, 2, 'the original attempt and one retry, no more');
+});
+
+test('one token refresh, however many callers ask at once', async () => {
+  // start() fires loadPlaylists() and refresh() without awaiting either, so
+  // this is every boot, not an edge case. Two refreshes of the same refresh
+  // token race Spotify's rotation, and the loser is told invalid_grant, which
+  // is latched as terminal — the desk comes up permanently needing a re-link
+  // while holding a good token.
+  const fake = fakeSpotify({});
+  const spotify = new SpotifyController(cfg, { fetchImpl: fake.fetchImpl });
+  await Promise.all([spotify.status(), spotify.status(), spotify.status()]);
+  const refreshes = fake.calls.filter(c => c.url.includes('/api/token'));
+  assert.equal(refreshes.length, 1, 'three concurrent callers, one token request');
+});
+
+test('a failed refresh is not cached, so the next command retries', async () => {
+  // The flip side of single-flighting: a network blip on the first refresh
+  // must not leave a rejected promise pinned for the rest of the weekend.
+  let fail = true;
+  const flaky = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).includes('/api/token') && fail) {
+      fail = false;
+      throw new Error('venue wifi');
+    }
+    return fakeSpotify({}).fetchImpl(url as string, init);
+  }) as unknown as typeof fetch;
+
+  const spotify = new SpotifyController(cfg, { fetchImpl: flaky });
+  await assert.rejects(() => spotify.status(), /venue wifi/);
+  await spotify.status();   // must not re-throw the cached rejection
 });
 
 test('a rotated refresh token is handed back for persisting', async () => {

@@ -126,13 +126,22 @@ import { connect } from '/shared/desk-client.js';
 // OBS can hear it. The one way software could break that is if a well-meaning
 // volunteer added THIS page to OBS as a Browser Source, because a browser
 // source's audio goes to the stream by default. So the page checks whether it
-// is inside OBS and refuses to play anything if it is: OBS injects an
-// `obsstudio` object into every page it renders, which is a reliable tell.
+// is inside OBS and refuses to play anything if it is.
+//
+// TWO tells, because either one alone has a hole. The injected `obsstudio`
+// object only reaches the TOP frame of a browser source, so a volunteer who
+// builds a combined dashboard and embeds this player in an iframe gets a
+// subframe where the object is absent, the page arms normally, and licensed
+// walk-up audio goes straight to the stream — the exact thing this exists to
+// stop. `OBS/<version>` in the user agent is present in every frame and
+// closes it. The object is still checked first because it carries the plugin
+// version, which is worth putting in the refusal message.
 //
 // It refuses rather than muting, because a silent-but-present player would
 // still show up on the desk as an armed player and hide the real problem.
 // ---------------------------------------------------------------------------
-const inOBS = typeof window.obsstudio === 'object' && window.obsstudio !== null;
+const hasObsObject = typeof window.obsstudio === 'object' && window.obsstudio !== null;
+const inOBS = hasObsObject || /\bOBS\/[\d.]+/.test(navigator.userAgent);
 if (inOBS) {
   const v = window.obsstudio?.pluginVersion;
   document.getElementById('refuseWhy').textContent =
@@ -176,6 +185,29 @@ audio.addEventListener('ended', () => {
   const done = lastToken;
   lastToken = null;
   post('/api/audio/clip-ended', { token: done });
+});
+
+/**
+ * A clip that will not play reports itself finished.
+ *
+ * `ended` is the only event that reports a clip, and a file that fails to
+ * decode never fires it. A bad walk-up would otherwise leave the desk showing
+ * it as playing forever.
+ */
+function clipFailed(token) {
+  if (lastToken !== token) return;   // already moved on
+  lastToken = null;
+  post('/api/audio/clip-ended', { token });
+}
+
+// Decode failures arrive here rather than at play(): play() resolves as soon
+// as playback is allowed to begin, so a file that turns out to be truncated or
+// in a codec this machine lacks fails afterwards, silently, with no rejection.
+audio.addEventListener('error', () => {
+  if (!lastToken) return;
+  $('warn').hidden = false;
+  $('warn').textContent = 'That clip stopped: the file would not decode on this machine.';
+  clipFailed(lastToken);
 });
 
 async function post(path, body) {
@@ -222,6 +254,11 @@ function paint(s) {
       audio.play().catch(err => {
         $('warn').hidden = false;
         $('warn').textContent = 'That clip would not play: ' + err.message;
+        // And tell the desk, or it stays latched on a clip that is not
+        // playing: the bed ducked to 22%, the walk-up button lit, and the
+        // room hearing almost nothing until somebody notices and changes
+        // source by hand. Reporting it puts the playlist back in one hop.
+        clipFailed(clip.token);
       });
     } else {
       lastToken = clip.token;   // old news; adopt it so it never fires late

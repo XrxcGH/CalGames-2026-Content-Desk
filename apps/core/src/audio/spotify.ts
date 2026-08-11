@@ -108,6 +108,8 @@ export class SpotifyController implements MusicController {
   /** Resolved from deviceName, dropped whenever it stops working. */
   #device: Device | null = null;
   #relink = false;
+  /** The in-flight token refresh, so concurrent callers share one request. */
+  #refreshing: Promise<string> | null = null;
 
   constructor(cfg: SpotifyConfig, opts: SpotifyOptions = {}) {
     this.#clientId = cfg.clientId;
@@ -132,8 +134,26 @@ export class SpotifyController implements MusicController {
    */
   async #accessToken(): Promise<string> {
     if (this.#token && Date.now() < this.#tokenExpires) return this.#token;
+    // Single-flight, and this one is not theoretical. start() fires
+    // loadPlaylists() and refresh() without awaiting either, so EVERY boot
+    // sent two refresh_token POSTs carrying the same token at the same
+    // moment. Spotify rotates refresh tokens: when it does, one of the pair
+    // is answered with the rotation and the other is answered `invalid_grant`
+    // for a token that was valid microseconds earlier. invalid_grant is
+    // latched as terminal below, so the desk would come up permanently
+    // needing a re-link while holding a perfectly good rotated token.
+    // A second hazard the same race carries: two rotations racing into
+    // saveRefreshToken share one .tmp path, so the older token can win.
+    this.#refreshing ??= this.#doRefresh().finally(() => { this.#refreshing = null; });
+    return this.#refreshing;
+  }
 
+  async #doRefresh(): Promise<string> {
     const res = await this.#fetch(TOKEN_URL, {
+      // The same 6s cap every API call gets. Without it this one call fell
+      // back to undici's ~300s headers timeout, so a venue wifi stall on the
+      // hourly refresh hung the operator's next button press for minutes.
+      signal: AbortSignal.timeout(6000),
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
