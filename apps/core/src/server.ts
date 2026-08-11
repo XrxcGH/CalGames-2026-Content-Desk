@@ -33,6 +33,7 @@ import type { CoverageLedger } from './coverage.ts';
 import type { CardLedger } from './cards.ts';
 import type { Rundown } from './rundown.ts';
 import type { Sponsors } from './sponsors.ts';
+import { CONTROL_ACTIONS, controlGroups } from './control-map.ts';
 import type { Vitals } from './vitals.ts';
 
 /** How many people the panel graphic can render and still be readable. */
@@ -619,6 +620,52 @@ export function startServer(opts: ServerOpts) {
           bus.emit({ type: 'scene.change', source: 'manual', payload: { scene: wanted } });
           if (obs?.connected) await obs.setScene(wanted);
           return json(res, 200, { scene: wanted, obs: obs?.connected ?? false });
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // ---- the control map, and the one route it needs ----------------------
+      // Every action the desk can be driven by, as data. A Stream Deck button
+      // is worth more than a browser tab to somebody who is also cutting
+      // cameras, and every version of Companion can already send an HTTP
+      // request with no module installed. See control-map.ts.
+      if (path === '/api/control-map') {
+        return json(res, 200, { actions: CONTROL_ACTIONS, groups: controlGroups() });
+      }
+
+      /**
+       * Fire one button, by action id.
+       *
+       * The consoles use the WebSocket; hardware cannot. This deliberately
+       * takes an ACTION ID rather than an event type and payload, and emits
+       * exactly what the control map declares for it.
+       *
+       * That distinction is the whole security of the route. An earlier
+       * version took {type, payload} and allowlisted the type, which looked
+       * equivalent and was not: "Post score" is a legitimate button, so
+       * `match.score_posted` was on the allowlist, so anything that could
+       * reach this route could post a match result with a fabricated score of
+       * its choosing. Caught by trying it. A button can now only send what the
+       * map says that button sends.
+       */
+      if (path === '/api/emit' && req.method === 'POST') {
+        try {
+          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
+            { id?: string };
+          const action = CONTROL_ACTIONS.find(a => a.id === String(body.id ?? ''));
+          if (!action || action.path !== '/api/emit') {
+            return json(res, 422, {
+              error: `"${body.id}" is not a button. See GET /api/control-map.`,
+            });
+          }
+          const mapped = action.body as { type?: string; payload?: unknown } | undefined;
+          bus.emit({
+            type: mapped?.type as DeskEventType,
+            source: 'manual',
+            payload: (mapped?.payload ?? {}) as Record<string, unknown>,
+          });
+          return json(res, 200, { ok: true, id: action.id, type: mapped?.type });
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }
