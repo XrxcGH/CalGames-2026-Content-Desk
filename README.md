@@ -74,6 +74,20 @@ That's the whole architecture. Everything else is adapters and CSS.
 | [packages/theme/tokens.css](packages/theme/tokens.css) | Design tokens + motion system, shared by every surface |
 | [prototypes/overlay.html](prototypes/overlay.html) | Runnable proof-of-concept |
 
+## See it without installing it
+
+[previews/](previews/) holds a render of every screen, one PNG per page, plus
+[previews/index.html](previews/index.html) as a contact sheet. They are real
+renders of the real surfaces driven through the real event bus, not mockups,
+so they cannot quietly drift from the code.
+
+```powershell
+npm run previews
+```
+
+Re-run that after changing anything visual. It boots a desk on a spare port,
+walks it through each state, screenshots every page, and rewrites the folder.
+
 ## Look
 
 Palette is mandated, so the character comes from **typography and geometry**: expanded **Archivo**
