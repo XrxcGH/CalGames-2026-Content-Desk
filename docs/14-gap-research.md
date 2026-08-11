@@ -544,6 +544,10 @@ Ranked here rather than in a separate axis because most of it is cheap, most of 
 
 **Caveat.** Mark machine-generated captions as such, or keep a human hold for award and ceremony segments. A caption backlog must never block a publish.
 
+**Built 2026-08-11, in half, and the other half was declined.** `apps/core/src/publish/captions.ts` finds a sidecar for a queue item and the upload step attaches it, wrapped so a caption failure is a warning and never a stuck video. The scope note in this item is wrong and cost an afternoon to find: `captions.insert` needs `youtube.force-ssl`, NOT the `youtube` manage scope claimed above. Both doc corrections this item demanded have been made — `docs/06` and `docs/11` no longer promise live automatic captions.
+
+The Whisper pass is **declined**, not deferred. It fails the two rules this repo is actually built on: it needs a model file and a native runtime (against no-build-step and double-click), and it contends for the same machine that is encoding the show, which `docs/09` names as the tight resource. It also loses on merit — YouTube already runs ASR on every upload for free and does it better than a laptop under load, so an unreviewed local transcript would be strictly worse output bought with the show's CPU. What survives is the part ASR cannot do: carry a file a human made. The word-index-against-the-replay-clock idea is genuinely good and orphaned by this; it is written down here rather than lost.
+
 #### 37. Low-stim mode and a scheduled low-sensory window
 
 **What.** A `?stim=low` variant of `/s/side` and the venue program path (no autoplay motion, no whip transitions, reduced saturation, longer dwell) plus a desk-scheduled window during which the cue engine suppresses stingers and bumpers and the house bus is capped.

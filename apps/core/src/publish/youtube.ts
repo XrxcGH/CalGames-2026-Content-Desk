@@ -12,7 +12,7 @@
  */
 
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -21,6 +21,8 @@ const API_URL = 'https://www.googleapis.com/youtube/v3';
 
 export const UPLOAD_SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
 export const MANAGE_SCOPE = 'https://www.googleapis.com/auth/youtube';
+/** captions.insert needs this one specifically. See uploadCaption. */
+export const CAPTION_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
 
 export interface YouTubeAuth { clientId: string; clientSecret: string; refreshToken: string }
 
@@ -237,6 +239,60 @@ export class YouTubeClient {
       }),
     });
     if (!res.ok) throw new Error(`Privacy update failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  }
+
+  /**
+   * Attach a caption track to a video. Returns the caption id.
+   *
+   * Scope note, because this is the one call that needs more than the others:
+   * captions.insert requires youtube.force-ssl, NOT the upload scope the rest
+   * of the pipeline runs on. A desk authorised for uploads only will get a 403
+   * here, which is why the caller treats a caption failure as a warning rather
+   * than a failed video. Re-consent with CAPTION_SCOPE to turn it on.
+   *
+   * Multipart rather than resumable: a caption file is kilobytes. The manual
+   * boundary construction is unavoidable — YouTube's multipart upload wants
+   * related/mixed with a JSON part first, which fetch's FormData cannot build.
+   */
+  async uploadCaption(
+    videoId: string, file: string,
+    opts: { language?: string; name?: string; draft?: boolean } = {},
+  ): Promise<string> {
+    const token = await this.#accessToken();
+    const body = await readFile(file);
+    const meta = JSON.stringify({
+      snippet: {
+        videoId,
+        language: opts.language ?? 'en',
+        // The track name shown in the player's caption menu. Empty is a valid
+        // and common choice; YouTube then labels it by language alone.
+        name: opts.name ?? '',
+        isDraft: opts.draft ?? false,
+      },
+    });
+
+    const boundary = `cg2026-${videoId}-${body.length}`;
+    const payload = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
+      body,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const res = await fetch(
+      'https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body: payload,
+      });
+    if (!res.ok) {
+      throw new Error(`Caption upload failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    }
+    return ((await res.json()) as { id: string }).id;
   }
 
   /**

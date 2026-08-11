@@ -139,9 +139,27 @@ Rules that make it hold up all weekend:
 5. **Rehearse both mixes Friday** and listen to the stream return feed from a phone.
    Echo and balance problems get called out by chat within minutes on show day.
 
-**Closed captions** ride on this for free: enable YouTube Live automatic captions. With a
-clean mic bus (no music bleed) auto-captioning is respectable, it's an accessibility win the
-community has explicitly asked for, and it makes the archived VOD searchable.
+**Closed captions** partly ride on this for free, but the earlier version of this paragraph
+promised more than YouTube delivers and is corrected here. [Automatic captions on a LIVE
+stream are English-only, normal-latency-only, and gated to channels above 1,000
+subscribers](https://support.google.com/youtube/answer/6373554). Two of those bite: nobody has
+checked WRRF's subscriber count against the threshold, and the normal-latency requirement
+fights the low-latency pit feed this document already asks for. Plan the accessibility win on
+what is actually reliable:
+
+1. **Automatic captions on the ARCHIVE** are not gated the same way and appear on every VOD.
+   Nothing to enable.
+2. **A caption sidecar beats ASR** wherever somebody produced one. Drop a `.srt` or `.vtt` into
+   `data/captions` named after the match key or the segment label and the publish queue attaches
+   it to that video as a real track, which outranks the automatic one. See
+   [11-distribution.md](11-distribution.md).
+3. **The clean mic bus still matters most.** Every caption path, automatic or human, gets more
+   accurate when the announcer's voice arrives without music under it — which is the argument
+   for the two-bus split above, restated.
+
+The half of the caption problem that is fully solved here is authored text: the status card and
+safety message fan out to program, side screens and phones simultaneously and are 100% correct
+by construction, which no speech recogniser is.
 
 ### The desk drives the house bus: `/s/house`
 

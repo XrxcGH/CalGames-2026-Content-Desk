@@ -420,8 +420,10 @@ link never leaves an orphan video with no context.
 - Game audio from the arcade stays out of the stream mix ([05-arcade.md](05-arcade.md)), and the
   event's Spotify playlist exists on the HOUSE bus only ([06](06-hardware-and-network.md)). A
   Content ID claim can mute or block the archive, and the archive is what teams watch afterward.
-- **Enable YouTube automatic captions** on the live stream. It's near-zero effort, a real
-  accessibility win, and the clean mic bus from [06](06-hardware-and-network.md) is what makes them legible.
+- **Captions.** [Automatic captions on the live stream are English-only, normal-latency-only,
+  and gated to channels above 1,000 subscribers](https://support.google.com/youtube/answer/6373554),
+  so do not count on them; the archive gets automatic captions regardless. What the desk adds is
+  the sidecar path below.
 
 ### The second stream: a clean static full-field feed
 
@@ -470,6 +472,40 @@ item's state, including anything `held`, is readable at `GET /api/publish` (gate
 needs to be signed in). Nobody should have to SSH into anything on Sunday, but there is no
 desk-console panel over that endpoint yet: today, "what's stuck" means someone reading the JSON,
 not a screen built for it.
+
+### Caption sidecars
+
+The pipeline does not transcribe anything, and that is a decision rather than a gap. There is no
+speech recognition in this repo: the laptop cutting video in a gym has nothing spare, and an
+unreviewed machine transcript of a team number is a coin flip ("one six seven eight"). YouTube
+already runs ASR on every upload, for free, better.
+
+What the desk adds is the thing ASR cannot do — carry a caption file somebody actually made.
+
+**How to use it.** Put the file in `data/captions`. Name it after the TBA match key or the item
+label, with a `.srt`, `.vtt`, `.sbv` or `.sub` extension:
+
+```
+data/captions/2026cacg_qm12.srt
+data/captions/Opening ceremony.vtt
+data/captions/2026cacg_f1m1.es.srt      <- Spanish track, tagged by filename
+```
+
+When that video uploads, the file goes up with it as a proper caption track, which outranks the
+automatic captions in the player. The name has to match exactly (case and punctuation are
+ignored, `qm1` will not claim `qm12`), and an empty file is skipped rather than uploaded —
+a track with no cues shows in the player as captions being AVAILABLE, which is worse than
+their absence.
+
+**Who this is for.** Nobody at the desk, which is the point. It is for the volunteer typing
+along in the stands, the captioner a district hires for finals, or a corrected export of last
+year's auto-captions for an award script that reads the same every year. Files can land days
+after the event; a video already uploaded needs a re-run, so drop them in before the upload
+where possible.
+
+**Scope note.** `captions.insert` needs the `youtube.force-ssl` scope, not the upload scope. A
+desk consented for uploads only gets a 403, logged as a warning — the video still publishes,
+just without the track. Re-consent with `CAPTION_SCOPE` to turn it on.
 
 ---
 

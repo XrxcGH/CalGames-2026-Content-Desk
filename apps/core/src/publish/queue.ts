@@ -18,6 +18,7 @@ import { matchCut, type ClipStore, type Range } from '../clips.ts';
 import { TbaClient } from './tba.ts';
 import { description, identify, isPractice, segmentDescription, segmentName, videoTitle } from './naming.ts';
 import { YouTubeClient, watchUrl, type VideoMeta } from './youtube.ts';
+import { findSidecar } from './captions.ts';
 
 // There is no 'analysis' kind: the docs once promised automatic detection of
 // telestrator sessions, but no detector was ever built, so the kind was
@@ -50,6 +51,8 @@ export interface QueueItem {
   released: boolean;
   clipPath: string | null;
   videoId: string | null;
+  /** Set once a caption sidecar has been attached, so a resume never doubles it. */
+  captionId: string | null;
   sessionUrl: string | null;
   attempts: number;
   error: string | null;
@@ -87,6 +90,7 @@ export function qcHold(kind: ItemKind, cutSeconds: number): string | null {
 
 export class PublishQueue {
   #file: string;
+  #captions: string;
   #items: QueueItem[] = [];
   #cfg: Config;
   #bus: EventBus;
@@ -98,6 +102,7 @@ export class PublishQueue {
 
   constructor(root: string, cfg: Config, bus: EventBus, clips: ClipStore | null) {
     this.#file = join(root, 'data', 'publish-queue.json');
+    this.#captions = join(root, 'data', 'captions');
     this.#cfg = cfg;
     this.#bus = bus;
     this.#clips = clips;
@@ -132,8 +137,8 @@ export class PublishQueue {
   async load(): Promise<void> {
     try {
       this.#items = JSON.parse(await readFile(this.#file, 'utf8')) as QueueItem[];
-      // Queue files written before the released flag existed lack the field.
-      for (const item of this.#items) item.released ??= false;
+      // Queue files written before these fields existed lack them.
+      for (const item of this.#items) { item.released ??= false; item.captionId ??= null; }
       // Crash recovery is restore AND resume: without this kick, a machine
       // that died mid-upload restarted with every item faithfully restored in
       // 'cut'/'uploaded' and then did nothing — a second Release finds no
@@ -156,7 +161,7 @@ export class PublishQueue {
   }
 
   async add(init: Omit<QueueItem, 'id' | 'state' | 'released' | 'clipPath' | 'videoId'
-    | 'sessionUrl' | 'attempts' | 'error' | 'progress' | 'createdAt' | 'updatedAt'>,
+    | 'captionId' | 'sessionUrl' | 'attempts' | 'error' | 'progress' | 'createdAt' | 'updatedAt'>,
     hold: string | null = null): Promise<QueueItem> {
     const item: QueueItem = {
       ...init,
@@ -168,7 +173,7 @@ export class PublishQueue {
       // picked it up and later overwrote the hold with 'cut'.
       state: hold ? 'held' : 'pending',
       released: false,
-      clipPath: null, videoId: null, sessionUrl: null,
+      clipPath: null, videoId: null, captionId: null, sessionUrl: null,
       attempts: 0, error: hold, progress: 0,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
@@ -435,6 +440,28 @@ export class PublishQueue {
         item.error = null;
         item.attempts = 0;
         item.updatedAt = Date.now();
+
+        // Captions, if somebody produced a file for this one. Wrapped, and
+        // deliberately so: a caption track is worth having and is never worth
+        // failing a video over. The likeliest failure here is a 403 because
+        // the desk was consented for uploads only (captions.insert needs
+        // force-ssl), and that must read as a line in the log, not as a match
+        // video stuck in the queue.
+        try {
+          // Not if one is already attached: a crash between the upload and
+          // the save re-enters this branch, the resumable session hands back
+          // the SAME video id, and a second insert would put two identical
+          // tracks in the player's caption menu.
+          const sidecar = item.captionId ? null
+            : await findSidecar(this.#captions, [item.matchKey ?? '', item.label]);
+          if (sidecar) {
+            item.captionId = await this.#yt.uploadCaption(item.videoId, sidecar.path,
+              { language: sidecar.language });
+            console.log(`[publish] ${item.label}: ${sidecar.cues} captions attached`);
+          }
+        } catch (err) {
+          console.warn(`[publish] ${item.label}: captions not attached (${(err as Error).message})`);
+        }
         // A crash between here and the playlist insert must restart as
         // 'uploaded' with this video id, not re-upload a duplicate.
         await this.#save();
