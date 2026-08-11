@@ -251,12 +251,17 @@ startTicker(() => {
   const behind = s.pace?.behindMin;
   const behindText = behind != null && Math.abs(behind) >= 2
     ? ` · running <b>${Math.abs(behind)} min ${behind > 0 ? 'behind' : 'ahead'}</b>` : '';
-  $('line').innerHTML = s.status
+  const html = s.status
     ? `<b>${esc(s.status.message)}</b>`
     : `${esc(s.match?.displayName ?? 'No match loaded')} · ` +
       `${PHASE_LABEL[phaseFor(s, c)] ?? ''} <b>${clockDisplayFor(s, c)}</b> · ` +
       `red <b>${s.score.red.total}</b> · blue <b>${s.score.blue.total}</b>${behindText}`;
+  // Only when it actually changed. This runs on rAF, so it was destroying and
+  // re-parsing this line sixty times a second, all day, on a battery-powered
+  // tablet sitting on the podium.
+  if (html !== lastLine) { lastLine = html; $('line').innerHTML = html; }
 });
+let lastLine = '';
 
 function esc(x) {
   return String(x ?? '').replace(/[&<>"']/g, c =>

@@ -73,6 +73,14 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
   touch-action: manipulation;
 }
 .b:active { transform: scale(.95); background: var(--cg-gold); color: var(--cg-black); }
+/* Drawn INSIDE the chamfer with a negative offset, because clip-path clips
+   outline and box-shadow alike and a ring outside it is silently invisible —
+   the same fix /s/next already carries. Without it there was no focus
+   indication anywhere on this page, including Start and Abort, for anyone on
+   a Bluetooth keyboard or switch access. */
+.b:focus-visible, #pin:focus-visible, #unlock:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: -6px;
+}
 .b[data-on="true"] { background: var(--cg-gold); color: var(--cg-black); }
 .b small { display: block; font-size: 13px; opacity: .75; letter-spacing: .04em; margin-top: 2px; }
 .b--go { background: var(--cg-green); }
@@ -87,6 +95,10 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
   font-family: var(--font-cond); font-weight: 700; font-size: 13px;
   letter-spacing: .08em; text-transform: uppercase;
   opacity: 0; pointer-events: none; transition: opacity 160ms linear;
+  /* Above the PIN gate, which is a full-screen opaque fixed layer at z-index
+     50. Without this the "Wrong PIN" toast painted UNDERNEATH it: the operator
+     fat-fingered the PIN, tapped Unlock, and saw absolutely nothing happen. */
+  z-index: 60;
 }
 #toast[data-show] { opacity: 1; }
 #toast[data-err] { background: var(--st-bad); color: #fff; }
@@ -449,10 +461,23 @@ async function loadCues() {
     }
     if (!res.ok) return;
     const { cues = [] } = await res.json();
-    $('cues').innerHTML = cues.map(c =>
-      `<button class="b" data-cue="${c.id}" data-on="${c.autopilot}">${c.name}` +
-      `<small>${c.autopilot ? 'armed' : `off · would have fired ${c.wouldHaveFired}×`}</small></button>`
-    ).join('');
+    // Built as nodes, not as a string. Cue names come from config.json, which
+    // is operator-authored text — the arcade overlay already comments that
+    // exactly this is "an on-air HTML injection point" — and interpolating it
+    // raw ran it inside the producer's authenticated session.
+    $('cues').replaceChildren(...cues.map(c => {
+      const b = document.createElement('button');
+      b.className = 'b';
+      b.dataset.cue = c.id;
+      b.dataset.on = String(c.autopilot);
+      b.append(document.createTextNode(c.name));
+      const small = document.createElement('small');
+      small.textContent = c.autopilot
+        ? 'armed'
+        : `off · would have fired ${Number(c.wouldHaveFired) || 0}×`;
+      b.append(small);
+      return b;
+    }));
     for (const b of document.querySelectorAll('[data-cue]')) {
       b.onclick = tap(async () => {
         const on = b.dataset.on !== 'true';

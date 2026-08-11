@@ -422,7 +422,18 @@ const STATUS_KIND = {
 
 function paintStatus(status) {
   const card = $('statusCard');
-  if (!status) { card.hidden = true; return; }
+  if (!status) {
+    // Fades out rather than disappearing between two frames, which on a
+    // broadcast reads as a glitch rather than as the card retiring.
+    if (!card.hidden && card.dataset.leaving !== 'true') {
+      card.dataset.leaving = 'true';
+      const done = () => { card.hidden = true; delete card.dataset.leaving; };
+      card.addEventListener('transitionend', done, { once: true });
+      setTimeout(done, 500);
+    }
+    return;
+  }
+  delete card.dataset.leaving;
   const back = status.backAt
     ? ` (back ~${new Date(status.backAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`
     : '';
@@ -582,16 +593,39 @@ function paintPanel(panel) {
   const el = $('anPanel');
   const strap = $('anStrap');
   const people = panel?.people ?? [];
+
+  // The title is painted BEFORE the early return, because it changes
+  // independently of who is sitting there. Inside the keyed block it stuck:
+  // the desk retitled a segment "Playoff preview" with the same three guests
+  // up and the strap kept saying "Analysis desk" until somebody was added or
+  // removed. It also never appeared at all for a strap with nobody on it,
+  // which is the bumper case the strap exists for.
+  $('anTitle').textContent = panel?.title || 'Analysis desk';
+
+  // The CARDS are keyed, because rebuilding them on every state frame would
+  // restart the entrance animation ten times a second.
   const key = JSON.stringify(people);
   if (key === panelKey) return;
   panelKey = key;
-
-  // The segment title still belongs on air with nobody named, which is the
-  // case for a bumper or a wide of an empty desk.
-  $('anTitle').textContent = panel?.title || 'Analysis desk';
   strap.hidden = people.length > 0;
-  el.hidden = people.length === 0;
   el.dataset.n = String(people.length);
+
+  // Leaving is animated as well as arriving. Up to six name cards vanishing in
+  // a single frame reads as a fault; the band drops away the way it came in.
+  if (people.length === 0) {
+    if (!el.hidden) {
+      el.dataset.leaving = 'true';
+      const done = () => { el.hidden = true; delete el.dataset.leaving; };
+      // The timeout is the belt: transitionend does not fire if the element is
+      // display:none'd by something else mid-flight, and a panel stuck
+      // half-off the bottom of the frame is worse than one that cuts.
+      el.addEventListener('transitionend', done, { once: true });
+      setTimeout(done, 500);
+    }
+    return;
+  }
+  delete el.dataset.leaving;
+  el.hidden = false;
 
   el.replaceChildren(...people.map(p => {
     const card = document.createElement('div');

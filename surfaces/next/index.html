@@ -195,6 +195,11 @@ async function loadPlayed() {
   } catch { box.hidden = true; }
 }
 if (team) $('team').value = team;
+// And load their played matches, which only ever ran from the submit handler.
+// A parent who followed their team yesterday reopened the page and the played
+// list with its video links — the page's whole post-match feature — simply
+// never appeared until they pressed Follow again.
+if (team) void loadPlayed();
 
 $('follow').addEventListener('submit', e => {
   e.preventDefault();
@@ -313,6 +318,11 @@ async function poll() {
 }
 setInterval(poll, 5000);
 poll();
+
+// The played list refreshes on its own timer, and a slower one: it changes
+// when a video finishes uploading, which is minutes, not seconds. Without
+// this a video posted while somebody had the page open never showed up.
+setInterval(() => { if (team) void loadPlayed(); }, 60_000);
 </script>
 </body>
 </html>

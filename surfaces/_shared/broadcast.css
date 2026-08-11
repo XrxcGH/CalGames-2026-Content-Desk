@@ -171,10 +171,13 @@
   font-family: var(--font-cond); font-weight: 600; font-size: var(--name-size, var(--t-body));
   color: var(--cg-white-dim); text-align: left; line-height: 1.08;
   letter-spacing: .04em; text-transform: uppercase;
-  /* Two lines is the ceiling, and the ceiling has to follow the actual type
-     size: pinned to the old 32px token it clipped the second line clean off
-     once the names grew. */
-  max-height: calc(var(--name-size, var(--t-body)) * 2.3); overflow: hidden;
+  /* Two lines is the ceiling, and it clamps to two rather than clipping at a
+     height. max-height: 2.3em left a 0.14em strip below line two, so a name
+     that wrapped to three lines showed a row of amputated letter-tops under
+     it. line-clamp cuts at a line boundary and ellipsises, which is what the
+     panel cards already do. */
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
 .robot[data-photo="false"] .robot-name { color: var(--cg-white); }
 
@@ -321,6 +324,20 @@
    a card that names the reason reads as process. Gold shell like the hub
    tab, floating top-center where every camera framing leaves room.
    ========================================================================== */
+/* On and off with motion, like everything else on this overlay. It used to
+   snap: "Field delay" appeared and disappeared in one frame, which on a
+   broadcast reads as a glitch rather than as information. It sits away from
+   the frame edge, so it fades and lifts rather than sliding off a border. */
+.status-card {
+  transition: opacity var(--dur-out) linear,
+              transform var(--dur-out) cubic-bezier(.4, 0, .2, 1);
+}
+.status-card[data-leaving="true"] {
+  opacity: 0; transform: translateY(10px); pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-card[data-leaving="true"] { transform: none; }
+}
 .status-card {
   position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
   z-index: 45;
@@ -559,6 +576,22 @@
   display: flex; align-items: stretch; justify-content: space-evenly; gap: 18px;
 }
 .an-panel[hidden] { display: none; }
+/* The exit. The band sits at the bottom edge, so it leaves DOWNWARD rather
+   than fading: motion off the nearest border is what reads as deliberate
+   there, and a fade in place looks like a dropped frame. */
+.an-panel {
+  transition: transform var(--dur-out) cubic-bezier(.4, 0, .2, 1),
+              opacity var(--dur-out) linear;
+}
+.an-panel[data-leaving="true"] {
+  transform: translateY(calc(100% + var(--safe-y)));
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .an-panel { transition: opacity 120ms linear; }
+  .an-panel[data-leaving="true"] { transform: none; }
+}
 
 .an-card {
   /* Equal widths (flex-basis 0, grow 1), NOT content widths. A row where
@@ -822,6 +855,12 @@
   background: var(--cg-purple-void);
 }
 .emerg[hidden] { display: none; }
+/* The luma remap every other full-frame plate has, and the one that matters
+   most: without it the near-black fill keys straight out on the Blackmagic
+   DSK, so an EVACUATE message rendered as white and gold text floating over
+   live match video — the one graphic whose only job is to be read, degraded
+   at the one moment it is ever used. */
+:root[data-key="luma"] .emerg { background: var(--cg-purple); }
 .emerg-kind {
   font-family: var(--font-cond); font-weight: 700; font-size: 44px;
   letter-spacing: .22em; text-indent: .22em; text-transform: uppercase;
@@ -863,9 +902,17 @@
   font-style: normal; font-size: .8em; line-height: .68em; text-align: center;
   vertical-align: middle;
 }
-/* Outlined: a yellow card is a warning, not a result. */
-.cmark--yellow { background: var(--cg-gold); }
-/* Filled and larger: a red is heavier than a yellow at a glance. */
+/* Outlined, and it has to actually BE outlined. This said "outlined" in the
+   comment and set a solid gold fill, so both marks were filled rectangles
+   differing only in colour and 0.04em of size — which is precisely the
+   colour-alone distinction the block comment above rules out, on a stream
+   that has been recompressed twice, all weekend, on every carded team. */
+.cmark--yellow {
+  background: none;
+  box-shadow: inset 0 0 0 .13em var(--cg-gold);
+}
+/* Filled and larger: a red is heavier than a yellow at a glance, and now the
+   two differ in fill as well as in hue. */
 .cmark--red { background: var(--cg-white); width: .56em; height: .74em; }
 .cmark--sur {
   width: auto; padding: 0 .28em; background: var(--cg-white-dim);
