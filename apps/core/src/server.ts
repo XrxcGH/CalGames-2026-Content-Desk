@@ -423,7 +423,33 @@ export function startServer(opts: ServerOpts) {
         });
       }
 
-      if (path === '/api/media/manifest') return json(res, 200, media.manifest);
+      // , not : this endpoint is open, every overlay reads
+      // it, and a team that asked to come off the screen must come off the
+      // screen. The full manifest, consent included, is on the gated route
+      // below for the media console.
+      if (path === '/api/media/manifest') return json(res, 200, media.airable);
+
+      if (path === '/api/media/consent' && req.method === 'POST') {
+        try {
+          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
+            { team?: number; consent?: string };
+          const team = Number(body.team);
+          if (!Number.isInteger(team) || team <= 0) return json(res, 400, { error: 'Which team?' });
+          const consent = body.consent;
+          if (consent !== 'granted' && consent !== 'unknown' && consent !== 'declined') {
+            return json(res, 400, { error: 'Consent is granted, unknown or declined.' });
+          }
+          const updated = await media.setConsent(team, consent);
+          // Push it now rather than at the next match load: a team asking at
+          // the pit desk should be off the screen before they walk back.
+          broadcastMedia();
+          return json(res, 200, updated);
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      if (path === '/api/media/all') return json(res, 200, media.manifest);
       if (path === '/api/events/recent') return json(res, 200, bus.recent.slice(-200));
 
       if (path === '/api/recorder') {
@@ -1349,6 +1375,23 @@ ${sections}</body></html>`;
     }
   }, 10_000);
 
+  /**
+   * Re-send the media set to every surface.
+   *
+   * Surfaces normally get media once, in their opening snapshot, because robot
+   * photos do not change mid-show. A consent change is the exception and the
+   * one that cannot wait: a team asking for their robot to come off the screen
+   * should not have to wait for a reload of a Browser Source nobody is looking
+   * at.
+   */
+  function broadcastMedia(): void {
+    for (const ws of wss.clients) {
+      if (ws.readyState === ws.OPEN) {
+        send(ws, { t: 'snapshot', state: bus.state, media: media.airable, needsPin: !!REMOTE_PIN });
+      }
+    }
+  }
+
   wss.on('connection', (ws, req) => {
     const addr = req.socket.remoteAddress ?? 'unknown';
     // The surface tag ends up in log lines, and searchParams percent-decodes,
@@ -1360,7 +1403,7 @@ ${sections}</body></html>`;
     // it is never asked twice. The phone remote, which can be opened straight
     // to its own page, still authenticates over the socket below.
     if (cookie(req.headers.cookie, AUTH_COOKIE) === SESSION) authed.add(ws);
-    send(ws, { t: 'snapshot', state: bus.state, media: media.manifest, needsPin: !!REMOTE_PIN });
+    send(ws, { t: 'snapshot', state: bus.state, media: media.airable, needsPin: !!REMOTE_PIN });
 
     // Guesses on this one socket. The per-address damper already counts them;
     // this closes the socket too, so a guessing loop cannot even keep its

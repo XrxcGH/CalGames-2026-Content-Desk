@@ -49,6 +49,17 @@ input:focus { outline: none; border-color: var(--accent); }
 .tips h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 8px; }
 .tips b { color: var(--text); }
+.consent { margin-top: 28px; }
+.consent h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 8px; }
+.crow { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 6px;
+  background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 8px; }
+.crow b { font-family: var(--font-num); font-weight: 900; min-width: 70px; }
+.cstate { font-family: var(--font-cond); letter-spacing: .1em; text-transform: uppercase;
+  font-size: 13px; margin-right: auto; }
+.cstate[data-v="declined"] { color: var(--st-bad-text); font-weight: 700; }
+.cstate[data-v="granted"] { color: var(--st-ok); }
+.crow .btn { font-size: 12px; padding: 5px 10px; }
 </style>
 </head>
 <body>
@@ -67,6 +78,15 @@ input:focus { outline: none; border-color: var(--accent); }
   </div>
 
   <div class="queue" id="queue"></div>
+
+  <!-- The one control a team asks for at the pit desk. -->
+  <div class="consent">
+    <h2>Take a robot off the screen</h2>
+    <p class="sub">If a team asks for their photo not to be shown, set them to
+      <b>declined</b>. It comes off every screen immediately, and stays off if
+      somebody re-uploads the photo later. Nothing is deleted.</p>
+    <div id="consentList"></div>
+  </div>
 
   <div class="tips">
     <h2>Shooting notes</h2>
@@ -176,6 +196,54 @@ function row(file) {
   if (input.value && sure) upload();
   else if (input.value) el.querySelector('.st').textContent = 'check the team number, then press Enter';
 }
+
+/**
+ * The consent list.
+ *
+ * Reads the FULL manifest (/api/media/all) rather than what the overlays get,
+ * because a team that already declined has to be findable here in order to be
+ * un-declined. The overlay endpoint deliberately cannot see them.
+ */
+async function loadConsent() {
+  try {
+    const res = await fetch('/api/media/all');
+    if (!res.ok) return;
+    const manifest = await res.json();
+    const teams = Object.values(manifest).sort((a, b) => a.team - b.team);
+    const box = document.getElementById('consentList');
+    if (!teams.length) {
+      box.innerHTML = '<p class="sub">No robot photos uploaded yet.</p>';
+      return;
+    }
+    box.replaceChildren(...teams.map(m => {
+      const row = document.createElement('div');
+      row.className = 'crow';
+      const num = document.createElement('b');
+      num.textContent = m.team;
+      const state = document.createElement('span');
+      state.className = 'cstate';
+      state.dataset.v = m.consent ?? 'unknown';
+      state.textContent = m.consent ?? 'unknown';
+      row.append(num, state);
+      for (const value of ['granted', 'unknown', 'declined']) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.textContent = value;
+        b.disabled = (m.consent ?? 'unknown') === value;
+        b.onclick = async () => {
+          await fetch('/api/media/consent', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: m.team, consent: value }),
+          });
+          void loadConsent();
+        };
+        row.append(b);
+      }
+      return row;
+    }));
+  } catch { /* transient */ }
+}
+void loadConsent();
 </script>
 </body>
 </html>

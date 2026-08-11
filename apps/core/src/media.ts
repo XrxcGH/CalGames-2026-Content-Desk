@@ -12,6 +12,24 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+/**
+ * Whether this team's image may go on air.
+ *
+ *   granted   somebody at the event asked the team and they said yes
+ *   unknown   nobody has asked. The DEFAULT, and it shows: an event that has
+ *             not asked has not been told yes
+ *   declined  they said no, or asked for it to come down
+ *
+ * `unknown` still airs, and that is a deliberate line rather than an
+ * oversight. These are photographs of ROBOTS, taken in a public hall by the
+ * event that invited them, and treating a missing checkbox as a refusal would
+ * empty the alliance overview at every event that never got round to a form.
+ * `declined` is absolute and instant, which is the part that matters: a team
+ * that asks for their robot to come off the screen gets that in one click,
+ * without anybody deleting a file.
+ */
+export type MediaConsent = 'granted' | 'unknown' | 'declined';
+
 export interface RobotMedia {
   team: number;
   version: number;
@@ -20,6 +38,8 @@ export interface RobotMedia {
   h: number;
   uploadedAt: number;
   warnings: string[];
+  /** Absent on anything uploaded before this existed, which reads as unknown. */
+  consent?: MediaConsent;
 }
 
 export type Manifest = Record<number, RobotMedia>;
@@ -74,6 +94,34 @@ export class MediaLibrary {
   constructor(root: string) { this.#root = root; }
 
   get manifest(): Manifest { return this.#manifest; }
+
+  /**
+   * What the OVERLAY may draw: everything except teams who said no.
+   *
+   * A separate accessor rather than a filter at each call site, because there
+   * are several call sites and the one that gets forgotten is the one on air.
+   */
+  get airable(): Manifest {
+    const out: Manifest = {};
+    for (const [team, m] of Object.entries(this.#manifest)) {
+      if (m.consent === 'declined') continue;
+      out[Number(team)] = m;
+    }
+    return out;
+  }
+
+  /**
+   * Record what a team said. Takes effect on the next state push, so a team
+   * asking at the pit desk is off the screen before they walk back.
+   */
+  async setConsent(team: number, consent: MediaConsent): Promise<RobotMedia> {
+    const media = this.#manifest[team];
+    if (!media) throw new Error('No robot photo has been uploaded for team ' + team + '.');
+    media.consent = consent;
+    await writeFile(join(this.#root, 'teams', String(team), 'meta.json'),
+      JSON.stringify(media, null, 2));
+    return media;
+  }
 
   /** Rebuild from disk on boot: the manifest lives in memory, built from each
    *  team's meta.json. No manifest file exists on disk, deliberately. */
@@ -168,6 +216,9 @@ export class MediaLibrary {
       src: `/media/teams/${team}/robot.v${version}.png`,
       uploadedAt: Date.now(),
       warnings,
+      // Preserved across a re-upload: a team that said no does not have to say
+      // it again because somebody replaced the photo.
+      consent: this.#manifest[team]?.consent ?? 'unknown',
     };
     await writeFile(join(dir, 'meta.json'), JSON.stringify(media, null, 2));
     this.#manifest[team] = media;
