@@ -379,6 +379,22 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         };
       }
 
+      // Takes the screen the same way the card call does, and gets out of the
+      // way on its own when a match arms (see sponsors.ts).
+      case 'sponsor.show': {
+        const p = ev.payload as { id?: string; name?: string; line?: string; logo?: string | null };
+        const name = String(p.name ?? '').trim();
+        if (!name) return state;
+        return {
+          ...state,
+          sponsor: { id: String(p.id ?? ''), name, line: String(p.line ?? '').trim(), logo: p.logo ?? null },
+          screen: auto(state, 'sponsor'),
+        };
+      }
+
+      case 'sponsor.hide':
+        return { ...state, sponsor: null };
+
       case 'card.call_clear':
         return { ...state, cardCall: null };
 

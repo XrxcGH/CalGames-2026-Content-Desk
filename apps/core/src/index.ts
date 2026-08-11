@@ -37,6 +37,7 @@ import { ClipStore } from './clips.ts';
 import { CoverageLedger } from './coverage.ts';
 import { CardLedger } from './cards.ts';
 import { Rundown } from './rundown.ts';
+import { Sponsors } from './sponsors.ts';
 import { Vitals } from './vitals.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -440,6 +441,11 @@ if (config.startgg.token && config.startgg.eventSlug) {
 const publish = new PublishQueue(ROOT, config, bus, clips);
 await publish.load();
 
+// Who paid for this, and proof of what they got. Counting is the half nobody
+// builds, and it is the half that makes asking again easy.
+const sponsors = new Sponsors(bus, config.sponsors.list);
+sponsors.attach();
+
 // The day as a list, with a clock derived from measured pace rather than the
 // printed schedule nobody believes by 11am.
 const rundown = new Rundown(bus, config.rundown.segments);
@@ -533,7 +539,7 @@ if (config.publish.autoQueueArcade && !has('demo') && !has('replay')) {
 const server = startServer({
   bus, media, root: ROOT, port, host, recorder, clips, publish, config, cheesy, cues, obs,
   arcade, trivia, audio, audioClips, profiles, coverage, vitals, cardLedger,
-  rundown, lanBase,
+  rundown, sponsors, lanBase,
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once — see the handler at the top of this file.

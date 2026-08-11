@@ -26,7 +26,7 @@ fitStage($('stage'));
 // ---- screens --------------------------------------------------------------
 const SCREENS = [
   'overview', 'match', 'score', 'analysis', 'arcade', 'selection', 'explain',
-  'cardcall', 'blank',
+  'cardcall', 'sponsor', 'blank',
 ];
 let currentScreen = null;
 
@@ -544,6 +544,7 @@ desk.on('state', state => {
   paintStatus(CLEAN ? null : state.status);
   paintEmergency(state.emergency);
   paintCardCall(state.cardCall);
+  paintSponsor(state.sponsor);
   showScreen(CLEAN ? 'match' : state.screen);
 });
 
@@ -662,6 +663,25 @@ function paintFinalCards(state) {
     chip.textContent = `${c.color === 'red' ? 'Red card' : 'Yellow card'} · ${c.team}`;
     return chip;
   }));
+}
+
+/**
+ * The sponsor card.
+ *
+ * The logo is optional and often missing at an offseason event, so the name is
+ * always drawn: a card that renders as a broken image is worse for the sponsor
+ * than one that just says who they are, in the same face everything else uses.
+ */
+function paintSponsor(sponsor) {
+  if (!sponsor) return;
+  $('spName').textContent = sponsor.name;
+  $('spLine').textContent = sponsor.line ?? '';
+  const logo = $('spLogo');
+  logo.hidden = !sponsor.logo;
+  if (sponsor.logo) logo.src = sponsor.logo;
+  // A logo path that 404s would otherwise leave the browser's broken-image
+  // glyph 340px tall on a projector.
+  logo.onerror = () => { logo.hidden = true; };
 }
 
 function paintCardCall(call) {

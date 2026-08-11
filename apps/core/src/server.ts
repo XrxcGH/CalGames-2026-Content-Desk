@@ -32,6 +32,7 @@ import type { ProfileBook, ProfileInput } from './profiles.ts';
 import type { CoverageLedger } from './coverage.ts';
 import type { CardLedger } from './cards.ts';
 import type { Rundown } from './rundown.ts';
+import type { Sponsors } from './sponsors.ts';
 import type { Vitals } from './vitals.ts';
 
 /** How many people the panel graphic can render and still be readable. */
@@ -117,6 +118,8 @@ export interface ServerOpts {
   cardLedger?: CardLedger | null;
   /** The day as a list, with a clock derived from measured pace. */
   rundown?: Rundown | null;
+  /** Sponsor rotation, and the count behind the post-event report. */
+  sponsors?: Sponsors | null;
   /** LAN-reachable base URL, e.g. "http://10.0.100.23:8720", for QR codes. */
   lanBase?: string | null;
 }
@@ -126,7 +129,7 @@ export function startServer(opts: ServerOpts) {
           publish = null, config = null, cheesy = null, cues = null, obs = null,
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
-          rundown = null, lanBase = null } = opts;
+          rundown = null, sponsors = null, lanBase = null } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -590,6 +593,33 @@ export function startServer(opts: ServerOpts) {
           bus.emit({ type: 'scene.change', source: 'manual', payload: { scene: wanted } });
           if (obs?.connected) await obs.setScene(wanted);
           return json(res, 200, { scene: wanted, obs: obs?.connected ?? false });
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // ---- sponsors ---------------------------------------------------------
+      if (path === '/api/sponsors' && req.method !== 'POST') {
+        // ?report=1 answers with pasteable text rather than JSON, because the
+        // thing somebody actually needs at 6pm is an email they can send.
+        if (sponsors && url.searchParams.get('report')) {
+          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          return res.end(sponsors.report(config?.event.name ?? 'The event'));
+        }
+        return json(res, 200, sponsors?.snapshot ?? null);
+      }
+
+      if (path === '/api/sponsors' && req.method === 'POST') {
+        if (!sponsors) return json(res, 503, { error: 'No sponsors are configured.' });
+        try {
+          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
+            { action?: string; id?: string };
+          switch (body.action) {
+            case 'next': return json(res, 200, sponsors.next());
+            case 'show': return json(res, 200, sponsors.show(String(body.id ?? '')));
+            case 'hide': return json(res, 200, sponsors.hide());
+            default: return json(res, 404, { error: 'Unknown sponsor action.' });
+          }
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }

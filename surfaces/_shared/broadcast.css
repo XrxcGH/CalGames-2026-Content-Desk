@@ -912,3 +912,43 @@
 }
 .fc-chip--yellow { background: var(--cg-gold); }
 .fc-chip--red { background: var(--cg-white); }
+
+/* ==========================================================================
+   Sponsor recognition. Full frame, in the gaps, and never over a match: a
+   sponsor card that interrupts play is worth less than none, to the sponsor
+   most of all.
+
+   The logo is given room and the name is set large underneath it rather than
+   beside it, because logos arrive at every aspect ratio a volunteer can
+   produce and a layout that assumes a wide one breaks on the first square one.
+   ========================================================================== */
+.sp {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 22px; padding: 0 140px; text-align: center;
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--atmo);
+  background-size: var(--tex-perf-size), cover;
+}
+:root[data-key="luma"] .sp {
+  background-color: var(--cg-purple);
+  background-image: var(--tex-perf);
+}
+.sp-kicker {
+  font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
+  letter-spacing: .24em; text-indent: .24em; text-transform: uppercase;
+  color: var(--cg-gold);
+}
+/* Capped both ways: a tall logo must not push the name off the bottom, and a
+   tiny one must not be blown up into artefacts. */
+.sp-logo { max-width: 900px; max-height: 340px; object-fit: contain; }
+.sp-name {
+  font-family: var(--font-display); font-weight: 800;
+  font-variation-settings: "wdth" var(--wdth-display);
+  font-size: 88px; line-height: 1.05; color: var(--cg-white);
+}
+.sp-line {
+  font-family: var(--font-cond); font-weight: 600; font-size: 36px;
+  letter-spacing: .06em; color: var(--cg-white-dim); max-width: 26em;
+}
+.sp-tick { width: 420px; height: 4px; background: var(--tick); }

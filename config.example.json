@@ -77,6 +77,13 @@
     }
   },
 
+  "sponsors": {
+    "//": "Who paid for this. Tier decides how often a sponsor comes round in the rotation (title 3x, major 2x, supporting 1x), never how big it is drawn.",
+    "//report": "GET /api/sponsors?report=1 gives pasteable text: appearances and seconds on screen per sponsor, counted from the broadcast itself.",
+    "//logo": "Optional path under /media, e.g. /media/sponsors/acme.png. The name is always drawn, so a missing logo is not a broken card.",
+    "list": []
+  },
+
   "rundown": {
     "//": "The day as a list. The desk manager advances it; nothing advances itself, because a rundown that advances on its own will do it during the one delay nobody predicted.",
     "//matches": "A matches block gives a COUNT, not a duration: the length comes from the pace model measuring real cycle time. A printed 7 minutes against a measured 9 is an hour by the end of the day.",

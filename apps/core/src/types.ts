@@ -125,7 +125,9 @@ export type DeskEventType =
   // What the event offers and where, pushed from config at boot.
   | 'event.accessibility'
   // The day as a list: which segment is live and when the next one starts.
-  | 'rundown.updated';
+  | 'rundown.updated'
+  // Sponsor recognition, and the count behind the post-event report.
+  | 'sponsor.show' | 'sponsor.hide';
 
 // ---------------------------------------------------------------------------
 // 2026 REBUILT
@@ -488,6 +490,8 @@ export interface DeskState {
   cards: CardState;
   /** The card call currently on air, or null. */
   cardCall: CardCall | null;
+  /** The sponsor on air, or null. */
+  sponsor: { id: string; name: string; line: string; logo: string | null } | null;
   /** Teams playing this match as a surrogate: it does not count for them. */
   surrogates: number[];
   /** Accessibility services this event actually offers. Empty means none listed. */
@@ -533,6 +537,7 @@ export const initialState = (): DeskState => ({
   emergency: null,
   cards: { byTeam: {}, thisMatch: [] },
   cardCall: null,
+  sponsor: null,
   surrogates: [],
   accessibility: { services: [], ask: '' },
   selection: null,

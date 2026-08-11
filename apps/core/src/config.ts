@@ -88,6 +88,15 @@ export interface Config {
   // be an explicit act at the point of use rather than something inherited
   // from a file copied between machines. See docs/10-field-bridge.md.
   /**
+   * Who paid for this, and what they were promised.
+   *
+   * Tier decides how often a sponsor comes round in the rotation, never how
+   * big it is drawn. Empty is fine and means no sponsor graphics at all.
+   */
+  sponsors: {
+    list: { id: string; name: string; tier?: 'title' | 'major' | 'supporting'; line?: string; logo?: string }[];
+  };
+  /**
    * The day as a list. Empty is fine and means the desk shows no rundown.
    *
    * A matches block gives a COUNT rather than a duration: the length comes
@@ -210,6 +219,7 @@ export const DEFAULTS: Config = {
     enabled: true,
     spotify: { clientId: '', refreshToken: '', deviceName: '', playlistUri: '' },
   },
+  sponsors: { list: [] },
   rundown: { segments: [] },
   accessibility: { services: [], ask: '' },
   nexus: { apiKey: '', eventKey: '' },
