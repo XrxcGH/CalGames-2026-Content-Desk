@@ -103,3 +103,41 @@ test('an unknown sponsor is refused by name', () => {
   const s = new Sponsors(new EventBus(), PLAN);
   assert.throws(() => s.show('nope'), /no sponsor "nope"/);
 });
+
+test('no sponsor appears three times running, across the cycle wrap', () => {
+  // The existing test drew exactly one cycle, so it never crossed the wrap —
+  // which is where the old round-robin-until-empty order broke. A title (3)
+  // plus a supporting (1) built [t, s, t, t], and cycling that gives
+  // t, s, t, t, t, s: the title three cards running, the exact "stuck graphic"
+  // the docstring says the interleave prevents.
+  //
+  // With one other sponsor a weight of 3 CANNOT be spaced — three of four
+  // slots go to the same name however you order them — so the weight is
+  // capped at what the plan can carry. Every shape a real event might have:
+  const plans = [
+    [{ id: 't', name: 'T', tier: 'title' }, { id: 's', name: 'S', tier: 'supporting' }],
+    [{ id: 't', name: 'T', tier: 'title' },
+      { id: 's1', name: 'S1', tier: 'supporting' }, { id: 's2', name: 'S2', tier: 'supporting' }],
+    [{ id: 't', name: 'T', tier: 'title' },
+      { id: 'p', name: 'P', tier: 'presenting' }, { id: 's', name: 'S', tier: 'supporting' }],
+  ] as SponsorPlan[][];
+
+  for (const plan of plans) {
+    const s = new Sponsors(new EventBus(), plan);
+    const seen: string[] = [];
+    for (let i = 0; i < 20; i++) seen.push(s.next().live!.id);
+    for (let i = 2; i < seen.length; i++) {
+      assert.ok(!(seen[i] === seen[i - 1] && seen[i] === seen[i - 2]),
+        `three in a row at ${i}: ${seen.join(',')}`);
+    }
+    // And the title still gets the most airtime, which is the other half.
+    const titles = seen.filter(x => x === 't').length;
+    assert.ok(titles > seen.length / plan.length, 'the title still leads');
+  }
+});
+
+test('a lone sponsor is the one case that repeats, and that is arithmetic', () => {
+  const s = new Sponsors(new EventBus(), [{ id: 'a', name: 'A' }] as SponsorPlan[]);
+  assert.equal(s.next().live!.id, 'a');
+  assert.equal(s.next().live!.id, 'a');
+});

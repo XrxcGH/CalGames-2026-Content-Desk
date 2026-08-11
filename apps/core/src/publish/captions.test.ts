@@ -42,7 +42,7 @@ test('reads a language tag off the filename, and only a real one', () => {
 test('finds the file for a match key, tolerating case and punctuation', async () => {
   const dir = await folder({ '2026CAGG_QM12.srt': SRT });
   try {
-    const found = await findSidecar(dir, ['2026cagg_qm12', 'Qualification 12']);
+    const [found] = await findSidecar(dir, ['2026cagg_qm12', 'Qualification 12']);
     assert.equal(basename(found!.path), '2026CAGG_QM12.srt');
     assert.equal(found!.language, 'en');
     assert.equal(found!.cues, 2);
@@ -56,7 +56,7 @@ test('a near-miss key claims nothing', async () => {
   // error nobody catches until somebody who needs them hits play.
   const dir = await folder({ 'qm1.srt': SRT });
   try {
-    assert.equal(await findSidecar(dir, ['qm12']), null);
+    assert.deepEqual(await findSidecar(dir, ['qm12']), []);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -67,7 +67,7 @@ test('an empty caption file is refused, not uploaded', async () => {
   // a worse lie than their absence.
   const dir = await folder({ 'qm12.srt': 'WEBVTT\n\n' });
   try {
-    assert.equal(await findSidecar(dir, ['qm12']), null);
+    assert.deepEqual(await findSidecar(dir, ['qm12']), []);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -76,7 +76,7 @@ test('an empty caption file is refused, not uploaded', async () => {
 test('keys are tried in order, so the match key beats the label', async () => {
   const dir = await folder({ 'qm12.srt': SRT, 'Qualification 12.srt': SRT });
   try {
-    const found = await findSidecar(dir, ['qm12', 'Qualification 12']);
+    const [found] = await findSidecar(dir, ['qm12', 'Qualification 12']);
     assert.equal(basename(found!.path), 'qm12.srt');
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -84,13 +84,43 @@ test('keys are tried in order, so the match key beats the label', async () => {
 });
 
 test('no captions folder is the normal case, not an error', async () => {
-  assert.equal(await findSidecar(join(tmpdir(), 'cg-cap-does-not-exist'), ['qm12']), null);
+  assert.deepEqual(await findSidecar(join(tmpdir(), 'cg-cap-does-not-exist'), ['qm12']), []);
 });
 
 test('a file the API cannot take is ignored', async () => {
   const dir = await folder({ 'qm12.txt': SRT, 'qm12.docx': SRT });
   try {
-    assert.equal(await findSidecar(dir, ['qm12']), null);
+    assert.deepEqual(await findSidecar(dir, ['qm12']), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('every language attaches, and English leads', () => {
+  // Returning only the first match meant a volunteer who added a Spanish track
+  // alongside the English one published a video with ONLY Spanish captions:
+  // readdir is lexicographic, so "qm12.es.srt" sorted ahead of "qm12.srt" and
+  // shadowed it entirely. The opposite of the point of the feature.
+  return (async () => {
+    const dir = await folder({
+      'qm12.srt': SRT, 'qm12.es.srt': SRT, 'qm12.pt-BR.vtt': SRT,
+    });
+    try {
+      const found = await findSidecar(dir, ['qm12']);
+      assert.deepEqual(found.map(f => f.language), ['en', 'es', 'pt-BR']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  })();
+});
+
+test('an uppercase language tag is a language tag', async () => {
+  // "qm12.ES.srt" failed the tag test, fell back to "en", ALSO failed the
+  // strip, and normalised to "qm12es" — matching nothing and logging nothing.
+  const dir = await folder({ 'qm12.ES.srt': SRT });
+  try {
+    const [found] = await findSidecar(dir, ['qm12']);
+    assert.equal(found?.language, 'ES');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -286,14 +286,26 @@ export class Vitals {
       return [{ id: 'publish', label: 'Publishing', level: 'off', detail: 'disabled in config' }];
     }
     const ready = publishReadiness(cfg);
-    const missing = [...ready.youtube, ...ready.tba];
     const failed = (this.#d.publish?.items ?? []).filter(i => i.state === 'failed').length;
 
-    if (missing.length) {
+    // YouTube blocks; TBA does not. They were merged into one list, so an
+    // offseason desk with working YouTube credentials and no TBA write keys —
+    // an entirely normal configuration — showed a blocking doors failure
+    // saying "Nothing will upload", which was untrue and already satisfied.
+    // The queue treats TBA as optional and drives items to done without it.
+    if (ready.youtube.length) {
       return [{
         id: 'publish', label: 'Publishing', level: 'fail', blocking: true,
-        detail: `not configured: ${missing.join(', ')}`,
+        detail: `not configured: ${ready.youtube.join(', ')}`,
         fix: 'Nothing will upload. Run npm run auth:youtube, and fill in config.json.',
+      }];
+    }
+    if (ready.tba.length) {
+      return [{
+        id: 'publish', label: 'Publishing', level: 'warn',
+        detail: `videos will upload, but nothing will be linked on TBA: ${ready.tba.join(', ')}`,
+        fix: 'Fill in the TBA write keys in config.json, or ignore this if the '
+          + 'event is not on The Blue Alliance.',
       }];
     }
     return [{

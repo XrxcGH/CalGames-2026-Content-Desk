@@ -84,19 +84,51 @@ export class Sponsors {
    * than appearing once.
    */
   #weighted(): string[] {
-    const buckets = this.#plan.map(s => ({
-      id: s.id, left: WEIGHT[s.tier ?? 'supporting'] ?? 1,
-    }));
+    const raw = this.#plan.map(s => WEIGHT[s.tier ?? 'supporting'] ?? 1);
+    const sum = raw.reduce((n, w) => n + w, 0);
+    /*
+     * A weight is capped at what the rest of the plan can actually space out.
+     *
+     * With a title (3) and ONE supporting (1), three-in-a-row is arithmetic
+     * rather than a scheduling mistake: three of four slots go to the same
+     * sponsor, so whatever order they are in, the wrap puts them together.
+     * Capping the title at (everyone else + 1) gives t s t, which honours
+     * both halves of the promise — the title still appears more often, and
+     * the graphic never sits on one sponsor three cards running.
+     *
+     * A plan with enough other sponsors to space a 3 is unaffected.
+     */
+    const buckets = this.#plan.map((s, i) => {
+      const others = sum - (raw[i] ?? 1);
+      const weight = Math.max(1, Math.min(raw[i] ?? 1, others + 1));
+      return { id: s.id, weight };
+    });
+    const total = buckets.reduce((n, b) => n + b.weight, 0);
     const out: string[] = [];
-    let any = true;
-    while (any) {
-      any = false;
-      for (const b of buckets) {
-        if (b.left <= 0) continue;
-        out.push(b.id);
-        b.left--;
-        any = true;
+
+    /*
+     * Largest-remainder spacing, not round-robin-until-empty.
+     *
+     * The old loop drained a bucket per pass, so a title (3) plus a
+     * supporting (1) built [t, s, t, t] — and cycling that gives t, s, t, t,
+     * t, s: the title THREE times running across the wrap, which is the exact
+     * "stuck graphic" the docstring says the interleave prevents. The test
+     * drew precisely one cycle, so it never crossed the wrap.
+     *
+     * This picks, at each slot, whichever sponsor is furthest behind the share
+     * its weight entitles it to, which spreads a heavy sponsor evenly and
+     * — because the whole cycle is built from the same rule — leaves the wrap
+     * no worse than any other join.
+     */
+    const credit = buckets.map(() => 0);
+    for (let slot = 0; slot < total; slot++) {
+      buckets.forEach((b, i) => { credit[i] = (credit[i] ?? 0) + b.weight; });
+      let best = 0;
+      for (let i = 1; i < credit.length; i++) {
+        if ((credit[i] ?? 0) > (credit[best] ?? 0)) best = i;
       }
+      out.push(buckets[best]!.id);
+      credit[best] = (credit[best] ?? 0) - total;
     }
     return out;
   }

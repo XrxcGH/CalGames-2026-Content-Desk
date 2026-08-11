@@ -245,3 +245,42 @@ test('release lifts a plain deferred hold', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a match with a video on the channel is never queued twice', async () => {
+  // An item that uploaded fine and then exhausted its TBA-link retries (a
+  // two-minute outage does it) sits in `failed` holding a live videoId. Score
+  // corrections re-emit match.score_posted, as does pressing Post score twice,
+  // and the dedupe excluded `failed` — so the queue re-cut and re-uploaded,
+  // putting a second copy of the match on the channel. retry(id) is the path
+  // for that item, and it reuses the video it already has.
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const cfg = structuredClone(DEFAULTS);
+    const bus = {
+      emit: () => {},
+      state: {
+        lastMatchStartedAt: 1000, matchEndedAt: 160_000, scorePostedAt: 190_000,
+        match: { displayName: 'Qualification 12', red: [], blue: [] },
+        score: { red: { total: 96 }, blue: { total: 88 } },
+      },
+    } as unknown as EventBus;
+
+    const q = new PublishQueue(root, cfg, bus, null);
+    await q.load();
+    const first = await q.queueMatch();
+    assert.ok(first, 'queued once');
+
+    // It uploads, then the TBA link gives up.
+    first!.state = 'failed';
+    first!.videoId = 'abc123';
+
+    assert.equal(await q.queueMatch(), null, 'not a second video on the channel');
+
+    // A failure with NO video is still re-queueable: that is what excluding
+    // `failed` was for, and it must keep working.
+    first!.videoId = null;
+    assert.ok(await q.queueMatch(), 'a cut that never uploaded can be retried');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -38,6 +38,7 @@ import { CoverageLedger } from './coverage.ts';
 import { CardLedger } from './cards.ts';
 import { Rundown } from './rundown.ts';
 import { Sponsors } from './sponsors.ts';
+import { rebuildFromLog } from './rebuild.ts';
 import { Vitals } from './vitals.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -471,6 +472,30 @@ cardLedger.attach(bus);
 // on the day rather than in an email three weeks later.
 const coverage = new CoverageLedger(publish);
 coverage.attach(bus);
+
+/*
+ * All four of the above are derived, in-memory, and empty at boot — and a desk
+ * DOES restart at an event: a laptop sleeps, a power strip gets kicked,
+ * somebody closes the window. The consequences are not cosmetic. A forgotten
+ * yellow means the announcer is told a carded team is clean. A forgotten
+ * morning means the coverage report raises no gap for a match with no video,
+ * which is its one job in exactly the situation it exists for. The sponsor
+ * counts under-report airings in a document that goes to the people who paid.
+ *
+ * So they are rebuilt from today's log, straight into observe() and never
+ * through the bus: re-emitting the morning would re-fire cues, re-cut clips
+ * and take the program screen to whatever was up at 9am. Nothing here reaches
+ * air. See rebuild.ts.
+ */
+{
+  const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'),
+    [cardLedger, coverage, rundown, sponsors]);
+  if (rebuilt.events) {
+    console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log(s) today: ` +
+      'cards, coverage, run of show and sponsor counts carried over'
+      + (rebuilt.skipped ? ` (${rebuilt.skipped} torn line(s) skipped)` : ''));
+  }
+}
 
 // One place to ask "is this thing ready", and one place to find out which
 // single subsystem broke. See vitals.ts: the failures worth catching are the

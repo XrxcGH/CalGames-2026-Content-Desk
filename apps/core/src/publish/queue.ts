@@ -51,8 +51,12 @@ export interface QueueItem {
   released: boolean;
   clipPath: string | null;
   videoId: string | null;
-  /** Set once a caption sidecar has been attached, so a resume never doubles it. */
-  captionId: string | null;
+  /**
+   * Language tags already attached, so a resume never doubles a track.
+   * Per language rather than a single id, because a match can carry more than
+   * one and attaching English must not mark Spanish as done.
+   */
+  captions: string[];
   sessionUrl: string | null;
   attempts: number;
   error: string | null;
@@ -138,7 +142,7 @@ export class PublishQueue {
     try {
       this.#items = JSON.parse(await readFile(this.#file, 'utf8')) as QueueItem[];
       // Queue files written before these fields existed lack them.
-      for (const item of this.#items) { item.released ??= false; item.captionId ??= null; }
+      for (const item of this.#items) { item.released ??= false; item.captions ??= []; }
       // Crash recovery is restore AND resume: without this kick, a machine
       // that died mid-upload restarted with every item faithfully restored in
       // 'cut'/'uploaded' and then did nothing — a second Release finds no
@@ -161,7 +165,7 @@ export class PublishQueue {
   }
 
   async add(init: Omit<QueueItem, 'id' | 'state' | 'released' | 'clipPath' | 'videoId'
-    | 'captionId' | 'sessionUrl' | 'attempts' | 'error' | 'progress' | 'createdAt' | 'updatedAt'>,
+    | 'captions' | 'sessionUrl' | 'attempts' | 'error' | 'progress' | 'createdAt' | 'updatedAt'>,
     hold: string | null = null): Promise<QueueItem> {
     const item: QueueItem = {
       ...init,
@@ -173,7 +177,7 @@ export class PublishQueue {
       // picked it up and later overwrote the hold with 'cut'.
       state: hold ? 'held' : 'pending',
       released: false,
-      clipPath: null, videoId: null, captionId: null, sessionUrl: null,
+      clipPath: null, videoId: null, captions: [], sessionUrl: null,
       attempts: 0, error: hold, progress: 0,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
@@ -203,7 +207,16 @@ export class PublishQueue {
     const { name, key } = identify(displayName);
     const title = videoTitle(name, this.#cfg.event.name, this.#cfg.event.year);
 
-    if (this.#items.some(i => i.kind === 'match' && i.label === name && i.state !== 'failed')) {
+    // A failed item may be re-queued — that is the point of excluding it — but
+    // NOT one that already has a video on the channel. An item that uploaded
+    // fine and then exhausted its TBA-link retries (a two-minute outage does
+    // it) sits in `failed` holding a live videoId, and score corrections
+    // re-emit match.score_posted, as does pressing the desk's Post score twice.
+    // Without this the queue re-cut and re-uploaded, putting a second copy of
+    // the match on the channel — the one invariant this whole file is built
+    // around. retry(id) is the path for that item, and it reuses the videoId.
+    if (this.#items.some(i => i.kind === 'match' && i.label === name
+      && (i.state !== 'failed' || i.videoId))) {
       return null;                                   // already queued
     }
 
@@ -448,16 +461,28 @@ export class PublishQueue {
         // force-ssl), and that must read as a line in the log, not as a match
         // video stuck in the queue.
         try {
-          // Not if one is already attached: a crash between the upload and
-          // the save re-enters this branch, the resumable session hands back
-          // the SAME video id, and a second insert would put two identical
-          // tracks in the player's caption menu.
-          const sidecar = item.captionId ? null
-            : await findSidecar(this.#captions, [item.matchKey ?? '', item.label]);
-          if (sidecar) {
-            item.captionId = await this.#yt.uploadCaption(item.videoId, sidecar.path,
+          // The event-prefixed key first, because that is the one a captioner
+          // sees: every key on TBA reads "2026cacg_qm12", and captions.ts
+          // tells them to name the file after the match key. item.matchKey is
+          // the short form ("qm12"), so a file named exactly as documented
+          // matched nothing and was skipped in silence.
+          const full = item.matchKey ? `${this.#cfg.event.key}_${item.matchKey}` : '';
+          const sidecars = await findSidecar(this.#captions,
+            [full, item.matchKey ?? '', item.label]);
+          for (const sidecar of sidecars) {
+            // Skip a language already up: a crash between the upload and the
+            // save re-enters this branch, the resumable session hands back the
+            // SAME video id, and a second insert would put two identical
+            // tracks in the player's caption menu.
+            if (item.captions.includes(sidecar.language)) continue;
+            await this.#yt.uploadCaption(item.videoId, sidecar.path,
               { language: sidecar.language });
-            console.log(`[publish] ${item.label}: ${sidecar.cues} captions attached`);
+            item.captions.push(sidecar.language);
+            // Saved per track rather than once at the end, so a crash between
+            // two languages does not re-attach the first on restart.
+            await this.#save();
+            console.log(
+              `[publish] ${item.label}: ${sidecar.cues} ${sidecar.language} captions attached`);
           }
         } catch (err) {
           console.warn(`[publish] ${item.label}: captions not attached (${(err as Error).message})`);
@@ -489,7 +514,18 @@ export class PublishQueue {
         }
         // Publish only after linking succeeds, so a failed link never leaves
         // an orphan video with no context.
-        if (this.#cfg.publish.publicAfterLink && this.#cfg.publish.privacy !== 'public') {
+        //
+        // And only while the master switch is on. It was checked in the cut
+        // branch alone, which stops new uploads and does nothing about the
+        // ones already on the channel: an operator flipping publishing off to
+        // freeze a mislabelled match watched that very video go PUBLIC on the
+        // next sweep, because publicAfterLink defaults on. Checked HERE rather
+        // than at the top of the branch on purpose — the TBA link still runs,
+        // since an uploaded video with no link is the orphan this ordering
+        // exists to prevent, and linking is not the outward-facing step.
+        if (this.#cfg.publish.enabled
+          && this.#cfg.publish.publicAfterLink
+          && this.#cfg.publish.privacy !== 'public') {
           await this.#yt.setPrivacy(item.videoId!, 'public');
         }
         item.state = 'done';

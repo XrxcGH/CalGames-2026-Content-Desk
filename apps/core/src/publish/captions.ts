@@ -63,7 +63,11 @@ export function countCues(text: string): number {
 export function languageOf(file: string): string {
   const stem = basename(file, extname(file));
   const tail = stem.includes('.') ? stem.slice(stem.lastIndexOf('.') + 1) : '';
-  return /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(tail) ? tail : 'en';
+  // Case-insensitive on the primary subtag, because BCP-47 is. "qm12.ES.srt"
+  // used to fail the test, fall back to "en", ALSO fail the strip, and end up
+  // normalising to "qm12es" — so it matched nothing at all and logged nothing
+  // either. Wrong language would have been a bug; silence was worse.
+  return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(tail) ? tail : 'en';
 }
 
 /** Normalise a key for matching: case and punctuation are not the point. */
@@ -78,22 +82,24 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
  * claim the captions for qm12, and a caption track on the wrong match is the
  * kind of error nobody catches until somebody who needs it hits play.
  */
-export async function findSidecar(dir: string, keys: string[]): Promise<Sidecar | null> {
+export async function findSidecar(dir: string, keys: string[]): Promise<Sidecar[]> {
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
-    return null; // No captions folder is the normal case, not an error.
+    return []; // No captions folder is the normal case, not an error.
   }
 
   const wanted = keys.filter(Boolean).map(norm);
   for (const want of wanted) {
+    const found: Sidecar[] = [];
+    const seen = new Set<string>();
     for (const name of names) {
       const ext = extname(name).toLowerCase();
       if (!FORMATS.has(ext)) continue;
       let stem = basename(name, extname(name));
       const lang = languageOf(name);
-      if (lang !== 'en' || /\.[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(stem)) {
+      if (/\.[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(stem)) {
         stem = stem.slice(0, stem.lastIndexOf('.'));
       }
       if (norm(stem) !== want) continue;
@@ -107,8 +113,27 @@ export async function findSidecar(dir: string, keys: string[]): Promise<Sidecar 
         console.warn(`[captions] ${name} has no cues, skipping it`);
         continue;
       }
-      return { path, language: lang, cues };
+      // One track per language. Two files claiming the same language is a
+      // mistake somebody made in the folder, not a choice, and the second
+      // insert would simply fail at YouTube.
+      const key = lang.toLowerCase();
+      if (seen.has(key)) {
+        console.warn(`[captions] ${name} duplicates language "${lang}", skipping it`);
+        continue;
+      }
+      seen.add(key);
+      found.push({ path, language: lang, cues });
+    }
+    // ALL of them, not the first. Returning one meant a volunteer who added a
+    // Spanish track alongside the English one published a video with only
+    // Spanish captions — readdir is lexicographic, so ".es" sorted ahead of
+    // the untagged file and shadowed it. The opposite of the point.
+    if (found.length) {
+      // English first when it is there: it is the track most viewers want
+      // selected by default, and YouTube honours insert order for ties.
+      found.sort((a, b) => Number(b.language === 'en') - Number(a.language === 'en'));
+      return found;
     }
   }
-  return null;
+  return [];
 }
