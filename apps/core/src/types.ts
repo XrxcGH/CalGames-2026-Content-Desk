@@ -216,6 +216,17 @@ export interface MatchInfo {
   /** Playoff seed, 1-8. Absent in qualification. */
   redAlliance?: number;
   blueAlliance?: number;
+  /**
+   * Teams playing this one as a surrogate: it fills a schedule and does not
+   * count for their record.
+   *
+   * Declared here rather than read out of the payload with a cast, which is
+   * how it was consumed before. The cast worked and hid the real problem —
+   * nothing PRODUCED the field, because the Cheesy protocol type did not model
+   * the station flags either, so the desk's surrogate mark could not appear at
+   * a real event no matter what.
+   */
+  surrogates?: number[];
 }
 
 /**

@@ -409,17 +409,20 @@ export class TriviaStore {
     if (!this.#questions[index] || !this.#questions[to]) return this.snapshot();
     this.#assertNotLive(index);
     this.#assertNotLive(to);
-    // While idle, the cursor is the asked/unasked boundary, and a move that
-    // crosses it cannot be represented: it either drags an unasked question
-    // into the asked region (silently never aired) or pushes an asked one
-    // back under the cursor (re-aired, and re-paid at reveal). Moves within
-    // either region leave the boundary untouched, so they are fine as-is.
-    if (this.#phase === 'idle') {
-      const crosses = (index < this.#index) !== (to < this.#index);
-      if (crosses) {
-        throw new Error('That would move a question across the already-asked line. '
-          + 'Reorder within the un-asked part of the bank, or Reset to start over.');
-      }
+    // The cursor is the asked/unasked boundary, and a move that crosses it
+    // cannot be represented: it either drags an unasked question into the
+    // asked region (silently never aired) or pushes an asked one back under
+    // the cursor (re-aired, and re-paid at reveal). Moves within either region
+    // leave the boundary untouched, so they are fine as-is.
+    //
+    // Checked in EVERY phase. It used to be idle-only, which left the hole
+    // wide open in exactly the state the host is in most of the time: with a
+    // question on screen they could drag an already-asked one below the cursor
+    // and have it air and pay out a second time. The live question itself is
+    // covered by the assertions above.
+    if ((index < this.#index) !== (to < this.#index)) {
+      throw new Error('That would move a question across the already-asked line. '
+        + 'Reorder within the un-asked part of the bank, or Reset to start over.');
     }
     const live = this.#phase !== 'idle' ? this.#current() : null;
     const [q] = this.#questions.splice(index, 1);

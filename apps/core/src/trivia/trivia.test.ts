@@ -361,7 +361,14 @@ test('reordering moves a question without disturbing the rest', () => {
   assert.deepEqual(store.bank().map(q => q.text), ['One', 'Three', 'Two']);
 });
 
-test('a long move across the open question keeps the cursor on it', () => {
+test('a move across the asked line is refused while a question is live too', () => {
+  // This test used to assert that D could be dragged to the front while C was
+  // on screen, and that the cursor followed C. The cursor part was right and
+  // the move was not: index 0 is BEHIND the cursor, so D would then never have
+  // aired at all — the exact failure the idle-mode guard exists to stop, left
+  // wide open in the state the host is actually in most of the time. The same
+  // hole let an already-asked question be dragged below the cursor and air,
+  // and pay out, a second time.
   const store = new TriviaStore(new EventBus(), []);
   for (const text of ['A', 'B', 'C', 'D']) {
     store.addQuestion({ text, options: ['a', 'b', 'c', 'd'], answer: 0 });
@@ -371,10 +378,26 @@ test('a long move across the open question keeps the cursor on it', () => {
   store.open(20);                                   // C is live at index 2
   assert.equal(store.snapshot().question?.text, 'C');
 
-  store.moveQuestion(3, -3);                        // D jumps over the cursor
-  assert.deepEqual(store.bank().map(q => q.text), ['D', 'A', 'B', 'C']);
+  assert.throws(() => store.moveQuestion(3, -3), /already-asked line/);
+  assert.deepEqual(store.bank().map(q => q.text), ['A', 'B', 'C', 'D'],
+    'and nothing moved');
+});
+
+test('a legal move keeps the cursor on the live question', () => {
+  // Reordering WITHIN the un-asked part is fine in any phase, and the cursor
+  // has to follow its question rather than its number.
+  const store = new TriviaStore(new EventBus(), []);
+  for (const text of ['A', 'B', 'C', 'D', 'E']) {
+    store.addQuestion({ text, options: ['a', 'b', 'c', 'd'], answer: 0 });
+  }
+  store.open(20); store.reveal(); store.next();
+  store.open(20); store.reveal(); store.next();
+  store.open(20);                                   // C is live at index 2
+
+  store.moveQuestion(4, -1);                        // E ahead of D, both unasked
+  assert.deepEqual(store.bank().map(q => q.text), ['A', 'B', 'C', 'E', 'D']);
   assert.equal(store.snapshot().question?.text, 'C', 'the room still answers C');
-  assert.equal(store.bank().findIndex(q => q.live), 3);
+  assert.equal(store.bank().findIndex(q => q.live), 2, 'and the cursor stayed with it');
 });
 
 test('open() from revealed is refused: the answer is still on the big screen', () => {

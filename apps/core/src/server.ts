@@ -1539,7 +1539,12 @@ ${sections}</body></html>`;
   // reconnect logic can act on. Clients ignore unknown frame types.
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients) {
-      if (ws.readyState === ws.OPEN) ws.send('{"t":"hb"}');
+      // Carries the server's clock. The surfaces derive the match clock
+      // locally from matchStartedAt, so they need to know how far their own
+      // Date.now() is from this machine's — and the only thing they had to
+      // measure that with was state.updatedAt, which is the timestamp of the
+      // last EVENT and can be a minute old between matches.
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'hb', now: Date.now() }));
     }
   }, 10_000);
 

@@ -265,12 +265,24 @@ export class CheesyAdapter {
     const red = [teamAt('R1', m.Red1), teamAt('R2', m.Red2), teamAt('R3', m.Red3)].filter(Boolean) as Team[];
     const blue = [teamAt('B1', m.Blue1), teamAt('B2', m.Blue2), teamAt('B3', m.Blue3)].filter(Boolean) as Team[];
 
+    // Surrogates, straight off the station flags. Without this the desk's
+    // surrogate mark had no producer and never appeared at a real event: the
+    // audience watched a team "lose" a match that was never theirs to lose,
+    // and then found the ranking table disagreed with what they had just seen.
+    const surrogates = ([
+      [m.Red1, m.Red1IsSurrogate], [m.Red2, m.Red2IsSurrogate], [m.Red3, m.Red3IsSurrogate],
+      [m.Blue1, m.Blue1IsSurrogate], [m.Blue2, m.Blue2IsSurrogate], [m.Blue3, m.Blue3IsSurrogate],
+    ] as const)
+      .filter(([team, flag]) => flag === true && typeof team === 'number' && team > 0)
+      .map(([team]) => team as number);
+
     // Seeds are 0 through qualification, so they are carried only when real.
     // A graphic that says "Alliance 0" is worse than one that says nothing.
     const match: MatchInfo = {
       id: String(m.Id ?? `${m.Type ?? 'm'}${m.TypeOrder ?? 0}`),
       displayName: m.LongName ?? m.ShortName ?? 'Match',
       red, blue,
+      surrogates,
       ...((m.PlayoffRedAlliance ?? 0) > 0 ? { redAlliance: m.PlayoffRedAlliance } : {}),
       ...((m.PlayoffBlueAlliance ?? 0) > 0 ? { blueAlliance: m.PlayoffBlueAlliance } : {}),
     };

@@ -267,14 +267,59 @@ if (!lan) {
 const lanBase = `http://${lan ?? 'localhost'}:${port}`;
 trivia.setJoinUrl(`${lanBase}/s/quiz`);
 
+/**
+ * The per-event question bank, checked on the way in.
+ *
+ * The HTTP path validates every question; this one did not, and the store
+ * assumes ids are present and unique. A hand-written or hand-merged file with
+ * a missing id makes `askedIds.add(undefined)` mark EVERY id-less question
+ * asked the moment the first one is revealed — each round shows finished after
+ * one question and resuming skips the rest. Duplicate ids conflate progress
+ * the same way, and an out-of-range answer airs a question nobody can get
+ * right. All three are quiet: nothing on screen looks broken.
+ *
+ * A bad question is dropped rather than failing the boot. The host is standing
+ * in front of a gym, and thirty good questions with one missing beats a desk
+ * that refuses to start.
+ */
 async function loadTriviaBank(path: string) {
   try {
     const { readFile } = await import('node:fs/promises');
-    const bank = JSON.parse(await readFile(path, 'utf8'));
-    if (Array.isArray(bank) && bank.length) {
-      console.log(`[trivia] ${bank.length} questions from data/trivia.json`);
-      return bank;
+    const raw = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!Array.isArray(raw) || !raw.length) return DEFAULT_QUESTIONS;
+
+    const seen = new Set<string>();
+    const bad: string[] = [];
+    const bank = raw.filter((q, i) => {
+      const item = q as Record<string, unknown> | null;
+      const id = typeof item?.['id'] === 'string' ? item['id'] as string : '';
+      const options = item?.['options'];
+      const answer = item?.['answer'];
+      const why =
+        !id ? 'no id'
+          : seen.has(id) ? `duplicate id "${id}"`
+            : typeof item?.['text'] !== 'string' || !item['text'] ? 'no text'
+              : !Array.isArray(options) || options.length < 2 ? 'needs at least two options'
+                : typeof answer !== 'number' || !Number.isInteger(answer)
+                  || answer < 0 || answer >= options.length
+                  ? 'the answer does not point at one of the options'
+                  : null;
+      if (why) { bad.push(`#${i + 1} (${why})`); return false; }
+      seen.add(id);
+      return true;
+    });
+
+    if (bad.length) {
+      console.warn(`[trivia] skipped ${bad.length} unusable question(s) in ${path}: `
+        + bad.slice(0, 5).join(', ') + (bad.length > 5 ? ', ...' : ''));
     }
+    if (!bank.length) {
+      console.warn('[trivia] none of the questions in that file were usable, '
+        + 'falling back to the built-in bank');
+      return DEFAULT_QUESTIONS;
+    }
+    console.log(`[trivia] ${bank.length} questions from data/trivia.json`);
+    return bank;
   } catch { /* no per-event bank, use the built-in one */ }
   return DEFAULT_QUESTIONS;
 }

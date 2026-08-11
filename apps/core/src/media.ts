@@ -63,9 +63,38 @@ export function readPngHeader(buf: Buffer): PngHeader | null {
     w: buf.readUInt32BE(16),
     h: buf.readUInt32BE(20),
     colorType,
-    // 4 = gray+alpha, 6 = truecolor+alpha
-    hasAlpha: colorType === 4 || colorType === 6,
+    // 4 = gray+alpha, 6 = truecolor+alpha, and 0/3 with a tRNS chunk. That
+    // last case is not exotic: TinyPNG and pngquant palettize to colorType 3
+    // and carry the transparency in tRNS, so a correctly cut robot photo run
+    // through either was rejected with a message telling the volunteer their
+    // background had not been removed — which it had, on upload day, with the
+    // team standing there.
+    hasAlpha: colorType === 4 || colorType === 6 || hasTrns(buf),
   };
+}
+
+/**
+ * Does this PNG carry a tRNS chunk?
+ *
+ * Walks the chunk list rather than searching the bytes: the four ASCII
+ * characters "tRNS" can appear inside compressed image data by chance, and a
+ * false positive here would wave through a photo with an opaque background.
+ * Stops at IDAT, because tRNS is required to precede the image data.
+ */
+function hasTrns(buf: Buffer): boolean {
+  let at = 8;                                   // past the signature
+  while (at + 8 <= buf.length) {
+    const len = buf.readUInt32BE(at);
+    const type = buf.subarray(at + 4, at + 8).toString('latin1');
+    if (type === 'tRNS') return true;
+    if (type === 'IDAT' || type === 'IEND') return false;
+    // length + 4 type + payload + 4 CRC. A length that overflows the buffer
+    // is a truncated file, not a reason to loop forever.
+    const next = at + 12 + len;
+    if (next <= at || next > buf.length) return false;
+    at = next;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

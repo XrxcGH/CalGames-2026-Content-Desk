@@ -22,6 +22,17 @@ export function phaseAt(c: number | null): Phase {
   return 'post';
 }
 
+/**
+ * Every phase in the order the match passes through them.
+ *
+ * Exists so a clock that jumps across more than one boundary can still fire
+ * each one. See EventBus.advance: a stalled event loop does that live, and
+ * replay does it deliberately when it caps a long gap.
+ */
+export const PHASE_ORDER: Phase[] = [
+  'pre', 'auto', 'transition', 'shift1', 'shift2', 'shift3', 'shift4', 'endgame', 'post',
+];
+
 export const PHASE_LABEL: Record<Phase, string> = {
   pre: 'Pre-match', auto: 'Auto', transition: 'Transition',
   shift1: 'Shift 1', shift2: 'Shift 2', shift3: 'Shift 3', shift4: 'Shift 4',

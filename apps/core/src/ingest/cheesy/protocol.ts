@@ -81,6 +81,20 @@ export interface CheesyMatch {
   Red1?: number; Red2?: number; Red3?: number;
   Blue1?: number; Blue2?: number; Blue3?: number;
   /**
+   * Surrogate flags, one per station. Cheesy's Match model carries these and
+   * this file did not model them, so the desk's whole surrogate feature — the
+   * "S" mark on the bar, the "does not count" line on the talent view — had no
+   * producer and could never fire at a real event. The tests were the only
+   * thing that ever set it.
+   *
+   * A surrogate is a team playing an extra qualification match to fill a
+   * schedule; it does not count for their record. Saying nothing means the
+   * audience watches a team "lose" a match that was never theirs to lose, and
+   * then finds the ranking table disagrees with what they just saw.
+   */
+  Red1IsSurrogate?: boolean; Red2IsSurrogate?: boolean; Red3IsSurrogate?: boolean;
+  Blue1IsSurrogate?: boolean; Blue2IsSurrogate?: boolean; Blue3IsSurrogate?: boolean;
+  /**
    * Seed numbers, playoffs only, 0 during qualification.
    *
    * Only three robots ever take the field, so these slots stay at three. A

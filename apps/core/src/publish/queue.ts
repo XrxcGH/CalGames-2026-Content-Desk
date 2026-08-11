@@ -153,11 +153,41 @@ export class PublishQueue {
       if (this.#items.length) {
         console.log(`[publish] restored ${this.#items.length} item(s), ${unfinished} unfinished`);
       }
-    } catch { this.#items = []; }
+    } catch (err) {
+      this.#items = [];
+      // ENOENT is the normal first run. Anything else means a file existed and
+      // could not be read, and an empty queue after a torn write is the whole
+      // day's uploads gone with nothing on screen to say so.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error('[publish] the queue file could not be read, starting empty:',
+          (err as Error).message);
+      }
+    }
   }
 
-  /** Atomic write: a torn queue file on a power cut would be worse than none. */
-  async #save(): Promise<void> {
+  /**
+   * Atomic write, and serialised: a torn queue file on a power cut would be
+   * worse than none, and two of these racing produce exactly that.
+   *
+   * They do race. The sessionUrl persist inside the upload step is
+   * fire-and-forget, and a score posting at the same moment calls add(), so
+   * both reach here at once — sharing one `.tmp` path. The loser renames a
+   * file that is already gone (ENOENT) or, worse, the two writes interleave
+   * into the same temp file and the rename publishes a torn queue. load()'s
+   * bare catch then turns that into an empty queue: every unfinished upload
+   * for the day, silently gone.
+   *
+   * Chaining is enough. These are small writes and there is no contention to
+   * speak of; correctness here is worth more than concurrency.
+   */
+  #saving: Promise<void> = Promise.resolve();
+
+  #save(): Promise<void> {
+    this.#saving = this.#saving.then(() => this.#writeNow(), () => this.#writeNow());
+    return this.#saving;
+  }
+
+  async #writeNow(): Promise<void> {
     await mkdir(dirname(this.#file), { recursive: true });
     const tmp = `${this.#file}.tmp`;
     await writeFile(tmp, JSON.stringify(this.#items, null, 2));

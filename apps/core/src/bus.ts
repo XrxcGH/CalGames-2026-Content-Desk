@@ -10,7 +10,7 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { phaseAt } from './clock.ts';
+import { phaseAt, PHASE_ORDER } from './clock.ts';
 import { reduce, tick } from './state.ts';
 import {
   eventId, initialState, EVENT_SCHEMA_VERSION,
@@ -142,18 +142,39 @@ export class EventBus {
     if (after.phase === this.#lastPhase) { this.#state = after; return; }
 
     this.#state = after;
-    const phase = after.phase;
-    this.#lastPhase = phase;
+    const from = this.#lastPhase;
+    this.#lastPhase = after.phase;
 
-    // Source 'clock', never 'cue': the cue engine drops cue-sourced events to
-    // break feedback loops, so stamping these 'cue' made every clock-driven
-    // boundary invisible to cues. The endgame trigger was dead code and the
-    // buzzer hold could not fire at all in desk-only or demo operation.
-    if (phase === 'transition') this.emit({ type: 'match.auto_end', source: 'clock', ts: now });
-    else if (phase === 'endgame') this.emit({ type: 'match.endgame', source: 'clock', ts: now });
-    else if (phase === 'post') this.emit({ type: 'match.end', source: 'clock', ts: now });
-    else if (phase.startsWith('shift')) {
-      this.emit({ type: 'match.shift_change', payload: { phase }, source: 'clock', ts: now });
+    /*
+     * EVERY boundary crossed, not only the newest.
+     *
+     * This used to emit one event for the phase it landed in, which is right
+     * at 10Hz and wrong whenever the clock jumps. It does jump: replay caps
+     * long gaps deliberately (see replay()), and a stalled event loop does the
+     * same live. Skipping match.auto_end means the reducer's auto-winner
+     * heuristic never runs, so the hub indicator shows "both" for all four
+     * shifts of a rehearsal where the live run alternated — a replay
+     * reconstructing different state than the run it is replaying, which is
+     * the one property the whole log format exists to provide.
+     */
+    const start = PHASE_ORDER.indexOf(from);
+    const end = PHASE_ORDER.indexOf(after.phase);
+    // Backwards means a new match loaded and the clock reset. Nothing to
+    // replay through: the boundaries ahead will fire as they arrive.
+    const crossed = end > start ? PHASE_ORDER.slice(start + 1, end + 1) : [after.phase];
+
+    for (const phase of crossed) {
+      // Source 'clock', never 'cue': the cue engine drops cue-sourced events
+      // to break feedback loops, so stamping these 'cue' made every
+      // clock-driven boundary invisible to cues. The endgame trigger was dead
+      // code and the buzzer hold could not fire at all in desk-only or demo
+      // operation.
+      if (phase === 'transition') this.emit({ type: 'match.auto_end', source: 'clock', ts: now });
+      else if (phase === 'endgame') this.emit({ type: 'match.endgame', source: 'clock', ts: now });
+      else if (phase === 'post') this.emit({ type: 'match.end', source: 'clock', ts: now });
+      else if (phase.startsWith('shift')) {
+        this.emit({ type: 'match.shift_change', payload: { phase }, source: 'clock', ts: now });
+      }
     }
   }
 

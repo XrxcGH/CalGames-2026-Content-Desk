@@ -682,3 +682,29 @@ test('surfaces can size off the alliance rather than a hard-coded three', () => 
   assert.equal(bus.state.match?.blue.length, 2);
   assert.deepEqual(bus.state.match?.red.map(t => t.number), [254, 846, 1678, 25801]);
 });
+
+test('surrogates come off the field, which is the only place they exist', () => {
+  // The desk has had a surrogate mark on the bar and a "does not count" line
+  // on the talent view since they were built, and neither could ever appear at
+  // a real event: the protocol did not model Cheesy's station flags, so the
+  // only thing that ever set the field was a test fixture.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', {
+    Match: {
+      Id: 42, LongName: 'Qualification 42',
+      Red1: 846, Red2: 1868, Red3: 253,
+      Blue1: 100, Blue2: 115, Blue3: 670,
+      Red2IsSurrogate: true, Blue3IsSurrogate: true,
+    },
+  });
+  assert.deepEqual(bus.state.match?.surrogates, [1868, 670]);
+
+  // A match with none carries an empty list rather than stale flags from the
+  // match before it, which is the failure that would actually reach air.
+  adapter.ingest('matchLoad', {
+    Match: { Id: 43, LongName: 'Qualification 43', Red1: 846, Blue1: 100 },
+  });
+  assert.deepEqual(bus.state.match?.surrogates, []);
+});

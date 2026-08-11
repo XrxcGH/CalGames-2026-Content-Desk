@@ -118,11 +118,10 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           // because a yellow from match 12 is still live in match 40.
           cards: { ...state.cards, thisMatch: [] },
           cardCall: null,
-          surrogates: (() => {
-            const raw = (p as unknown as { surrogates?: unknown }).surrogates;
-            return (Array.isArray(raw) ? raw : [])
-              .map(Number).filter(n => Number.isInteger(n) && n > 0);
-          })(),
+          // Still validated rather than trusted: the payload arrives off a
+          // socket, and a bad entry here puts an "S" on the wrong team.
+          surrogates: (p?.surrogates ?? [])
+            .map(Number).filter(n => Number.isInteger(n) && n > 0),
           screen: auto(state, 'overview'),
         };
       }

@@ -89,6 +89,8 @@ class DeskClient extends EventTarget {
   #pin = null;
   /** Server clock minus ours. Small, but it makes the countdown honest. */
   #skew = 0;
+  /** True once a heartbeat has given the real server clock. See #apply. */
+  #skewFromBeat = false;
   #ws = null;
   #backoff = 250;
   #name;
@@ -134,11 +136,22 @@ class DeskClient extends EventTarget {
         this.dispatchEvent(new CustomEvent(msg.ev.type, { detail: msg.ev }));
       } else if (msg.t === 'relay') {
         this.dispatchEvent(new CustomEvent(`relay:${msg.channel}`, { detail: msg.data }));
+      } else if (msg.t === 'hb' && typeof msg.now === 'number') {
+        // The heartbeat carries the server's clock, so the skew stays fresh
+        // between events. See #apply: the only other source is the last
+        // EVENT's timestamp, which on a quiet desk is minutes old — and a
+        // socket that reconnected mid-match then computed a match clock that
+        // was wrong by exactly that age, showed it on air, and snapped
+        // forward at the next phase boundary.
+        this.#skew = msg.now - Date.now();
+        this.#skewFromBeat = true;
       }
     };
 
     ws.onclose = () => {
       this.connected = false;
+      // The next desk may be a different process with a different clock.
+      this.#skewFromBeat = false;
       this.dispatchEvent(new CustomEvent('link', { detail: false }));
       setTimeout(() => this.#connect(), this.#backoff);
       this.#backoff = Math.min(this.#backoff * 2, 5000);
@@ -147,7 +160,12 @@ class DeskClient extends EventTarget {
   }
 
   #apply(state) {
-    if (state.updatedAt) this.#skew = state.updatedAt - Date.now();
+    // A floor, not a correction. `updatedAt` is the last EVENT's timestamp, so
+    // it is the server's clock as of some moment in the past — fine at the
+    // instant an event lands, stale by however long the desk has been quiet.
+    // The 10-second heartbeat carries the real thing; this only has to get a
+    // freshly-connected surface close enough to render its first frame.
+    if (state.updatedAt && !this.#skewFromBeat) this.#skew = state.updatedAt - Date.now();
     this.state = state;
     this.dispatchEvent(new CustomEvent('state', { detail: state }));
   }
