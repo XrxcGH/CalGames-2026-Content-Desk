@@ -136,7 +136,7 @@ Either one shuts down cleanly and releases the address so the next start works.
 
 ### Trying it at home first
 
-You do not need a field, a camera, or an event to practise. When the desk finds
+You do not need a field, a camera, or an event to practice. When the desk finds
 no field it asks whether you want a **pretend match**; press **D** and every
 screen plays a full match on a loop with realistic scores.
 
@@ -145,7 +145,7 @@ After the first run, two files appear in the desk folder:
 - **START-DESK.cmd** — the real thing.
 - **START-PRACTICE.cmd** — the pretend match.
 
-Both are double-click. Practise on the second one as much as you like; it
+Both are double-click. Practice on the second one as much as you like; it
 cannot touch a real field or upload anything.
 
 ---
