@@ -1442,7 +1442,14 @@ export function startServer(opts: ServerOpts) {
          * and it has to be reversible from the media console.
          */
         if (prefix === '/media/') {
-          const team = Number(/^teams\/(\d+)\//.exec(rel)?.[1]);
+          // Match on the DECODED path, because safeJoin below decodes before it
+          // opens the file. url.pathname keeps percent escapes, so a request for
+          // /media/teams/%32%35%34/robot.v1.png read as a non-numeric team, skipped
+          // this check entirely, then resolved to team 254 and served a photo that
+          // team had asked to have taken down.
+          let decodedRel = rel;
+          try { decodedRel = decodeURIComponent(rel); } catch { /* malformed: judge it raw */ }
+          const team = Number(/^teams\/(\d+)\//.exec(decodedRel)?.[1]);
           if (Number.isInteger(team) && media.manifest[team]?.consent === 'declined') {
             res.writeHead(404).end('Not found');
             return;
