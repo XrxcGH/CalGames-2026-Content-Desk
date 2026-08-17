@@ -694,7 +694,16 @@ process.on('SIGTERM', shutdown);
  * see EOF immediately and exit on boot.
  */
 if (has('exit-with-parent')) {
+  // 'end' and 'close' BOTH fire when the launcher's pipe goes away, and an
+  // 'error' can follow. Every extra call reached shutdown()'s "a second
+  // Ctrl-C means now" escalation, which exits before closeLog() has flushed
+  // the tail of the day. That tail is exactly what rebuildFromLog needs after
+  // a restart, so the graceful path was quietly the destructive one. Latch it:
+  // the news only arrives once however many times it is announced.
+  let parentAlreadyGone = false;
   const parentGone = (): void => {
+    if (parentAlreadyGone) return;
+    parentAlreadyGone = true;
     if (!shuttingDown) console.log('[core] the launcher window closed');
     shutdown();
   };
