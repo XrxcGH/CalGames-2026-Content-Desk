@@ -30,6 +30,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { localStamp } from './bus.ts';
 import type { DeskEvent } from './types.ts';
 
 /** Anything that can be fed a logged event to rebuild itself. */
@@ -63,7 +64,10 @@ export interface RebuildResult {
 export async function rebuildFromLog(
   dir: string, observers: Observer[], now = new Date(),
 ): Promise<RebuildResult> {
-  const day = now.toISOString().slice(0, 10);
+  // Local, via the same helper logPathFor names with. A UTC day here put the
+  // boundary at 5pm local: an evening restart matched no files at all, and the
+  // next morning matched the previous evening's.
+  const day = localStamp(now).slice(0, 10);
   const result: RebuildResult = { files: 0, events: 0, skipped: 0 };
 
   let names: string[];

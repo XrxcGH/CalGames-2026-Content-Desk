@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isFromDay, rebuildFromLog, type Observer } from './rebuild.ts';
+import { localStamp } from './bus.ts';
 import { CardLedger } from './cards.ts';
 import type { DeskEvent } from './types.ts';
 
@@ -117,4 +118,43 @@ test('only .ndjson from the right day counts', () => {
   assert.equal(isFromDay('2026-10-16-09-14-02.ndjson', '2026-10-17'), false);
   assert.equal(isFromDay('2026-10-17-notes.txt', '2026-10-17'), false);
   assert.equal(isFromDay('sample.ndjson', '2026-10-17'), false);
+});
+
+test('an evening restart still finds the morning, and does not eat yesterday', async () => {
+  // The day used to be computed in UTC while the event ran in Pacific, so the
+  // calendar flipped at 5pm local, mid-show: a 5:30pm restart matched no files
+  // at all and every ledger reopened blank, while the next morning matched the
+  // previous evening's log and replayed it into a fresh day. Both directions
+  // are pinned here because one fix has to hold both.
+  const morning = new Date('2026-10-17T09:00:00-07:00');
+  const evening = new Date('2026-10-17T17:30:00-07:00');
+  const nextDay = new Date('2026-10-18T09:00:00-07:00');
+
+  const dir = await logs({
+    [`${localStamp(morning)}.ndjson`]: line('match.loaded', { displayName: 'Q1' }, 1000),
+    [`${localStamp(new Date('2026-10-16T18:00:00-07:00'))}.ndjson`]:
+      line('match.loaded', { displayName: 'FRI' }, 500),
+  });
+  try {
+    const evenings = spy();
+    await rebuildFromLog(dir, [evenings], evening);
+    assert.deepEqual(evenings.seen.map(e => (e.payload as { displayName: string }).displayName),
+      ['Q1'], 'the 5:30pm restart restores the morning and only the morning');
+
+    const sunday = spy();
+    await rebuildFromLog(dir, [sunday], nextDay);
+    assert.deepEqual(sunday.seen, [], 'the next day starts clean');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('log names sort chronologically as strings, which is how they are replayed', () => {
+  const stamps = [
+    new Date('2026-10-17T09:00:00-07:00'),
+    new Date('2026-10-17T14:00:00-07:00'),
+    new Date('2026-10-17T17:30:00-07:00'),
+    new Date('2026-10-17T23:45:00-07:00'),
+  ].map(localStamp);
+  assert.deepEqual([...stamps].sort(), stamps);
 });

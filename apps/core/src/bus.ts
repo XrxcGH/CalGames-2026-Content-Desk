@@ -258,5 +258,24 @@ export class EventBus {
   }
 }
 
+/**
+ * Wall-clock stamp for log names, in LOCAL time.
+ *
+ * Deliberately not toISOString(). At a Pacific venue UTC midnight is 5pm
+ * local, so a UTC stamp filed the evening's log under tomorrow's date: a
+ * restart after 5pm rebuilt every ledger from zero files, and the next
+ * morning replayed the previous evening into a fresh day. That is exactly
+ * the cross-day bleed rebuild.ts exists to prevent.
+ *
+ * rebuildFromLog derives its day filter from this same function, so the
+ * name and the filter cannot drift apart again. Zero-padded because
+ * rebuildFromLog sorts the names lexicographically to replay in order.
+ */
+export function localStamp(d: Date): string {
+  const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
+  return `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+}
+
 export const logPathFor = (dir: string, d = new Date()): string =>
-  join(dir, `${d.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.ndjson`);
+  join(dir, `${localStamp(d)}.ndjson`);
