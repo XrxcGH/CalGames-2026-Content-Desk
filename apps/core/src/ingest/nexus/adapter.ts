@@ -70,6 +70,13 @@ export function bestStartEstimate(m: NexusMatch): number | null {
     ?? t.estimatedQueueTime ?? null;
 }
 
+/**
+ * Consecutive failed polls before the queueing banner is treated as stale.
+ * Three at the 20s poll is about a minute, which is shorter than the walk from
+ * the pits and long enough to ride out one flaky response.
+ */
+const STALE_AFTER_FAILURES = 3;
+
 export class NexusAdapter {
   #bus: EventBus;
   #client: NexusClient;
@@ -119,6 +126,24 @@ export class NexusAdapter {
       // fill the log with the same line every twenty seconds all afternoon.
       if (this.#failures === 1 || this.#failures % 15 === 0) {
         console.warn(`[nexus] poll failed (${this.#failures}x): ${(err as Error).message}`);
+      }
+      // Stop calling a team that was called a minute ago. Nothing else can
+      // clear this banner: the reducer keeps nowQueuing until something sends
+      // an explicit null, and the only other source of queue.updated is the
+      // Cheesy adapter, whose payload has no opinion on queueing at all. So a
+      // dead uplink left the side screens and every pit monitor telling a team
+      // to walk to the field, indefinitely.
+      //
+      // Exactly at three, so it fires once rather than on every later failure.
+      // #lastNowQueuing is deliberately left alone: recovery's next successful
+      // apply() republishes the banner, and clearing it here would re-announce
+      // the same team as freshly called.
+      if (this.#failures === STALE_AFTER_FAILURES) {
+        console.warn('[nexus] no queueing data for a while, clearing the "now queuing" banner');
+        this.#bus.emit({
+          type: 'queue.updated', source: 'nexus', confidence: 'derived',
+          payload: { nowQueuing: null },
+        });
       }
     }
   }

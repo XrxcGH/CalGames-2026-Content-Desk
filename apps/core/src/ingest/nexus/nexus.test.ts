@@ -177,3 +177,32 @@ test('the last match played stops being "up next"', () => {
   assert.deepEqual((last.payload as { upcoming: unknown[] }).upcoming, [],
     'an empty queue is news, not silence');
 });
+
+test('a dead uplink stops calling a team to the field', async () => {
+  // Nothing else can clear this banner: the reducer keeps nowQueuing until an
+  // explicit null arrives, and the Cheesy adapter's queue.updated carries no
+  // opinion on queueing. So a failed poll used to leave every side screen and
+  // pit monitor calling a team that was called an hour ago.
+  const bus = new EventBus();
+  const seen = collect(bus, ['queue.updated']);
+  const failing = new NexusClient({ apiKey: 'k', eventKey: '2026cacg' });
+  failing.status = async () => { throw new Error('uplink down'); };
+  const a = new NexusAdapter({ bus, apiKey: 'k', eventKey: '2026cacg', client: failing });
+
+  a.apply(status());
+  assert.equal(bus.state.nowQueuing, 'Qualification 12', 'the banner is up to begin with');
+
+  await a.poll();
+  await a.poll();
+  assert.equal(bus.state.nowQueuing, 'Qualification 12', 'one flaky response is ridden out');
+
+  await a.poll();
+  assert.equal(bus.state.nowQueuing, null, 'three failures in a row retires it');
+
+  // Once, not on every later failure.
+  const clears = seen.filter(e => (e.payload as { nowQueuing?: unknown }).nowQueuing === null).length;
+  await a.poll();
+  await a.poll();
+  assert.equal(seen.filter(e => (e.payload as { nowQueuing?: unknown }).nowQueuing === null).length,
+    clears, 'it does not re-announce the clear every twenty seconds');
+});
