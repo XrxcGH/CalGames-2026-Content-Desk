@@ -248,10 +248,58 @@ function merge(base: unknown, over: unknown): unknown {
   return out;
 }
 
+/**
+ * Keep only the sections that are actually objects, and say so about the rest.
+ *
+ * merge() takes any JSON: a top-level array replaced the whole config, and a
+ * section set to a string or a number replaced that section, so a plausible
+ * hand edit ("publish": []) reached the show as a raw TypeError on a property
+ * of undefined, at boot, on a laptop with nobody around who reads stacks. A
+ * section that is not an object cannot mean anything, so it is dropped with a
+ * line naming it and the defaults stand.
+ */
+function usableSections(parsed: unknown, expected: unknown = DEFAULTS, path = ''): Record<string, unknown> {
+  if (!isPlainObject(parsed)) {
+    console.warn('[config] config.json is not a JSON object, so none of it could be used. ' +
+      'It should start with { and end with }. Using defaults.');
+    return {};
+  }
+  const exp = isPlainObject(expected) ? expected : {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (k.startsWith('//')) continue;                 // a comment in the example file
+    const want = exp[k];
+    const where = path ? `${path}.${k}` : k;
+    if (isPlainObject(want) && !isPlainObject(v)) {
+      console.warn(`[config] "${where}" should be a group of settings like { ... }, but it is ` +
+        `${Array.isArray(v) ? 'a list' : typeof v}. Ignoring it and using the defaults for ${where}.`);
+      continue;
+    }
+    // Recurse so a nested group gets the same treatment: publish.playlists set
+    // to a string used to leave String.prototype.match standing in for a
+    // YouTube playlist id, which is not a crash and not a value either.
+    out[k] = isPlainObject(want) && isPlainObject(v) ? usableSections(v, want, where) : v;
+  }
+  return out;
+}
+
+/** The three the queue actually implements. Anything else silently meant "live". */
+const PUBLISH_MODES = ['deferred', 'trickle', 'live'] as const;
+
 export async function loadConfig(root: string): Promise<Config> {
   try {
     const raw = await readFile(join(root, 'config.json'), 'utf8');
-    return merge(DEFAULTS, JSON.parse(raw)) as Config;
+    const cfg = merge(DEFAULTS, usableSections(JSON.parse(raw))) as Config;
+
+    // A typo here used to behave as 'live': uploads starting mid-match and
+    // competing with the stream for the venue uplink, which is the one thing
+    // the deferred default exists to prevent.
+    if (!(PUBLISH_MODES as readonly string[]).includes(cfg.publish.mode)) {
+      console.warn(`[config] publish.mode "${String(cfg.publish.mode)}" is not one of ` +
+        `${PUBLISH_MODES.join(', ')}. Using deferred, which uploads after the event.`);
+      cfg.publish.mode = 'deferred';
+    }
+    return cfg;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       // First run on a fresh machine. Say so now, or the missing publish
