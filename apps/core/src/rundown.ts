@@ -107,6 +107,28 @@ export class Rundown {
     if (ev.type === 'match.score_posted') {
       this.#playedAt.push(ev.ts);
       this.#publish();
+      return;
+    }
+
+    // Which segment is live, and which are done, is the day's actual
+    // progress. It lived only in memory, so a restart put every segment back
+    // to pending: the audience countdown pointed at the wrong thing and the
+    // desk manager had to walk the whole morning forward by hand to get the
+    // projections honest again. Restoring it from the published snapshot is
+    // idempotent, so the copy that comes back around on the live desk
+    // changes nothing.
+    if (ev.type === 'rundown.updated') {
+      const rows = (ev.payload as { segments?: unknown }).segments;
+      if (!Array.isArray(rows)) return;
+      for (const row of rows) {
+        const r = row as { id?: unknown; state?: unknown; startedAt?: unknown; endedAt?: unknown };
+        const st = this.#state.get(String(r.id));
+        if (!st) continue;                       // a plan that changed since
+        if (r.state !== 'pending' && r.state !== 'live' && r.state !== 'done') continue;
+        st.state = r.state;
+        st.startedAt = typeof r.startedAt === 'number' ? r.startedAt : null;
+        st.endedAt = typeof r.endedAt === 'number' ? r.endedAt : null;
+      }
     }
   }
 
