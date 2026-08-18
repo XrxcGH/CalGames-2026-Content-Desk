@@ -491,7 +491,7 @@ It will tell you if it failed; it will not leave you guessing.
 
 ### Replays
 
-Press `M` any time something interesting happens. You do not need to be exact —
+Press `Space` any time something interesting happens. You do not need to be exact —
 the mark lands a couple of seconds *before* you pressed, because everybody
 presses late.
 

@@ -324,10 +324,16 @@ to `Set` (`Arcade Set (Smash)`). A set shorter than the 30-second segment QC flo
 FIRST's own auto-uploader has shipped 11-second "match videos" and whole wrong matches. The queue
 guards against the same failure here: every kind of item has a plausible duration range
 (`QC_BOUNDS` in `queue.ts`, e.g. 60-900s for a match, 30-7200s for a segment), and a cut outside its
-range is parked in the `held` state with a reason attached instead of moving on to upload. Releasing
-it is the same `POST /api/publish/release` action that lets a `deferred`-mode queue go at end of
-day. There's no desk-console panel listing held items yet, so operating this in October means
-someone with `GET /api/publish` open to see what's stuck (see Failure handling below).
+range is parked in the `held` state with a reason attached instead of moving on to upload.
+
+A QC hold is NOT cleared by the bulk release. `POST /api/publish/release` is the end-of-day
+"the venue is closed, go" for a `deferred` queue, and it deliberately steps over anything held
+for QC, logging how many it left parked. That is the point: the whole reason the item stopped
+was that nobody had looked at it, and a bulk release is nobody looking at it. The escape is
+per item, after somebody has actually watched the clip: `POST /api/publish/retry/{id}`, which
+carries the same durable go-ahead. There is no desk-console panel listing held items yet, so
+operating this in October means someone with `GET /api/publish` open to see what is stuck
+(see Failure handling below).
 
 ### Day-VOD chapters
 

@@ -180,6 +180,20 @@ These exist for the lead, not for the volunteer. The volunteer double-clicks.
 | `/no-browser` | Do not open a browser window |
 | `/no-wait` | Do not pause before closing the window |
 
+### Recording
+
+The desk records whenever `recording.sources` in `config.json` lists at least one camera. There
+is no flag to remember and none to forget: listing the cameras is how you say you want them
+recorded. That matters because everything downstream needs the recording. No recording means no
+replays, no post-match clips, no match videos, and a publish queue with nothing to publish.
+
+Two ways to check it is working. The launcher window prints `recording N source(s)` a moment
+after it starts, and files appear under `rec/` within a few seconds. If neither happens, the
+window says why: usually ffmpeg is missing, or a camera in the list could not be opened.
+
+Pass `/no-record` for a laptop that should not fill its disk. Recording also needs ffmpeg, which
+the launcher does not install: see the ffmpeg note in the README.
+
 ---
 
 ## When something is wrong
