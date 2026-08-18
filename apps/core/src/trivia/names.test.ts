@@ -142,3 +142,36 @@ test('the names it was always meant to allow still pass', () => {
     assert.equal(screenName(name).ok, true, `${name} is somebody's actual name`);
   }
 });
+
+test('a pad letter no longer defeats the spelled-out pass', () => {
+  // The join was matched for equality, so "F U C K x" became "fuckx", which
+  // is no stem plus any real suffix, and one junk letter walked the whole
+  // technique straight past the filter.
+  for (const name of ['F U C K x', 'x F U C K x', 'Bob F U C K x',
+    'F U C K y e a h', 'a S H I T b']) {
+    assert.equal(screenName(name).ok, false, name);
+  }
+});
+
+test('a lookalike letter cannot split a word in half', () => {
+  // Anything the fold table does not know becomes a separator, so ONE pasted
+  // Cyrillic or Greek letter turned a banned word into two harmless halves
+  // while the projector showed the word intact. Accents did the same.
+  assert.equal(screenName('sh\u0456t').ok, false, 'Cyrillic i');
+  assert.equal(screenName('f\u00fbck').ok, false, 'circumflex u');
+  assert.equal(screenName('n\u0456gger').ok, false, 'Cyrillic i in a slur');
+
+  // A lookalike that folds to a DIFFERENT letter is not an evasion: Cyrillic
+  // u renders as a y, so this reads "fyck" on the screen and is left alone.
+  assert.equal(screenName('f\u0443ck').ok, true);
+});
+
+test('containment is confined to letter runs, where it is safe', () => {
+  // Matching banned stems INSIDE a join is what catches the padded spell-out.
+  // Letting it touch the ordinary whole-name join is the Scunthorpe problem
+  // wearing a hat, and it refused a real mushroom.
+  for (const name of ['Shitake Mushroom', 'Scunthorpe Town', 'Anna Lyst',
+    'Shi Take', 'Ana Sofia', 'A B Smith', 'Class of 26', 'Xu Wei']) {
+    assert.equal(screenName(name).ok, true, `${name} is somebody or something real`);
+  }
+});

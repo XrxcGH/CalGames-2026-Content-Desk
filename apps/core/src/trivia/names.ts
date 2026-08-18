@@ -33,6 +33,15 @@
 const FOLD: Record<string, string> = {
   '0': 'o', '1': 'i', '!': 'i', '|': 'i', '3': 'e', '4': 'a', '@': 'a',
   '5': 's', '$': 's', '6': 'g', '7': 't', '8': 'b', '9': 'g', '+': 't',
+  // Cyrillic and Greek letters that are pixel-identical to Latin ones in the
+  // projector font. Anything foldWords does not recognise becomes a separator,
+  // so ONE pasted lookalike split a banned word into two harmless halves while
+  // the screen showed the word intact. These are the set that actually
+  // collide; the rest of those alphabets look like themselves.
+  '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c',
+  '\u0443': 'y', '\u0445': 'x', '\u0456': 'i', '\u0458': 'j', '\u04bb': 'h',
+  '\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03bf': 'o', '\u03c1': 'p',
+  '\u03c5': 'u', '\u03c7': 'x', '\u0261': 'g', '\u0131': 'i', '\u0454': 'e',
 };
 
 /**
@@ -62,7 +71,10 @@ const SUFFIXES = ['', 's', 'es', 'ed', 'ing', 'er', 'ers', 'y', 'ie', 'ies', 'is
  * a separator. This is the form that still has words in it.
  */
 function foldWords(raw: string): string[] {
-  const folded = [...raw.toLowerCase()].map(c => FOLD[c] ?? c).join('');
+  // NFKD splits an accented letter into a plain one plus a combining mark,
+  // and the mark is dropped here. Without it an accent read as a separator.
+  const bare = raw.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const folded = [...bare.toLowerCase()].map(c => FOLD[c] ?? c).join('');
   return folded
     .split(/[^a-z]+/)
     .filter(Boolean)
@@ -149,10 +161,21 @@ export function screenName(raw: string): NameVerdict {
   // (one extra word defeats it) while refusing "Anu S", which is a real given
   // name plus a real initial.
   const singles = words.every(w => w.length === 1);
-  const joins: string[] = [];
+  // Two kinds of join, judged differently.
+  //
+  // runJoins come from letters that were separated on purpose, which is the
+  // technique itself, so they are matched by CONTAINMENT: one pad letter used
+  // to defeat the whole pass, because "F U C K x" joins to "fuckx", which is
+  // no stem plus any real suffix.
+  //
+  // nameJoins are ordinary words pushed together, so they are matched by
+  // EQUALITY. Containment here is the Scunthorpe problem wearing a hat: it
+  // refuses "Shitake Mushroom".
+  const runJoins: string[] = [];
+  const nameJoins: string[] = [];
   if (singles) {
     // Every letter separated: that IS the technique, whatever it spells.
-    joins.push(words.join(''));
+    runJoins.push(words.join(''));
   } else {
     // A run of three or more single letters inside a longer name. Three is the
     // floor that leaves initials alone: "Anu S" is a run of one and "J R
@@ -161,17 +184,18 @@ export function screenName(raw: string): NameVerdict {
     let run: string[] = [];
     for (const w of [...words, '']) {
       if (w.length === 1) { run.push(w); continue; }
-      if (run.length >= 3) joins.push(run.join(''));
+      if (run.length >= 3) runJoins.push(run.join(''));
       run = [];
     }
-    // And the plain whole-name join, unless the name ends in an initial —
-    // the "Anu S" shape, and the same shape the profile book prints for a
+    // And the plain whole-name join, unless the name ends in an initial:
+    // the "Anu S" shape, which is also how the profile book prints a
     // student, so it turns up on this leaderboard constantly.
     if (words.length > 1 && words[words.length - 1]!.length > 1) {
-      joins.push(words.join(''));
+      nameJoins.push(words.join(''));
     }
   }
-  if (joins.some(isBannedWord)) {
+  const spelledOut = runJoins.some(j => BANNED_STEMS.some(stem => j.includes(stem)));
+  if (spelledOut || runJoins.some(isBannedWord) || nameJoins.some(isBannedWord)) {
     return { ok: false, reason: 'Pick a different name for the big screen.' };
   }
 
