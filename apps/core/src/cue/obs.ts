@@ -174,7 +174,7 @@ export class ObsClient {
 
     const sweep = async (containerName: string, isGroup: boolean): Promise<void> => {
       // In obs-websocket v5, GetSceneItemList returns a group as a SINGLE item
-      // and never its children — those need GetGroupSceneItemList, addressed
+      // and never its children: those need GetGroupSceneItemList, addressed
       // by the group's name. Without the recursion, a Cheesy source dragged
       // into a group (a common way volunteers organize scenes) survived every
       // sweep, and both scorebugs composited: the exact failure this exists

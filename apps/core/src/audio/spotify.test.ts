@@ -98,7 +98,7 @@ test('the wake retry happens once, never in a loop', async () => {
   await assert.rejects(() => spotify.play(), /NO_ACTIVE_DEVICE/);
   // The counts are the actual claim in the title. Without them, code that woke
   // and retried three times passed this test, and only a truly infinite loop
-  // failed it — by timing the suite out.
+  // failed it, by timing the suite out.
   assert.equal(woke, 1, 'woke exactly once');
   assert.equal(plays, 2, 'the original attempt and one retry, no more');
 });
@@ -107,7 +107,7 @@ test('one token refresh, however many callers ask at once', async () => {
   // start() fires loadPlaylists() and refresh() without awaiting either, so
   // this is every boot, not an edge case. Two refreshes of the same refresh
   // token race Spotify's rotation, and the loser is told invalid_grant, which
-  // is latched as terminal — the desk comes up permanently needing a re-link
+  // is latched as terminal: the desk comes up permanently needing a re-link
   // while holding a good token.
   const fake = fakeSpotify({});
   const spotify = new SpotifyController(cfg, { fetchImpl: fake.fetchImpl });

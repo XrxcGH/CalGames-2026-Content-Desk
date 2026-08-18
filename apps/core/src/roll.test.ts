@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
  * arithmetic behind a comment claiming "if somebody simplifies the clamp back
  * out, this fails". It would not have. The clamp under test was the copy in
  * THIS file, and `desk-client.js` could have lost its own without a single
- * test going red — which is worse than no test, because it reads as coverage.
+ * test going red, which is worse than no test, because it reads as coverage.
  *
  * `roll()` is a browser module, but it touches the DOM only inside the
  * function, so four small stubs are enough to import it in Node and drive the

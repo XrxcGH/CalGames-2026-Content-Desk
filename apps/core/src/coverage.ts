@@ -131,8 +131,8 @@ export class CoverageLedger {
         // `score` is what the field actually sends (Cheesy's ScorePosted
         // carries RedScoreSummary.Score). This read `total` only, which no
         // live emitter has ever produced, so the score column on the report
-        // and on the audience-facing team page was permanently null — while
-        // the tests, which fabricated `{red:{total}}`, passed.
+        // and on the audience-facing team page was permanently null, while
+        // the tests passed on fabricated `{red:{total}}` payloads.
         const p = ev.payload as Record<string, { total?: unknown; score?: unknown } | undefined>;
         const num = (side: string): number | null => {
           const v = p[side]?.score ?? p[side]?.total;
@@ -198,8 +198,8 @@ export class CoverageLedger {
     // with the round in a separate field, and identify turns that into
     // "Match 7 (R2)". So on Sunday every played match reported never-queued,
     // the report warned about missing videos that were uploading fine, and the
-    // per-team page showed no links — noise at exactly the moment the report
-    // is supposed to be worth reading.
+    // per-team page showed no links. That is noise at exactly the moment the
+    // report is supposed to be worth reading.
     const byLabel = new Map<string, typeof items[number]>();
     for (const item of items) {
       if (item.kind !== 'match') continue;

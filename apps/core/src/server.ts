@@ -134,7 +134,7 @@ export function startServer(opts: ServerOpts) {
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
-  // up. A second handler here could never run — Node calls listeners in
+  // up. A second handler here could never run: Node calls listeners in
   // registration order, and index.ts's would already have decided.
 
   /**
@@ -220,7 +220,7 @@ export function startServer(opts: ServerOpts) {
         if (size > limit) {
           overflowed = true;
           chunks.length = 0;
-          // Reject with the route's ACTUAL limit — this text reaches the
+          // Reject with the route's ACTUAL limit: this text reaches the
           // operator, and telling someone with a 6KB body "32MB max" sends
           // them debugging the wrong thing. And never destroy the socket
           // here: that tore down the response too, so the friendly 422 the
@@ -279,8 +279,8 @@ export function startServer(opts: ServerOpts) {
    * /api/trivia/join. Timestamps rather than a counter: a counter never
    * decayed, so under venue NAT (many phones, one address) it hardened into a
    * 50-player-per-address cap for the entire three-day event. A sliding
-   * one-hour window keeps the guard's point — nobody mints 50 players in an
-   * hour by accident — without ever locking out a section of the gym for good.
+   * one-hour window keeps the guard's point (nobody mints 50 players in an
+   * hour by accident) without ever locking out a section of the gym for good.
    */
   const JOIN_WINDOW_MS = 60 * 60_000;
   const JOIN_LIMIT = 50;
@@ -310,8 +310,8 @@ export function startServer(opts: ServerOpts) {
   /**
    * Constant-time PIN comparison.
    *
-   * The lengths are compared first and that leak is fine — a PIN's length is
-   * not the secret — but the digits are compared with timingSafeEqual so the
+   * The lengths are compared first and that leak is fine (a PIN's length is
+   * not the secret), but the digits are compared with timingSafeEqual so the
    * number of correct leading characters is not readable off the clock.
    */
   function pinMatches(sent: string): boolean {
@@ -349,7 +349,7 @@ export function startServer(opts: ServerOpts) {
    * /api/auth, HttpOnly, never printed. A Stream Deck cannot use it. Bitfocus
    * Companion's stock generic-HTTP module sends a request; it does not run a
    * sign-in flow or keep a cookie jar, and the session rotates on every
-   * restart. So with a PIN set — which is what docs/06 tells the crew to do —
+   * restart. So with a PIN set, which is what docs/06 tells the crew to do,
    * every physical button 422'd, and the only workaround an on-site volunteer
    * would find is REMOTE_PIN="", which opens the whole desk to a gym full of
    * phones. The control map's entire reason for existing was unreachable
@@ -956,7 +956,7 @@ export function startServer(opts: ServerOpts) {
           const adults = people.length - students;
           const warning = students > 0 && adults === 0
             ? 'Students on camera with no adult on the panel. YouTube needs an adult ' +
-              'visibly in frame — check the shot before you cut to it.'
+              'visibly in frame. Check the shot before you cut to it.'
             : undefined;
           return json(res, 200, { on: people.length, people, warning });
         } catch (err) {
@@ -1431,8 +1431,8 @@ export function startServer(opts: ServerOpts) {
          * still on disk.
          *
          * `airable` correctly keeps them off every overlay, but the file sat
-         * at /media/teams/<team>/robot.v1.png — an open prefix, and a URL
-         * guessable from the team number alone — so anyone on the venue
+         * at /media/teams/<team>/robot.v1.png (an open prefix, and a URL
+         * guessable from the team number alone), so anyone on the venue
          * network, the same network the trivia QR code advertises to the
          * whole gym, could still fetch it. The page that takes the request
          * promises the team it "comes off every screen immediately", and
@@ -1520,7 +1520,7 @@ ${sections}</body></html>`;
   // ---- WebSocket fan-out -------------------------------------------------
   // maxPayload: the biggest legitimate inbound frame is a telestrator stroke
   // batch, a few KB. Without a cap, ws accepts frames up to its 100MiB default
-  // and every one is String()+JSON.parse'd on the show-critical event loop —
+  // and every one is String()+JSON.parse'd on the show-critical event loop,
   // from any socket, before the PIN gate is even consulted.
   const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: 256 * 1024 });
   const send = (ws: WebSocket, msg: unknown): void => {
@@ -1548,9 +1548,9 @@ ${sections}</body></html>`;
     for (const ws of wss.clients) {
       // Carries the server's clock. The surfaces derive the match clock
       // locally from matchStartedAt, so they need to know how far their own
-      // Date.now() is from this machine's — and the only thing they had to
-      // measure that with was state.updatedAt, which is the timestamp of the
-      // last EVENT and can be a minute old between matches.
+      // Date.now() is from this machine's. The only thing they had to measure
+      // that with was state.updatedAt, which is the timestamp of the last
+      // EVENT and can be a minute old between matches.
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'hb', now: Date.now() }));
     }
   }, 10_000);

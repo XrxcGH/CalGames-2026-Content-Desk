@@ -360,7 +360,7 @@ function paint(s) {
         <span class="gp-pos num">${i + 1}</span>
         <span class="gp-name">${escapeHtml(row.player.name)}${
           // team is operator/start.gg-fed text, same trust level as the name
-          // beside it — it goes through the same escape, or it is an on-air
+          // beside it: it goes through the same escape, or it is an on-air
           // HTML injection point.
           row.player.team ? ` <span style="color:var(--cg-gold)">${escapeHtml(row.player.team)}</span>` : ''}</span>
         <span class="gp-pts num">${row.points}</span>

@@ -204,7 +204,7 @@
   color: var(--cg-white); letter-spacing: .02em;
 }
 /* Four-team playoff alliance: the bar height is fixed, so the fourth line is
-   bought with tighter leading — but never below the 28px broadcast floor.
+   bought with tighter leading, but never below the 28px broadcast floor.
    The old .78 step-down landed at 21.84px on stream, under the floor the
    whole system promises; at 1.02 leading, four 28px rows run 114px and clear
    the 148px stream bar without it. (At venue scale max() resolves to the
@@ -468,8 +468,8 @@
   -webkit-text-stroke: 5px var(--cg-white);
 }
 /* And the itemization under it. An official total does NOT make the period
-   splits beneath it official — with the bridge down they are what an operator
-   typed — so the two carry separate confidence and can differ on screen. */
+   splits beneath it official (with the bridge down they are what an operator
+   typed), so the two carry separate confidence and can differ on screen. */
 .final-break[data-est="true"] .fb-n {
   color: transparent;
   -webkit-text-stroke: 1.5px var(--cg-white);
@@ -858,7 +858,7 @@
 /* The luma remap every other full-frame plate has, and the one that matters
    most: without it the near-black fill keys straight out on the Blackmagic
    DSK, so an EVACUATE message rendered as white and gold text floating over
-   live match video — the one graphic whose only job is to be read, degraded
+   live match video: the one graphic whose only job is to be read, degraded
    at the one moment it is ever used. */
 :root[data-key="luma"] .emerg { background: var(--cg-purple); }
 .emerg-kind {
@@ -904,7 +904,7 @@
 }
 /* Outlined, and it has to actually BE outlined. This said "outlined" in the
    comment and set a solid gold fill, so both marks were filled rectangles
-   differing only in colour and 0.04em of size — which is precisely the
+   differing only in colour and 0.04em of size, which is precisely the
    colour-alone distinction the block comment above rules out, on a stream
    that has been recompressed twice, all weekend, on every carded team. */
 /* A real border, not an inset shadow: the luma key strips every box-shadow

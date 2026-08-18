@@ -182,7 +182,7 @@ export class YouTubeClient {
           const status = await this.#resume(sessionUrl, size, meta);
           if ('id' in status) { opts.onProgress?.(size, size); return status.id; }
           if (status.sessionUrl !== sessionUrl) { sessionUrl = status.sessionUrl; opts.onSession?.(sessionUrl); }
-          // "Progress isn't a failure" — but only when the committed offset
+          // "Progress isn't a failure," but only when the committed offset
           // actually MOVED. A session that answers 308 without advancing
           // (a proxy swallowing the body, a wedged session) used to refund
           // the attempt unconditionally and loop forever, re-sending the
@@ -251,7 +251,7 @@ export class YouTubeClient {
    * than a failed video. Re-consent with CAPTION_SCOPE to turn it on.
    *
    * Multipart rather than resumable: a caption file is kilobytes. The manual
-   * boundary construction is unavoidable — YouTube's multipart upload wants
+   * boundary construction is unavoidable: YouTube's multipart upload wants
    * related/mixed with a JSON part first, which fetch's FormData cannot build.
    */
   async uploadCaption(

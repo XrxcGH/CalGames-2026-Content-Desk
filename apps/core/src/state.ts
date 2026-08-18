@@ -188,7 +188,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         return { ...state, matchEndedAt: ev.ts, matchStartedAt: null };
 
       /**
-       * The reveal, and — from the field — the official totals.
+       * The reveal, and (from the field) the official totals.
        *
        * This case used to take ev.confidence and no numbers at all, which was
        * wrong twice over. It threw away the one authoritative figure in the
@@ -219,7 +219,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
        * A COMPLETE snapshot restores authority. A partial one cannot.
        *
        * The old comment here asserted "it replaces every number" and the code
-       * took ev.confidence unconditionally — but the payload type is Partial
+       * took ev.confidence unconditionally, but the payload type is Partial
        * twice over and withScore MERGES. A patch carrying one alliance's
        * teleopFuel therefore stamped the whole state authoritative while a
        * shadow-scored autoFuel sat untouched inside it, rendering solid.

@@ -95,8 +95,8 @@ test('the PNG header check still rejects what it always did', () => {
 test('a declined team is off the airable set, and that is what the server checks', () => {
   // The consent gap that survived the first pass: `airable` kept declined
   // photos off every overlay, but the FILE stayed served at
-  // /media/teams/<team>/robot.v1.png — an open prefix, and a URL anyone can
-  // guess from a team number. The server now consults the manifest before
+  // /media/teams/<team>/robot.v1.png (an open prefix, and a URL anyone can
+  // guess from a team number). The server now consults the manifest before
   // serving anything under /media/teams/, so this is the shape it relies on.
   return (async () => {
     const { lib, dir } = await libraryWith([{ team: 846, consent: 'declined' }]);

@@ -139,7 +139,7 @@ export function attachMarkers(bus: EventBus): () => void {
         // newlyDown, not down: `down` is level state repeated on every frame
         // (marking it flooded the timeline with duplicates), while the adapter
         // edge-detects newlyDown to teams that just went from linked to
-        // unlinked mid-match — one marker per actual drop.
+        // unlinked mid-match. One marker per actual drop.
         const p = ev.payload as { newlyDown?: number[] } | undefined;
         for (const team of p?.newlyDown ?? []) {
           mark({ kind: 'robot_down', label: `${team} lost comms`, priority: 2 }, ev.ts);

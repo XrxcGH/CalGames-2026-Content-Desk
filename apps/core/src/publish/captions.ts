@@ -8,11 +8,11 @@
  * flip). YouTube already runs ASR on every upload for free and does it better.
  *
  * What this adds is the thing YouTube's ASR cannot do: if somebody produced a
- * real caption file — a volunteer typing along, a paid captioner on the
- * finals, a corrected export of the auto-captions from last year's identical
- * award script — the pipeline picks it up and uploads it as a proper track,
- * which outranks ASR on the video. Drop a file in data/captions named after
- * the match key or the item label. That is the whole interface, because the
+ * real caption file (a volunteer typing along, a paid captioner on the finals,
+ * a corrected export of the auto-captions from last year's identical award
+ * script), the pipeline picks it up and uploads it as a proper track, which
+ * outranks ASR on the video. Drop a file in data/captions named after the
+ * match key or the item label. That is the whole interface, because the
  * person most likely to produce one is not the person running the desk.
  *
  * Accessibility is the reason, and worth stating plainly: the stream plays on
@@ -40,7 +40,7 @@ export interface Sidecar {
  * Format-agnostic on purpose: every format this accepts marks a cue with a
  * timestamp range on its own line, and the separator is either `-->` (SRT,
  * VTT, SUB) or a comma (SBV). Counting those is enough to answer the only
- * question worth asking here — is this a caption file with something in it,
+ * question worth asking here: is this a caption file with something in it,
  * or an empty export somebody dropped in the folder by accident.
  */
 export function countCues(text: string): number {
@@ -65,7 +65,7 @@ export function languageOf(file: string): string {
   const tail = stem.includes('.') ? stem.slice(stem.lastIndexOf('.') + 1) : '';
   // Case-insensitive on the primary subtag, because BCP-47 is. "qm12.ES.srt"
   // used to fail the test, fall back to "en", ALSO fail the strip, and end up
-  // normalising to "qm12es" — so it matched nothing at all and logged nothing
+  // normalising to "qm12es", so it matched nothing at all and logged nothing
   // either. Wrong language would have been a bug; silence was worse.
   return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(tail) ? tail : 'en';
 }
@@ -76,7 +76,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 /**
  * Find a caption file for an item.
  *
- * `keys` are the names worth answering to, best first — the TBA match key,
+ * `keys` are the names worth answering to, best first: the TBA match key,
  * then the label. A file matches when its stem, minus any language tag, equals
  * a key. Substring matching is deliberately not used: "qm1" would otherwise
  * claim the captions for qm12, and a caption track on the wrong match is the
@@ -126,7 +126,7 @@ export async function findSidecar(dir: string, keys: string[]): Promise<Sidecar[
     }
     // ALL of them, not the first. Returning one meant a volunteer who added a
     // Spanish track alongside the English one published a video with only
-    // Spanish captions — readdir is lexicographic, so ".es" sorted ahead of
+    // Spanish captions: readdir is lexicographic, so ".es" sorted ahead of
     // the untagged file and shadowed it. The opposite of the point.
     if (found.length) {
       // English first when it is there: it is the track most viewers want

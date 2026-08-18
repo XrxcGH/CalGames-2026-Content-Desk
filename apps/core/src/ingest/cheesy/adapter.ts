@@ -294,7 +294,7 @@ export class CheesyAdapter {
     // here: the buzzer-to-score-posted window runs minutes while referees
     // deliberate, and a socket blip in it used to wipe the just-finished score
     // off air, yank program to the overview, and diff the replayed score
-    // snapshot against zero — minting phantom burst/climb replay markers for a
+    // snapshot against zero, minting phantom burst/climb replay markers for a
     // match that was already over. A genuine scorekeeper replay of the same
     // match arrives after the field has returned to PreMatch, so it still
     // resets.
@@ -538,7 +538,7 @@ export class CheesyAdapter {
     // duplicates for one dropped robot, and the pre-match link-up (robots
     // connecting one by one) minted a bogus "lost comms" for every robot
     // before every match. A team is newly down only if the previous frame saw
-    // it linked, and only while the match is actually running — a DS
+    // it linked, and only while the match is actually running: a DS
     // disconnecting during post-match teardown is normal, not a highlight.
     const newlyDown = this.#started
       ? down.filter(team => this.#prevLinked.has(team))

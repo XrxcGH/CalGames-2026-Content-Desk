@@ -71,7 +71,7 @@ export function looksLikeAudio(buf: Buffer): boolean {
  * number wrong is worse than showing one fewer button.
  *
  * A plain space separates too: "846 Funky Town.mp3" is team 846. It did not,
- * and the failure was silent in the worst way — the clip scanned fine, showed
+ * and the failure was silent in the worst way: the clip scanned fine, showed
  * up on the desk as a stinger, and then playClip(846) threw "No walk-up loaded
  * for team 846" in the middle of alliance introductions. A file in the
  * walkups/ folder that starts with a number is a walk-up; that is what the
@@ -79,8 +79,8 @@ export function looksLikeAudio(buf: Buffer): boolean {
  *
  * The cost is a real ambiguity, so it is worth naming: "2026 Season Intro.mp3"
  * dropped in walkups/ now binds to team 2026 rather than reading as a stinger.
- * That is the right way round. It is visible — the desk draws it as a team
- * button — and it is one rename to fix, whereas the old behaviour was a
+ * That is the right way round. It is visible (the desk draws it as a team
+ * button) and it is one rename to fix, whereas the old behaviour was a
  * missing button nobody looked for until the team was already standing there.
  */
 export function parseWalkupName(base: string): { team: number | null; label: string } {

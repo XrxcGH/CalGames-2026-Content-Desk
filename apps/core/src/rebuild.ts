@@ -4,7 +4,7 @@
  * The discipline ledger, the coverage report, the run of show and the sponsor
  * airing counts are all derived state: they are built by watching the bus and
  * they live in memory. Every one of them opens empty and every one of them is
- * wrong after a restart, which is a thing that happens at events — a laptop
+ * wrong after a restart, which is a thing that happens at events: a laptop
  * sleeps, a power strip gets kicked, somebody closes the window.
  *
  * The consequences are not cosmetic. The card ledger forgetting a yellow means
@@ -14,8 +14,8 @@
  * in exactly the situation it exists for. The sponsor counts under-report
  * airings in a document that goes to the people who paid for the event.
  *
- * So they are rebuilt. The log is already there — `bus.openLog` has written
- * every event since Friday — and every one of these modules already exposes
+ * So they are rebuilt. The log is already there (`bus.openLog` has written
+ * every event since Friday) and every one of these modules already exposes
  * `observe(ev)` for precisely this, because a replay has to reconstruct them.
  *
  * Two things this is careful about:
@@ -58,7 +58,7 @@ export interface RebuildResult {
  * Feed today's logged events to each observer, oldest first.
  *
  * Never throws. A missing log directory is the normal first-boot case, and a
- * torn last line is what a power cut leaves behind — neither is a reason to
+ * torn last line is what a power cut leaves behind. Neither is a reason to
  * refuse to start a desk that somebody is standing in front of.
  */
 export async function rebuildFromLog(

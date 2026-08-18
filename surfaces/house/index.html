@@ -132,7 +132,7 @@ import { connect } from '/shared/desk-client.js';
 // object only reaches the TOP frame of a browser source, so a volunteer who
 // builds a combined dashboard and embeds this player in an iframe gets a
 // subframe where the object is absent, the page arms normally, and licensed
-// walk-up audio goes straight to the stream — the exact thing this exists to
+// walk-up audio goes straight to the stream: the exact thing this exists to
 // stop. `OBS/<version>` in the user agent is present in every frame and
 // closes it. The object is still checked first because it carries the plugin
 // version, which is worth putting in the refusal message.

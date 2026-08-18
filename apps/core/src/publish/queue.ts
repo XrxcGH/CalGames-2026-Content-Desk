@@ -3,7 +3,7 @@
  *
  * Deliberately boring. A JSON file, a state machine, exponential backoff, and
  * `GET /api/publish` reporting what's stuck (there is no desk-console panel
- * over it yet — see docs/11). It has to survive a crash, the venue internet
+ * over it yet; see docs/11). It has to survive a crash, the venue internet
  * dropping, and the event ending. Nobody should have to SSH into anything on
  * a Sunday.
  *
@@ -145,7 +145,7 @@ export class PublishQueue {
       for (const item of this.#items) { item.released ??= false; item.captions ??= []; }
       // Crash recovery is restore AND resume: without this kick, a machine
       // that died mid-upload restarted with every item faithfully restored in
-      // 'cut'/'uploaded' and then did nothing — a second Release finds no
+      // 'cut'/'uploaded' and then did nothing: a second Release finds no
       // 'held' items and returns 0, so the overnight batch silently never
       // finished. If the restored file holds runnable work, start the worker.
       if (this.#next()) this.kick();
@@ -171,7 +171,7 @@ export class PublishQueue {
    *
    * They do race. The sessionUrl persist inside the upload step is
    * fire-and-forget, and a score posting at the same moment calls add(), so
-   * both reach here at once — sharing one `.tmp` path. The loser renames a
+   * both reach here at once, sharing one `.tmp` path. The loser renames a
    * file that is already gone (ENOENT) or, worse, the two writes interleave
    * into the same temp file and the rename publishes a torn queue. load()'s
    * bare catch then turns that into an empty queue: every unfinished upload
@@ -237,14 +237,15 @@ export class PublishQueue {
     const { name, key } = identify(displayName);
     const title = videoTitle(name, this.#cfg.event.name, this.#cfg.event.year);
 
-    // A failed item may be re-queued — that is the point of excluding it — but
+    // A failed item may be re-queued (that is the point of excluding it), but
     // NOT one that already has a video on the channel. An item that uploaded
     // fine and then exhausted its TBA-link retries (a two-minute outage does
     // it) sits in `failed` holding a live videoId, and score corrections
     // re-emit match.score_posted, as does pressing the desk's Post score twice.
     // Without this the queue re-cut and re-uploaded, putting a second copy of
-    // the match on the channel — the one invariant this whole file is built
-    // around. retry(id) is the path for that item, and it reuses the videoId.
+    // the match on the channel. Never doing that is the one invariant this
+    // whole file is built around. retry(id) is the path for that item, and it
+    // reuses the videoId.
     if (this.#items.some(i => i.kind === 'match' && i.label === name
       && (i.state !== 'failed' || i.videoId))) {
       return null;                                   // already queued
@@ -367,8 +368,8 @@ export class PublishQueue {
       n++;
     }
     if (qcSkipped) {
-      console.warn(`[publish] release left ${qcSkipped} QC-held item(s) parked — ` +
-        'review each clip and use its Retry to publish it.');
+      console.warn(`[publish] release left ${qcSkipped} QC-held item(s) parked. ` +
+        'Review each clip and use its Retry to publish it.');
     }
     if (n) { await this.#save(); this.kick(); }
     return n;
@@ -377,7 +378,7 @@ export class PublishQueue {
   async retry(id: string): Promise<void> {
     const item = this.#items.find(i => i.id === id);
     if (!item) return;
-    // Retrying a held item is the per-item go-ahead — it is how a QC-held cut
+    // Retrying a held item is the per-item go-ahead: it is how a QC-held cut
     // gets published after someone has eyeballed it, so it carries the same
     // durable released flag the bulk release sets. Without it, deferred mode
     // would re-park the item the moment the worker looked at it.
@@ -550,7 +551,7 @@ export class PublishQueue {
         // ones already on the channel: an operator flipping publishing off to
         // freeze a mislabelled match watched that very video go PUBLIC on the
         // next sweep, because publicAfterLink defaults on. Checked HERE rather
-        // than at the top of the branch on purpose — the TBA link still runs,
+        // than at the top of the branch on purpose: the TBA link still runs,
         // since an uploaded video with no link is the orphan this ordering
         // exists to prevent, and linking is not the outward-facing step.
         if (this.#cfg.publish.enabled

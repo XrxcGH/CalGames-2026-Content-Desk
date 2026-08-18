@@ -16,7 +16,7 @@
 
 /* Self-hosted drop-in. Uncomment once the WOFF2s are in place, and delete the
    @import above. This block must cover EVERY face and weight the @import
-   serves: it once omitted Saira Condensed 700 (every .18em-tracked heading —
+   serves: it once omitted Saira Condensed 700 (every .18em-tracked heading,
    faux-bolded by the browser, visibly wrong on air) and JetBrains Mono
    entirely (all operator-console readouts falling back to Courier).
 

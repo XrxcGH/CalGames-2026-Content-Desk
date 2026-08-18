@@ -58,13 +58,13 @@ const teamOf = (v: unknown): number | null => {
  * What a student's lower third says: given name and family initial.
  *
  * The thing being avoided is specific and it is not "a kid on TV". Students
- * are on camera at every FRC event and should be — that is the point of the
+ * are on camera at every FRC event and should be: that is the point of the
  * event. What a broadcast graphic adds is a durable, indexed, searchable
  * record: FULL NAME + TEAM NUMBER + FACE, burnt into a public video that
  * outlives the weekend and that the student cannot take down. A first name and
  * an initial identifies them to everyone in the hall, to their team, and to
- * their family watching at home — which is the entire audience the graphic is
- * for — while being useless to a search engine.
+ * their family watching at home (which is the entire audience the graphic is
+ * for) while being useless to a search engine.
  *
  * Adults keep their full names. A drive coach, a mentor, an FTA and the
  * commentators are doing a public job under their own name.
@@ -195,7 +195,7 @@ export class ProfileBook {
         if (name !== profile.name) { profile.name = name; dirty = true; }
         // The team too. Name and role propagated and this did not, so an
         // operator fixing a wrong team number in the panel form had the fix
-        // silently discarded — the lower third kept airing the wrong gold
+        // silently discarded: the lower third kept airing the wrong gold
         // numeral on every push until somebody found the book editor.
         if (team !== profile.team) { profile.team = team; dirty = true; }
         // Only an explicit flag moves this. A desk that omits the field is not

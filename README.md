@@ -26,7 +26,7 @@ starting the desk, setting up OBS from nothing, pointing the side screens and
 pit monitors, running the show, and what to do when something breaks. It
 assumes you have never used any of it.
 
-A printable copy is committed alongside it as **RUN-THE-DESK.pdf** — hand that
+A printable copy is committed alongside it as **RUN-THE-DESK.pdf**. Hand that
 to people, because a gym has worse Wi-Fi than it has photocopiers. Rebuild it
 with `npm run handbook` after editing the Markdown.
 

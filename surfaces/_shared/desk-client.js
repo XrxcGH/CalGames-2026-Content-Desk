@@ -21,7 +21,7 @@ export const REBUILT = {
 export const PHASE_LABEL = {
   pre: 'Pre-match', auto: 'Auto', transition: 'Transition',
   shift1: 'Shift 1', shift2: 'Shift 2', shift3: 'Shift 3', shift4: 'Shift 4',
-  // 'End game', two words — the one spelling, everywhere. Core clock.ts and
+  // 'End game', two words. The one spelling, everywhere. Core clock.ts and
   // the replay console's timeline both use it, and the desk, remote, and
   // talent consoles render THIS map, so a drift here shows two spellings of
   // the same phase on adjacent screens at the desk.
@@ -139,8 +139,8 @@ class DeskClient extends EventTarget {
       } else if (msg.t === 'hb' && typeof msg.now === 'number') {
         // The heartbeat carries the server's clock, so the skew stays fresh
         // between events. See #apply: the only other source is the last
-        // EVENT's timestamp, which on a quiet desk is minutes old — and a
-        // socket that reconnected mid-match then computed a match clock that
+        // EVENT's timestamp, which on a quiet desk is minutes old. A socket
+        // that reconnected mid-match then computed a match clock that
         // was wrong by exactly that age, showed it on air, and snapped
         // forward at the next phase boundary.
         this.#skew = msg.now - Date.now();
@@ -161,7 +161,7 @@ class DeskClient extends EventTarget {
 
   #apply(state) {
     // A floor, not a correction. `updatedAt` is the last EVENT's timestamp, so
-    // it is the server's clock as of some moment in the past — fine at the
+    // it is the server's clock as of some moment in the past: fine at the
     // instant an event lands, stale by however long the desk has been quiet.
     // The 10-second heartbeat carries the real thing; this only has to get a
     // freshly-connected surface close enough to render its first frame.

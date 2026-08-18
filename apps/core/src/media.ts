@@ -67,8 +67,8 @@ export function readPngHeader(buf: Buffer): PngHeader | null {
     // last case is not exotic: TinyPNG and pngquant palettize to colorType 3
     // and carry the transparency in tRNS, so a correctly cut robot photo run
     // through either was rejected with a message telling the volunteer their
-    // background had not been removed — which it had, on upload day, with the
-    // team standing there.
+    // background had not been removed. It had been removed, on upload day,
+    // with the team standing there.
     hasAlpha: colorType === 4 || colorType === 6 || hasTrns(buf),
   };
 }

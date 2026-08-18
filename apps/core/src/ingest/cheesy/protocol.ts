@@ -82,8 +82,8 @@ export interface CheesyMatch {
   Blue1?: number; Blue2?: number; Blue3?: number;
   /**
    * Surrogate flags, one per station. Cheesy's Match model carries these and
-   * this file did not model them, so the desk's whole surrogate feature — the
-   * "S" mark on the bar, the "does not count" line on the talent view — had no
+   * this file did not model them, so the desk's whole surrogate feature (the
+   * "S" mark on the bar, the "does not count" line on the talent view) had no
    * producer and could never fire at a real event. The tests were the only
    * thing that ever set it.
    *

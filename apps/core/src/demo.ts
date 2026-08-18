@@ -194,7 +194,7 @@ export function startDemo(bus: EventBus, extras: DemoExtras = {}): void {
     payload: { rankings: DEMO_RANKINGS, highestPlayedMatch: `Q${matchNumber}` },
   });
   // +1: nothing is playing yet at boot, so the queue head is the match the
-  // loop is about to load and start — the same convention every post-commit
+  // loop is about to load and start, the same convention every post-commit
   // update below follows. Starting the head one further along (+2) made pace
   // latch the first match's behind-schedule figure against the SECOND match's
   // scheduled time, reading ~3 minutes ahead on a demo running dead on time.

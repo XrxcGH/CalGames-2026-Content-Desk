@@ -32,7 +32,7 @@ export interface ControlAction {
   /**
    * The literal JSON body a client sends. This is a CONTRACT: a button
    * configured from this field must work, and for /api/emit actions it did
-   * not — the map published `{type}` while the route accepts only `{id}`, so
+   * not: the map published `{type}` while the route accepts only `{id}`, so
    * every match-lifecycle button 422'd on the first press. The route takes an
    * id precisely so a caller cannot choose a payload, which means the id is
    * what the map has to publish.

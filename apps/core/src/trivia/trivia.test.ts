@@ -365,10 +365,10 @@ test('a move across the asked line is refused while a question is live too', () 
   // This test used to assert that D could be dragged to the front while C was
   // on screen, and that the cursor followed C. The cursor part was right and
   // the move was not: index 0 is BEHIND the cursor, so D would then never have
-  // aired at all — the exact failure the idle-mode guard exists to stop, left
-  // wide open in the state the host is actually in most of the time. The same
-  // hole let an already-asked question be dragged below the cursor and air,
-  // and pay out, a second time.
+  // aired at all. That is the exact failure the idle-mode guard exists to
+  // stop, left wide open in the state the host is actually in most of the
+  // time. The same hole let an already-asked question be dragged below the
+  // cursor and air, and pay out, a second time.
   const store = new TriviaStore(new EventBus(), []);
   for (const text of ['A', 'B', 'C', 'D']) {
     store.addQuestion({ text, options: ['a', 'b', 'c', 'd'], answer: 0 });
@@ -553,7 +553,7 @@ test('an unknown round is refused rather than silently doing nothing', () => {
 test('a round that has been played through refuses to replay', () => {
   // After lunch the host mis-taps the finished "Round 1" instead of "Round 4".
   // It used to rewind silently to question one, re-air it, and pay every
-  // correct answer a second time — a day-long leaderboard quietly wrong with
+  // correct answer a second time: a day-long leaderboard quietly wrong with
   // nothing on screen having looked unusual.
   const t = new TriviaStore(new EventBus(), [
     { id: 'a1', session: 'Round 1', text: 'Q1?', options: ['w', 'x', 'y', 'z'], answer: 0 },

@@ -116,7 +116,7 @@ test('every language attaches, and English leads', () => {
 
 test('an uppercase language tag is a language tag', async () => {
   // "qm12.ES.srt" failed the tag test, fell back to "en", ALSO failed the
-  // strip, and normalised to "qm12es" — matching nothing and logging nothing.
+  // strip, and normalised to "qm12es", matching nothing and logging nothing.
   const dir = await folder({ 'qm12.ES.srt': SRT });
   try {
     const [found] = await findSidecar(dir, ['qm12']);

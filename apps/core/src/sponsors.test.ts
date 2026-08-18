@@ -106,14 +106,14 @@ test('an unknown sponsor is refused by name', () => {
 });
 
 test('no sponsor appears three times running, across the cycle wrap', () => {
-  // The existing test drew exactly one cycle, so it never crossed the wrap —
+  // The existing test drew exactly one cycle, so it never crossed the wrap,
   // which is where the old round-robin-until-empty order broke. A title (3)
   // plus a supporting (1) built [t, s, t, t], and cycling that gives
   // t, s, t, t, t, s: the title three cards running, the exact "stuck graphic"
   // the docstring says the interleave prevents.
   //
-  // With one other sponsor a weight of 3 CANNOT be spaced — three of four
-  // slots go to the same name however you order them — so the weight is
+  // With one other sponsor a weight of 3 CANNOT be spaced (three of four
+  // slots go to the same name however you order them), so the weight is
   // capped at what the plan can carry. Every shape a real event might have:
   const plans = [
     [{ id: 't', name: 'T', tier: 'title' }, { id: 's', name: 'S', tier: 'supporting' }],

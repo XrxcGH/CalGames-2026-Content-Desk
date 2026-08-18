@@ -236,7 +236,7 @@ function paint(s) {
   $('linkText').textContent = 'linked';
   // The bank list carries the live-question highlight (and the store's
   // cannot-edit-while-on-screen rule with it), but it was only fetched at
-  // page load and after edits — so during a normal Open/Reveal/Next round the
+  // page load and after edits, so during a normal Open/Reveal/Next round the
   // highlight never appeared and the rule was only discoverable by hitting
   // the server error. Re-fetch whenever the round moves.
   const liveKey = `${s.phase}|${s.questionIndex}`;

@@ -74,8 +74,8 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
 }
 .b:active { transform: scale(.95); background: var(--cg-gold); color: var(--cg-black); }
 /* Drawn INSIDE the chamfer with a negative offset, because clip-path clips
-   outline and box-shadow alike and a ring outside it is silently invisible —
-   the same fix /s/next already carries. Without it there was no focus
+   outline and box-shadow alike and a ring outside it is silently invisible.
+   /s/next already carries the same fix. Without it there was no focus
    indication anywhere on this page, including Start and Abort, for anyone on
    a Bluetooth keyboard or switch access. */
 .b:focus-visible, #pin:focus-visible, #unlock:focus-visible {
@@ -274,8 +274,8 @@ desk.on('denied', () => {
 const unlock = () => {
   const pin = $('pin').value.trim();
   // Two doors, one key. The WS auth frame unlocks emits (screens, marks,
-  // telestrator), but the Cues section rides HTTP with the session cookie —
-  // and a desk restart rotates the session, killing the old cookie while the
+  // telestrator), but the Cues section rides HTTP with the session cookie.
+  // A desk restart rotates the session, killing the old cookie while the
   // socket happily re-auths. Unlocking must refresh BOTH, or Cues stays a
   // dead panel of stale arm states with no recovery short of a page reload.
   desk.authenticate(pin);
@@ -455,15 +455,15 @@ async function loadCues() {
       // arm states that no tap could change; clear them and bring the gate
       // back so re-entering the PIN can refresh the cookie via unlock().
       sessionAuthed = false;
-      $('cues').innerHTML = '<p class="hint">Signed out — enter the PIN to reload cues.</p>';
+      $('cues').innerHTML = '<p class="hint">Signed out. Enter the PIN to reload cues.</p>';
       $('gate').setAttribute('data-show', '');
       return;
     }
     if (!res.ok) return;
     const { cues = [] } = await res.json();
     // Built as nodes, not as a string. Cue names come from config.json, which
-    // is operator-authored text — the arcade overlay already comments that
-    // exactly this is "an on-air HTML injection point" — and interpolating it
+    // is operator-authored text (the arcade overlay already comments that
+    // exactly this is "an on-air HTML injection point"), and interpolating it
     // raw ran it inside the producer's authenticated session.
     $('cues').replaceChildren(...cues.map(c => {
       const b = document.createElement('button');

@@ -155,7 +155,7 @@ export class ArcadeStore {
     // a post-completion edit can silently hand the win to the wrong player.
     if (this.#set.state === 'complete') return this.#set;
     // The route forwards the body's delta through Number() unchecked, and
-    // Math.max(0, current + NaN) is NaN — which no later delta can ever heal,
+    // Math.max(0, current + NaN) is NaN, which no later delta can ever heal,
     // so one malformed POST used to poison the on-air score for the rest of
     // the set (and stamp it 'authoritative' below, to boot).
     if (!Number.isFinite(delta)) {
@@ -197,7 +197,7 @@ export class ArcadeStore {
     }
     // And the ids have to be distinct. standings() keys by id, so two racers
     // registered under the same one silently collapsed into a single row
-    // accruing both their points — the same wrong-leaderboard-with-no-error
+    // accruing both their points: the same wrong-leaderboard-with-no-error
     // failure the duplicate guard in recordRace was added to stop.
     const ids = new Set(racers.map(r => r.id));
     if (ids.size !== racers.length) {

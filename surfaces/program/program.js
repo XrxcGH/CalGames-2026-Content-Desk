@@ -394,7 +394,7 @@ function paintFinal(state) {
   $('finalRed').dataset.est = estTotal;
   $('finalBlue').dataset.est = estTotal;
   // The itemization carries its own flag, so an official total can sit above
-  // an outlined breakdown — which is exactly the state a desk that
+  // an outlined breakdown, which is exactly the state a desk that
   // shadow-scored a match is in when the field finally posts the result.
   const estParts = String(state.confidence === 'estimated');
   $('finalRedBreak').dataset.est = estParts;

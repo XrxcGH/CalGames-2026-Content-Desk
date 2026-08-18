@@ -110,8 +110,9 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // /theme/, /shared/ and /media/ for EVERY verb, which is harmless only for
   // as long as the sole handler matching those paths is the static file
   // sender. The moment a write route is mounted under one of them it ships
-  // pre-opened — the exact mechanism behind the OPTIONS hole below, and the
-  // file's own "a verb is not a permission" test does not hold on this branch.
+  // pre-opened. That is the exact mechanism behind the OPTIONS hole below,
+  // and the file's own "a verb is not a permission" test does not hold on
+  // this branch.
   if (reading && OPEN_PREFIXES.some(p => path.startsWith(p))) return false;
 
   // The surface pages themselves.

@@ -200,8 +200,8 @@ test('a stale loaded match does not swallow the next match\'s result', () => {
 
 test('a playoff match joins its upload, and the score column fills', async () => {
   // Two bugs that only showed up on Sunday afternoon. The rows are keyed on
-  // the raw name the field sends — Cheesy's playoff LongName is a bare
-  // "Match 7" — while the publish queue labels its items identify()'d to
+  // the raw name the field sends, and Cheesy's playoff LongName is a bare
+  // "Match 7". The publish queue labels its items identify()'d to
   // "Match 7 (R2)", so the join missed and every playoff match reported
   // never-queued while its upload was succeeding. And the score was read from
   // payload.red.total, which no live emitter produces; the field sends

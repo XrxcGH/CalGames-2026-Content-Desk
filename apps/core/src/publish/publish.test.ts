@@ -250,7 +250,7 @@ test('a match with a video on the channel is never queued twice', async () => {
   // An item that uploaded fine and then exhausted its TBA-link retries (a
   // two-minute outage does it) sits in `failed` holding a live videoId. Score
   // corrections re-emit match.score_posted, as does pressing Post score twice,
-  // and the dedupe excluded `failed` — so the queue re-cut and re-uploaded,
+  // and the dedupe excluded `failed`, so the queue re-cut and re-uploaded,
   // putting a second copy of the match on the channel. retry(id) is the path
   // for that item, and it reuses the video it already has.
   const root = await mkdtemp(join(tmpdir(), 'pubq-'));

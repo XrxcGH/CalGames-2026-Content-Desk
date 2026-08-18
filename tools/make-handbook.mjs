@@ -10,7 +10,7 @@
  * has one runtime dependency and no build step, and adding a Markdown library
  * plus a PDF library to print one document would be the tail wagging the dog.
  * So there is a small Markdown renderer below covering exactly the constructs
- * the handbook uses, and Chrome — already required for `npm run previews` —
+ * the handbook uses, and Chrome (already required for `npm run previews`)
  * does the PDF.
  *
  * If you add a Markdown construct to the handbook that this does not render,
@@ -45,7 +45,7 @@ const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&
  * Inline formatting: code, bold, italic, links.
  *
  * Code spans are extracted FIRST and put back last, so backticked text is
- * never re-processed — otherwise `**` inside a code span would turn into bold
+ * never re-processed. Otherwise `**` inside a code span would turn into bold
  * and the reader would see formatting where the document meant literal
  * characters.
  */

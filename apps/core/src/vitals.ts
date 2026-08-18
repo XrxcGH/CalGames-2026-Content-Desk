@@ -126,7 +126,7 @@ export class Vitals {
       const freeBytes = fs.bavail * fs.bsize;
       // The sources the recorder will actually open, not every source in the
       // file. It skips `enabled: false` ones, so four configured with three
-      // disabled reported a QUARTER of the true hours — enough to trip the
+      // disabled reported a QUARTER of the true hours, enough to trip the
       // blocking "under two hours" fail on a disk that comfortably holds the
       // day, on a check whose entire premise is giving an honest number.
       const live = this.#d.config.recording.sources.filter(src => src.enabled !== false);
@@ -295,8 +295,8 @@ export class Vitals {
     const failed = (this.#d.publish?.items ?? []).filter(i => i.state === 'failed').length;
 
     // YouTube blocks; TBA does not. They were merged into one list, so an
-    // offseason desk with working YouTube credentials and no TBA write keys —
-    // an entirely normal configuration — showed a blocking doors failure
+    // offseason desk with working YouTube credentials and no TBA write keys
+    // (an entirely normal configuration) showed a blocking doors failure
     // saying "Nothing will upload", which was untrue and already satisfied.
     // The queue treats TBA as optional and drives items to done without it.
     if (ready.youtube.length) {

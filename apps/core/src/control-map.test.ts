@@ -80,7 +80,7 @@ test('a button carries its own payload, so the caller cannot supply one', () => 
 test('the published request is the one the route accepts', () => {
   // The contract, and it was broken: the map published {type} for every emit
   // action while /api/emit accepts only {id}, so a Stream Deck configured
-  // exactly as documented 422'd on the match row — the six buttons pressed
+  // exactly as documented 422'd on the match row: the six buttons pressed
   // forty times a day. The route takes an id so a caller cannot choose a
   // payload, which means the id is what the map has to publish.
   for (const a of CONTROL_ACTIONS.filter(x => x.path === '/api/emit')) {

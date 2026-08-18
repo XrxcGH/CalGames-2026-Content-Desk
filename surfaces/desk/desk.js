@@ -41,7 +41,7 @@ desk.on('state', s => {
     $('screenSel').value = s.screen;
   }
   $('nMatch').textContent = s.match
-    // Both, and only both when they differ — which is the state worth
+    // Both, and only both when they differ, which is the state worth
     // noticing: an official total sitting over a typed-in breakdown.
     ? `${s.match.displayName} · screen: ${s.screen} · ${s.totalConfidence}`
       + (s.confidence === s.totalConfidence ? '' : ` (breakdown ${s.confidence})`)
@@ -126,7 +126,7 @@ function score(spec) {
 function showThird(pinned) {
   // The placeholder is a sample, not a default. It used to be the fallback, so
   // pressing T before typing anything put a lower third naming a specific
-  // (invented) person on the broadcast — a one-keystroke mistake with no undo
+  // (invented) person on the broadcast: a one-keystroke mistake with no undo
   // shorter than pressing T again.
   const line1 = $('t1').value.trim();
   if (!line1) {
@@ -588,7 +588,7 @@ $('panelShow').onclick = async () => {
 $('panelHide').onclick = async () => {
   // The server first, the local list after. Clearing optimistically and
   // swallowing the failure showed "Nobody on air" on a console whose graphic
-  // still had five faces up — and threw away the ordering, so recovery meant
+  // still had five faces up, and threw away the ordering, so recovery meant
   // re-ticking five people from memory while they were still on camera.
   const had = [...onAir];
   try {
@@ -991,7 +991,7 @@ $('ccShow').onclick = async () => {
   } catch (err) {
     // The error goes in the HINT, not in the reason input. It used to
     // overwrite what the operator had typed, so the obvious response to a
-    // transient failure — press the button again — put "HTTP 500" on the
+    // transient failure (press the button again) put "HTTP 500" on the
     // program under a 200px team number as the reason for the card.
     $('ccHint').textContent = err.message;
   }

@@ -139,7 +139,7 @@ export class CheesyClient {
       // The backoff resets only after the socket has stayed up a while. An
       // arena that accepts and immediately closes (mid-restart, a proxy
       // hiccup) used to reset on the accept, turning the 60s cap into a ~1s
-      // reconnect loop per socket forever — the exact storm the backoff
+      // reconnect loop per socket forever: the exact storm the backoff
       // promises the FTA cannot happen. 30s of health is proof of life; the
       // recorder's supervisor uses the same settle pattern.
       const settle = setTimeout(() => {

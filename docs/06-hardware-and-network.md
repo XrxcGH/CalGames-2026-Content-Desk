@@ -154,7 +154,7 @@ what is actually reliable:
    it to that video as a real track, which outranks the automatic one. See
    [11-distribution.md](11-distribution.md).
 3. **The clean mic bus still matters most.** Every caption path, automatic or human, gets more
-   accurate when the announcer's voice arrives without music under it — which is the argument
+   accurate when the announcer's voice arrives without music under it. That is the argument
    for the two-bus split above, restated.
 
 The half of the caption problem that is fully solved here is authored text: the status card and
@@ -196,7 +196,7 @@ music somewhere OBS can hear it:
 
 The interlocks are worth having and they are not the real guarantee. A browser source defaults to
 `reroute_audio = false`, which means the page's audio goes to the machine's default output and
-OBS's first-run **Desktop Audio** capture puts it on the stream — and that happens identically if
+OBS's first-run **Desktop Audio** capture puts it on the stream. That happens identically if
 the music plays in Chrome, or in Spotify's own app, on that machine. **So the hard requirement is
 unchanged and is physical: the music machine is not the OBS machine.** No amount of software
 checks substitutes for that.

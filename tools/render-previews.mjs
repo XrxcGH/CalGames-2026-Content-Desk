@@ -334,8 +334,8 @@ async function main() {
 
   // Every file the photographed desk will write to, put back afterwards.
   //
-  // This desk runs against the REAL data directory — ROOT is fixed in
-  // index.ts — so a render posts its fixture people into the operator's
+  // This desk runs against the REAL data directory (ROOT is fixed in
+  // index.ts), so a render posts its fixture people into the operator's
   // profile book and its fixture question into their trivia bank. Rendering
   // the site's own screenshots must not edit the event's live state, and a
   // volunteer who runs this the morning of the event should not find five
@@ -345,7 +345,7 @@ async function main() {
     join(ROOT, 'data', 'trivia.json'),
     // The publish queue too, and this one bites hardest. The shots emit a
     // whole match lifecycle, auto-queueing is on by default, so a render
-    // persisted a held "Qualification 12" — and the queue refuses a second
+    // persisted a held "Qualification 12". The queue refuses a second
     // item with the same label, so the event's REAL Qualification 12 would
     // silently never be queued. A volunteer re-rendering previews on Saturday
     // morning, exactly as the README tells them to, would lose that match's
@@ -378,7 +378,7 @@ async function main() {
       REMOTE_PIN: '',
       // Loopback, explicitly. The desk defaults to 0.0.0.0, so an ungated
       // full-control desk was reachable from the venue LAN for the length of
-      // every render — and the comment above claimed it merely "binds a spare
+      // every render. The comment above claimed it merely "binds a spare
       // port on this machine", which 0.0.0.0 is not.
       HOST: '127.0.0.1',
     },
@@ -422,7 +422,7 @@ async function main() {
  * Put the files back on the ways out that skip `finally`.
  *
  * Ctrl+C on a slow render used to leave the fixture people in the live profile
- * book — and then the NEXT run snapshotted the polluted file as its baseline,
+ * book, and then the NEXT run snapshotted the polluted file as its baseline,
  * so the pollution became the thing faithfully restored.
  */
 /**

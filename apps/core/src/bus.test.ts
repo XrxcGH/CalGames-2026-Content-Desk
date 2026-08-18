@@ -42,7 +42,7 @@ test('the ring can answer "what happened after seq N"', () => {
 
 test('a clock that jumps fires every boundary it crossed', () => {
   // advance() fired only the phase it landed in, which is right at 10Hz and
-  // wrong whenever the clock jumps — and it does jump: replay caps long gaps
+  // wrong whenever the clock jumps. And it does jump: replay caps long gaps
   // deliberately, and a stalled event loop does the same live. Skipping
   // match.auto_end means the reducer's auto-winner heuristic never runs, so a
   // replay reconstructs different state than the run it is replaying.
@@ -67,7 +67,7 @@ test('a clock that jumps fires every boundary it crossed', () => {
 
 test('a replayed log is renumbered on this process rather than keeping old seqs', async () => {
   // This test used to emit two fresh events on a new bus and assert seq 1 and
-  // 2 — which passes whether or not replay() renumbers anything, because it
+  // 2, which passes whether or not replay() renumbers anything, because it
   // never called replay(). The claim in the title was entirely unexercised.
   const dir = await mkdtemp(join(tmpdir(), 'cg-bus-'));
   try {

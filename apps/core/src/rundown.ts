@@ -229,7 +229,7 @@ export class Rundown {
     // everywhere else the audience is waiting and wants to know for how long.
     //
     // 'selection' and 'awards' were missing, which meant no countdown during
-    // alliance selection and the awards ceremony — the two longest
+    // alliance selection and the awards ceremony: the two longest
     // audience-facing waits of the weekend, and the two people ask about.
     const countdownKinds: SegmentKind[] = ['break', 'ceremony', 'gap', 'selection', 'awards'];
     const countdown = live && countdownKinds.includes(live.kind) && next?.projectedAt

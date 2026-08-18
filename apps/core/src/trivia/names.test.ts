@@ -102,8 +102,8 @@ test('digit-separated slurs do not walk past the folder', () => {
 
 test('folding cannot destroy a match either', () => {
   // The mirror of the above, and it bit the other way: "fuck1" folds its
-  // trailing digit to a letter, giving "fucki" — no stem plus any real suffix
-  // — so it passed while bare "fuck" was refused. The raw letter-split is
+  // trailing digit to a letter, giving "fucki" (no stem plus any real suffix),
+  // so it passed while bare "fuck" was refused. The raw letter-split is
   // screened alongside the folded one.
   for (const name of ['fuck1', 'shit1', 'bitch1', 'fuck3']) {
     assert.equal(screenName(name).ok, false, `${name} reached the projector`);

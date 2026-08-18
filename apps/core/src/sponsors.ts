@@ -93,7 +93,7 @@ export class Sponsors {
      * rather than a scheduling mistake: three of four slots go to the same
      * sponsor, so whatever order they are in, the wrap puts them together.
      * Capping the title at (everyone else + 1) gives t s t, which honours
-     * both halves of the promise — the title still appears more often, and
+     * both halves of the promise: the title still appears more often, and
      * the graphic never sits on one sponsor three cards running.
      *
      * A plan with enough other sponsors to space a 3 is unaffected.
@@ -110,14 +110,14 @@ export class Sponsors {
      * Largest-remainder spacing, not round-robin-until-empty.
      *
      * The old loop drained a bucket per pass, so a title (3) plus a
-     * supporting (1) built [t, s, t, t] — and cycling that gives t, s, t, t,
+     * supporting (1) built [t, s, t, t], and cycling that gives t, s, t, t,
      * t, s: the title THREE times running across the wrap, which is the exact
      * "stuck graphic" the docstring says the interleave prevents. The test
      * drew precisely one cycle, so it never crossed the wrap.
      *
      * This picks, at each slot, whichever sponsor is furthest behind the share
-     * its weight entitles it to, which spreads a heavy sponsor evenly and
-     * — because the whole cycle is built from the same rule — leaves the wrap
+     * its weight entitles it to, which spreads a heavy sponsor evenly and,
+     * because the whole cycle is built from the same rule, leaves the wrap
      * no worse than any other join.
      */
     const credit = buckets.map(() => 0);

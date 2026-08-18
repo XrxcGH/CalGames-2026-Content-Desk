@@ -289,7 +289,7 @@
    ::before/::after are listed explicitly because * does NOT match
    pseudo-elements: without them, a pseudo inherited --chamfer already baked
    with its owner's --ch, and every `::before { --ch: ... }` override in
-   broadcast.css was silently ignored — the panel-face insets rendered with
+   broadcast.css was silently ignored. The panel-face insets rendered with
    their parents' cut instead of their own.
    -------------------------------------------------------------------------- */
 *, *::before, *::after {

@@ -45,7 +45,7 @@ export type Phase = 'practice' | 'qualification' | 'playoff';
  * Which phase a match name belongs to.
  *
  * Read off the display name because that is all the ledger is given. Cheesy
- * sends "Qualification 12", "Practice 3" and — for playoffs — bare "Match 7"
+ * sends "Qualification 12", "Practice 3" and, for playoffs, bare "Match 7"
  * with the round in a separate field, so an unrecognised name is a PLAYOFF
  * rather than an error: that is the only phase whose names do not say what
  * they are, and guessing "qualification" for one would carry a spent card

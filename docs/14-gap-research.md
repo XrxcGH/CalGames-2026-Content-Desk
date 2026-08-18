@@ -41,7 +41,7 @@ Verdict shorthand used throughout: **program** means it serves running the event
 
 **Effort.** Small. **Serves.** Both.
 
-### B3. ~~Verify the ENERGIZED bonus RP threshold~~ — CHECKED, the desk is right
+### B3. ~~Verify the ENERGIZED bonus RP threshold~~ (CHECKED, the desk is right)
 
 **Resolved 2026-08-11, before this document was committed.** The sweep flagged this
 as urgent on the strength of [PitRadar's changelog](https://www.chiefdelphi.com/t/introducing-pitradar-a-free-live-competition-dashboard-for-pit-displays-spectators/517920),
@@ -70,7 +70,7 @@ scoring against on Friday rather than assuming.
 
 **Effort.** Zero code. **Serves.** Program.
 
-### B5. ~~One decision: how many people are actually running this?~~ — ANSWERED
+### B5. ~~One decision: how many people are actually running this?~~ (ANSWERED)
 
 **Answered 2026-08-11: three.** A desk manager (all software, plus the camera cut), an on-air
 talent (mics and cameras first, then analysis and interviews), and a field tech (field bridge,
@@ -544,9 +544,9 @@ Ranked here rather than in a separate axis because most of it is cheap, most of 
 
 **Caveat.** Mark machine-generated captions as such, or keep a human hold for award and ceremony segments. A caption backlog must never block a publish.
 
-**Built 2026-08-11, in half, and the other half was declined.** `apps/core/src/publish/captions.ts` finds a sidecar for a queue item and the upload step attaches it, wrapped so a caption failure is a warning and never a stuck video. The scope note in this item is wrong and cost an afternoon to find: `captions.insert` needs `youtube.force-ssl`, NOT the `youtube` manage scope claimed above. Both doc corrections this item demanded have been made — `docs/06` and `docs/11` no longer promise live automatic captions.
+**Built 2026-08-11, in half, and the other half was declined.** `apps/core/src/publish/captions.ts` finds a sidecar for a queue item and the upload step attaches it, wrapped so a caption failure is a warning and never a stuck video. The scope note in this item is wrong and cost an afternoon to find: `captions.insert` needs `youtube.force-ssl`, NOT the `youtube` manage scope claimed above. Both doc corrections this item demanded have been made: `docs/06` and `docs/11` no longer promise live automatic captions.
 
-The Whisper pass is **declined**, not deferred. It fails the two rules this repo is actually built on: it needs a model file and a native runtime (against no-build-step and double-click), and it contends for the same machine that is encoding the show, which `docs/09` names as the tight resource. It also loses on merit — YouTube already runs ASR on every upload for free and does it better than a laptop under load, so an unreviewed local transcript would be strictly worse output bought with the show's CPU. What survives is the part ASR cannot do: carry a file a human made. The word-index-against-the-replay-clock idea is genuinely good and orphaned by this; it is written down here rather than lost.
+The Whisper pass is **declined**, not deferred. It fails the two rules this repo is actually built on: it needs a model file and a native runtime (against no-build-step and double-click), and it contends for the same machine that is encoding the show, which `docs/09` names as the tight resource. It also loses on merit: YouTube already runs ASR on every upload for free and does it better than a laptop under load, so an unreviewed local transcript would be strictly worse output bought with the show's CPU. What survives is the part ASR cannot do: carry a file a human made. The word-index-against-the-replay-clock idea is genuinely good and orphaned by this; it is written down here rather than lost.
 
 #### 37. Low-stim mode and a scheduled low-sensory window
 
@@ -598,15 +598,15 @@ The Whisper pass is **declined**, not deferred. It fails the two rules this repo
 
 **Caveat.** The current cue set is entirely screen and scene changes on match state; there are no pit-cam, interview or crowd-cam cues yet, so the attribute has nothing to attach to until that content exists. Build it with the interview intake, which creates the first content it guards. Make it a confirm-and-log gate, never a refusal, or the director routes around it. Three taps or fewer on intake, or a good interviewer routes around it and back-fills dishonestly. E117 binds at a WRRF offseason by adoption rather than by rule, so frame it as the house standard.
 
-**Built 2026-08-11, attached somewhere better than the cue engine.** This item put the guard on `Cue`, then admitted in its own caveat that no cue it could attach to exists. The panel does exist, it is used every segment, and it is the exact moment the desk is told who is on camera — so that is where it went.
+**Built 2026-08-11, attached somewhere better than the cue engine.** This item put the guard on `Cue`, then admitted in its own caveat that no cue it could attach to exists. The panel does exist, it is used every segment, and it is the exact moment the desk is told who is on camera. So that is where it went.
 
 A profile carries `student`, one press on the book row, and two things follow.
 
-**The name is shortened to a given name and a family initial.** The thing being avoided is precise, and it is not "a child on television": students are on camera at every FRC event and should be. What a broadcast graphic adds is a durable, indexed, searchable record — full name plus team number plus face, burnt into a public video that outlives the weekend and that the student cannot take down. "Alex R. · Driver · 846" identifies them to everyone in the hall, to their team, and to the family watching at home, which is the entire audience the card is for, while being useless to a search engine. Adults keep their full names; a mentor, an FTA and the commentators are doing a public job under their own name.
+**The name is shortened to a given name and a family initial.** The thing being avoided is precise, and it is not "a child on television": students are on camera at every FRC event and should be. What a broadcast graphic adds is a durable, indexed, searchable record: full name plus team number plus face, burnt into a public video that outlives the weekend and that the student cannot take down. "Alex R. · Driver · 846" identifies them to everyone in the hall, to their team, and to the family watching at home, which is the entire audience the card is for, while being useless to a search engine. Adults keep their full names; a mentor, an FTA and the commentators are doing a public job under their own name.
 
 The shortening happens in the core, **before** the panel payload is built, not at render time. The payload goes into the append-only NDJSON log, which is replayed and archived: shortening only in CSS or in `program.js` would put the exact string being avoided into the permanent record and leave it there.
 
-**And an adult-present reminder**, which is the YouTube half of this item and the one with teeth. Students on the panel with no adult on it returns a warning the desk prints where the confirmation normally goes. A reminder rather than a refusal, exactly as the caveat above asks: a desk that blocks the shot gets routed around within the hour and then knows nothing at all. It is advice and cannot be more than that — whether an adult is in frame is a fact about the room that no field in a JSON body can know.
+**And an adult-present reminder**, which is the YouTube half of this item and the one with teeth. Students on the panel with no adult on it returns a warning the desk prints where the confirmation normally goes. A reminder rather than a refusal, exactly as the caveat above asks: a desk that blocks the shot gets routed around within the hour and then knows nothing at all. It is advice and cannot be more than that: whether an adult is in frame is a fact about the room that no field in a JSON body can know.
 
 **Still open:** the `/s/intake` tablet and the consent gate in the publish queue. Those need interview content that does not exist yet, which was this item's own conclusion and remains right.
 

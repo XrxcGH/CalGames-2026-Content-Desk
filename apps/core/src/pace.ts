@@ -60,10 +60,11 @@ export function projectNextStart(
 /**
  * Beyond this, the "schedule" and the clock are not describing the same day,
  * and the honest answer is no figure at all. Real FRC events run at most a few
- * hours behind; the two ways to exceed twelve hours are a replayed log (events
- * restamped to now, schedule strings still from the recording day — behindMin
- * would read the replay offset, months of minutes) and a schedule import with
- * the wrong date. Both must blank the sign, not put nonsense on it.
+ * hours behind; the two ways to exceed twelve hours are a replayed log and a
+ * schedule import with the wrong date. In a replay the events are restamped to
+ * now while the schedule strings still come from the recording day, so
+ * behindMin would read the replay offset: months of minutes. Both must blank
+ * the sign, not put nonsense on it.
  */
 const MAX_CREDIBLE_BEHIND_MIN = 12 * 60;
 

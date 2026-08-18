@@ -55,7 +55,7 @@ const has = (name: string): boolean => arg(name) !== undefined;
 // A value-carrying flag typed bare used to fail silently: `--port` with
 // nothing after it fell through to the default without complaint, and a bare
 // `--replay` booted a normal desk with no replay and no message at all.
-// Refuse at the door — a mistyped launch line must never half-work.
+// Refuse at the door: a mistyped launch line must never half-work.
 for (const name of ['port', 'host', 'ffmpeg-dir', 'encoder', 'segment',
   'bitrate', 'cheesy-host', 'display-id', 'obs-host', 'replay']) {
   if (arg(name) === '') {
@@ -79,13 +79,13 @@ process.on('unhandledRejection', reason => {
   console.error('[core] unhandled rejection:', reason);
 });
 
-// A synchronous crash during BOOT is fatal — a half-initialized desk is worse
+// A synchronous crash during BOOT is fatal. A half-initialized desk is worse
 // than none, and the commonest boot failure deserves words instead of a stack:
 // the port already being held by a copy of the desk forgotten in another
 // window. Once the show is up, the policy flips: a throw nobody anticipated
 // (a socket callback, a bad payload) must log and keep the show running,
 // because every overlay dying at once is always the worse outcome. This is the
-// ONLY uncaughtException handler in the process — a second one registered
+// ONLY uncaughtException handler in the process: a second one registered
 // later could never run, since this one would exit first.
 let bootComplete = false;
 process.on('uncaughtException', err => {
@@ -219,7 +219,7 @@ function validRecordingSources(raw: unknown): SourceConfig[] {
     }
     // Recorder keys its ffmpeg processes by id: a duplicate would spawn two
     // encoders clobbering one segment directory, with the first process
-    // orphaned at shutdown — never stopped, never finalized.
+    // orphaned at shutdown: never stopped, never finalized.
     if (seenIds.has(id)) return skip('id', `"${id}" is already used by an earlier source`);
     if (typeof label !== 'string' || !label.trim()) return skip('label', 'must be a non-empty string');
     if (role !== 'program' && role !== 'iso') return skip('role', 'must be "program" or "iso"');
@@ -284,7 +284,7 @@ trivia.setJoinUrl(`${lanBase}/s/quiz`);
  * The HTTP path validates every question; this one did not, and the store
  * assumes ids are present and unique. A hand-written or hand-merged file with
  * a missing id makes `askedIds.add(undefined)` mark EVERY id-less question
- * asked the moment the first one is revealed — each round shows finished after
+ * asked the moment the first one is revealed: each round shows finished after
  * one question and resuming skips the rest. Duplicate ids conflate progress
  * the same way, and an out-of-range answer airs a question nobody can get
  * right. All three are quiet: nothing on screen looks broken.
@@ -536,7 +536,7 @@ const coverage = new CoverageLedger(publish);
 coverage.attach(bus);
 
 /*
- * All four of the above are derived, in-memory, and empty at boot — and a desk
+ * All four of the above are derived, in-memory, and empty at boot. And a desk
  * DOES restart at an event: a laptop sleeps, a power strip gets kicked,
  * somebody closes the window. The consequences are not cosmetic. A forgotten
  * yellow means the announcer is told a carded team is clean. A forgotten
@@ -592,7 +592,7 @@ const vitals = new Vitals({
 // cut needs the score-reveal timestamp to know where its second part starts.
 // Not in demo mode OR replay mode: simulated and replayed matches look exactly
 // like field data here, and autoQueueMatches defaults on, so either would
-// otherwise queue bogus "Qualification N" uploads — a replayed log restamps
+// otherwise queue bogus "Qualification N" uploads. A replayed log restamps
 // event times to now, so the cut bounds even look plausible.
 if (config.publish.autoQueueMatches && !has('demo') && !has('replay')) {
   bus.subscribe(ev => {
@@ -634,7 +634,7 @@ const server = startServer({
   rundown, sponsors, lanBase,
 });
 // From here on, an uncaught throw logs and continues instead of killing every
-// overlay at once — see the handler at the top of this file.
+// overlay at once (see the handler at the top of this file).
 bootComplete = true;
 
 // Phase boundaries are time-driven, not event-driven: endgame lockdown and
@@ -676,7 +676,7 @@ const shutdown = (): void => {
   obs?.close();
   server.close();
   // Flush the event log before exiting: a WriteStream holds its tail in
-  // memory, and exiting without end() loses the last events of the session —
+  // memory, and exiting without end() loses the last events of the session:
   // exactly the ones a post-mortem replay would want. Capped alongside the
   // recorder wait, because shutdown must never hang on a dead stream either.
   setTimeout(() => process.exit(0), 5000);

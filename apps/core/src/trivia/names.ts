@@ -144,7 +144,7 @@ export function screenName(raw: string): NameVerdict {
   //
   // Run over the raw letter-split as well as the folded split, because folding
   // can DESTROY a match as easily as it creates one: "fuck1" folds its trailing
-  // digit to a letter, giving "fucki", which is no stem plus any real suffix —
+  // digit to a letter, giving "fucki", which is no stem plus any real suffix,
   // so it passed, while bare "fuck" was refused. Unfolded, the digit is a
   // separator and the word is plainly there.
   const rawWords = trimmed.toLowerCase().split(/[^a-z]+/).filter(Boolean);
@@ -154,8 +154,8 @@ export function screenName(raw: string): NameVerdict {
 
   // Pass two: the spacing taken back out, for the "F U C K" technique.
   //
-  // Only ever an exact match against a whole banned word — substring matching
-  // on this form is what would reject Scunthorpe — and only on the joins that
+  // Only ever an exact match against a whole banned word (substring matching
+  // on this form is what would reject Scunthorpe), and only on the joins that
   // are themselves evidence of somebody spelling something out. A blanket
   // whole-name join is both too weak and too strong: it missed "F U C K yeah"
   // (one extra word defeats it) while refusing "Anu S", which is a real given

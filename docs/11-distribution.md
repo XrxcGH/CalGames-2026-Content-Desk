@@ -269,7 +269,7 @@ to a single continuous 187s cut, and a match whose score is never posted falls b
 Analysis-desk sections go up through the segment flow with the pre-named `analysis` id: the
 operator marks in and out like any other segment. An automatic detector keyed off
 `telestrator.stroke` events was designed here once, but it was never built and the queue carries
-no `analysis` item kind — writing it up as shipped sent operators hunting for a feature that
+no `analysis` item kind. Writing it up as shipped sent operators hunting for a feature that
 does not exist. If it is ever built, the durable one-event-per-stroke record is the hook it
 would hang from.
 
@@ -486,7 +486,7 @@ speech recognition in this repo: the laptop cutting video in a gym has nothing s
 unreviewed machine transcript of a team number is a coin flip ("one six seven eight"). YouTube
 already runs ASR on every upload, for free, better.
 
-What the desk adds is the thing ASR cannot do — carry a caption file somebody actually made.
+What the desk adds is the thing ASR cannot do: carry a caption file somebody actually made.
 
 **How to use it.** Put the file in `data/captions`. Name it after the TBA match key or the item
 label, with a `.srt`, `.vtt`, `.sbv` or `.sub` extension:
@@ -499,7 +499,7 @@ data/captions/2026cacg_f1m1.es.srt      <- Spanish track, tagged by filename
 
 When that video uploads, the file goes up with it as a proper caption track, which outranks the
 automatic captions in the player. The name has to match exactly (case and punctuation are
-ignored, `qm1` will not claim `qm12`), and an empty file is skipped rather than uploaded —
+ignored, `qm1` will not claim `qm12`), and an empty file is skipped rather than uploaded:
 a track with no cues shows in the player as captions being AVAILABLE, which is worse than
 their absence.
 
@@ -510,7 +510,7 @@ after the event; a video already uploaded needs a re-run, so drop them in before
 where possible.
 
 **Scope note.** `captions.insert` needs the `youtube.force-ssl` scope, not the upload scope. A
-desk consented for uploads only gets a 403, logged as a warning — the video still publishes,
+desk consented for uploads only gets a 403, logged as a warning. The video still publishes,
 just without the track. Re-consent with `CAPTION_SCOPE` to turn it on.
 
 ---

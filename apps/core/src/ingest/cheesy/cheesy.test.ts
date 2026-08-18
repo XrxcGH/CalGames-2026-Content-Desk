@@ -480,7 +480,7 @@ test('a dropped robot is an edge, not a level: one newlyDown per actual drop', (
     .map(e => (e.payload as { newlyDown: number[] }).newlyDown);
 
   // Pre-match link-up: robots connect one by one. None of this is a drop, so
-  // no frame may mint a "lost comms" marker — the old level-based marking
+  // no frame may mint a "lost comms" marker: the old level-based marking
   // produced one per unlinked robot per frame here.
   adapter.ingest('arenaStatus', frame(false, false));
   adapter.ingest('arenaStatus', frame(true, false));
@@ -490,7 +490,7 @@ test('a dropped robot is an edge, not a level: one newlyDown per actual drop', (
   adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod });
   seen.length = 0;
 
-  // Mid-match, 1868 drops and STAYS down. Exactly one edge, then silence —
+  // Mid-match, 1868 drops and STAYS down. Exactly one edge, then silence:
   // Cheesy re-sends arenaStatus continuously, and every frame used to repeat
   // the marker.
   adapter.ingest('arenaStatus', frame(true, false));

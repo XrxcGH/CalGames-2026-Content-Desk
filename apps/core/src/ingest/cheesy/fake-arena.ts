@@ -252,7 +252,7 @@ export function startFakeArena(opts: FakeArenaOpts) {
     let redFuel = 4, blueFuel = 9;
     let redTower = 15, blueTower = 0;
     // Shift plan: [shift index, hub owner]. 10s of transition, then 4x25s,
-    // then a FULL 30s endgame — REBUILT's real length. A 10s endgame here
+    // then a FULL 30s endgame, REBUILT's real length. A 10s endgame here
     // buzzed at match clock ~120 while every clock-derived surface still
     // showed 0:20 remaining, which made rehearsals distrust the clock.
     const shiftOwner = ['red', 'blue', 'red', 'blue'] as const;

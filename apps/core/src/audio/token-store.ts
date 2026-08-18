@@ -45,15 +45,15 @@ export async function loadRefreshToken(root: string, fromConfig: string): Promis
       { refreshToken?: string; seed?: string };
     if (saved.refreshToken) {
       // Unless the operator has pasted a NEW token into config.json, in which
-      // case that is them telling us the stored chain is dead — and it is the
+      // case that is them telling us the stored chain is dead, and it is the
       // documented recovery, so it has to actually recover.
       //
       // Refresh tokens do die: revoked, or past the six-month life. The error
       // says "run npm run auth:spotify", the operator does, pastes the result
-      // into config.json, restarts — and the old code loaded the dead rotation
-      // right back over it and failed identically, forever, with no way out
-      // that does not involve knowing this file exists. For a volunteer with
-      // no terminal experience that is not a recovery path at all.
+      // into config.json, and restarts. The old code then loaded the dead
+      // rotation right back over it and failed identically, forever, with no
+      // way out that does not involve knowing this file exists. For a volunteer
+      // with no terminal experience that is not a recovery path at all.
       //
       // A stored file with no seed predates this check. It is trusted, because
       // the alternative is throwing away a live rotation on upgrade.

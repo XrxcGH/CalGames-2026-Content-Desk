@@ -156,7 +156,7 @@ export function drawCard(ctx, card) {
     if (card.estimated) {
       // Shadow-scored totals are OUTLINED here for the same reason the score
       // bar outlines them: a guess must never leave the desk looking
-      // official — least of all on a card someone is about to post.
+      // official, least of all on a card someone is about to post.
       ctx.lineWidth = 5;
       ctx.strokeStyle = p.white;
       ctx.strokeText(String(data?.score ?? 0), x + blockW / 2, blockY + 218);

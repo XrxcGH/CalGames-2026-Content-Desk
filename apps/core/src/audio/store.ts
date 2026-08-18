@@ -413,8 +413,8 @@ export class HouseAudio {
     // Same clearing setSource does, and for the same reason: a clip left in
     // the snapshot is a clip the house player can still decide to fire. An
     // operator switching playlists over a running walk-up left the finished
-    // clip in every subsequent snapshot, and the house player — which nulls
-    // its own token when the audio ends — read it as one it had not seen and
+    // clip in every subsequent snapshot, and the house player, which nulls
+    // its own token when the audio ends, read it as one it had not seen and
     // replayed the walk-up from the top over the new playlist.
     this.#clip = null;
     this.#source = 'playlist';

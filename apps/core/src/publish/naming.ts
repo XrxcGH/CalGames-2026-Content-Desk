@@ -81,7 +81,7 @@ export function identify(displayName: string): MatchIdentity {
   }
 
   // Playoff 7 / Match 7 / M7: derive the round from the match number. No bare
-  // `p` alias here — "P3" is FMS's PRACTICE short name and is handled above;
+  // `p` alias here. "P3" is FMS's PRACTICE short name and is handled above;
   // claiming it minted a playoff title and a real TBA key for a scrimmage.
   const playoff = /^(?:playoff|elimination|elim|match|m)\s*#?\s*(\d+)$/i.exec(s);
   if (playoff) {
@@ -125,7 +125,7 @@ export function roundOf(matchNumber: number): number {
 
 /**
  * "2026 CalGames": the event as titled, with the year exactly once. The year
- * has to appear somewhere — WRRF's channel hosts every season, and yearless
+ * has to appear somewhere: WRRF's channel hosts every season, and yearless
  * titles collide ("Qualification 1 - CalGames" every October). The
  * contains-check keeps the obvious config (name: "2026 CalGames") from
  * doubling into "2026 2026 CalGames".

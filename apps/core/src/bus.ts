@@ -44,7 +44,7 @@ export class EventBus {
   /**
    * While a replay runs, the 10Hz ticker must tick on the REPLAY's time axis,
    * not the wall clock. Replayed events are restamped by a constant offset,
-   * but pacing (speed, the 5s gap cap) makes the two axes diverge — left on
+   * but pacing (speed, the 5s gap cap) makes the two axes diverge: left on
    * Date.now(), advance() crosses phase boundaries on the wall axis while the
    * replayed events cross them on theirs, double-firing every boundary and
    * flip-flopping bus.state between the two. Null outside a replay.
@@ -71,7 +71,7 @@ export class EventBus {
 
   /**
    * Flush and close the event log. A WriteStream buffers its tail in memory,
-   * and exiting without end() drops the session's last events — exactly the
+   * and exiting without end() drops the session's last events: exactly the
    * ones a post-mortem replay would want. Resolves once the tail is on disk
    * (or immediately if logging was never enabled).
    */
@@ -153,7 +153,7 @@ export class EventBus {
      * long gaps deliberately (see replay()), and a stalled event loop does the
      * same live. Skipping match.auto_end means the reducer's auto-winner
      * heuristic never runs, so the hub indicator shows "both" for all four
-     * shifts of a rehearsal where the live run alternated — a replay
+     * shifts of a rehearsal where the live run alternated: a replay
      * reconstructing different state than the run it is replaying, which is
      * the one property the whole log format exists to provide.
      */
@@ -220,7 +220,7 @@ export class EventBus {
       // them, so they must replay. Clock-sourced phase boundaries
       // (match.auto_end/endgame/shift_change/end) are derived the same way:
       // advance() regenerates them from the replayed clock state, so replaying
-      // the logged copies double-fired every boundary — duplicate timeline
+      // the logged copies double-fired every boundary: duplicate timeline
       // markers and double-fired cues in the exact rehearsals replay exists
       // for.
       if (ev.type === 'pace.updated') continue;
@@ -250,7 +250,7 @@ export class EventBus {
     }
     } finally {
       // Always hand time back to the wall clock, even if the replay threw
-      // mid-stream — a ticker stranded on a dead replay axis would misphase
+      // mid-stream: a ticker stranded on a dead replay axis would misphase
       // every live match that follows.
       this.#replayClock = null;
     }

@@ -160,7 +160,7 @@ Merged from four raw findings; the most-discussed AV pitfall in FRC. Official ev
 
 **Recommendation:** Extend the dual-bus policy to the main program: stream bus = announcer + field FX + licensed bed only; venue bus keeps the DJ music. Use OBS multi-track so replay clips and uploads carry a music-free track; add a pre-upload audio check to the publish queue.
 
-**Built since this audit:** docs/06 now specifies exactly this — "Audio: two buses, and music never leaves the room", with the music source physically absent from the STREAM bus and the wiring documented at the mixer. Still open from the recommendation: OBS multi-track on the recordings and a pre-upload audio check in the publish queue.
+**Built since this audit:** docs/06 now specifies exactly this in "Audio: two buses, and music never leaves the room", with the music source physically absent from the STREAM bus and the wiring documented at the mixer. Still open from the recommendation: OBS multi-track on the recordings and a pre-upload audio check in the publish queue.
 
 - <https://www.chiefdelphi.com/t/lets-solve-the-twitch-and-youtube-dmca-issues-from-streams/429168>
 - <https://www.chiefdelphi.com/t/opinions-on-twitch-as-an-frc-streaming-platform/458993>
@@ -348,7 +348,7 @@ Offseason webcasters can't share the field's internet drop and buy their own (hu
 
 **Recommendation:** Define a degraded-uplink runbook: pre-configured low-bitrate OBS profile to switch to, local recording always on so archive and replay survive uplink loss, and a stream-health readout (dropped-frame percentage) on the dark operator console so the desk sees trouble before chat does.
 
-**Built since this audit:** docs/11 now carries that runbook — the low-bitrate fallback profile, the local-recording-never-stops rule, and watch-the-encoder guidance (OBS's own dropped-frame percentage as the early warning). Still open: surfacing that dropped-frame figure on the desk's stream panel rather than in OBS's corner.
+**Built since this audit:** docs/11 now carries that runbook. It has the low-bitrate fallback profile, the local-recording-never-stops rule, and watch-the-encoder guidance (OBS's own dropped-frame percentage as the early warning). Still open: surfacing that dropped-frame figure on the desk's stream panel rather than in OBS's corner.
 
 - <https://www.chiefdelphi.com/t/event-livestreaming/145356>
 - <https://www.chiefdelphi.com/t/webcasts-2015/142529/42>
@@ -372,7 +372,7 @@ Team 971's FRC.bet ran a no-money prediction market at Madtown Throwdown with re
 
 **Recommendation:** Add a 'pick the winner' question type auto-resolved from the Cheesy bridge's final-score event, reusing phone/leaderboard infrastructure. Avoid money/market framing (community sensitivity); simple pick-em with streak scoring. Could feed a 'crowd pick vs EPA pick' pre-match graphic.
 
-**Built since this audit:** the pick-the-winner round exists — `trivia.pick()` queues a prediction on the loaded match, the host opens it in the pre-match gap, and reveal resolves it against the posted score (docs/09 lists it done). Still open: the 'crowd pick vs EPA pick' pre-match graphic.
+**Built since this audit:** the pick-the-winner round exists. `trivia.pick()` queues a prediction on the loaded match, the host opens it in the pre-match gap, and reveal resolves it against the posted score (docs/09 lists it done). Still open: the 'crowd pick vs EPA pick' pre-match graphic.
 
 - <https://www.chiefdelphi.com/t/prediction-market-app-by-frc971-public-beta-at-madtown/507971>
 - <https://www.chiefdelphi.com/t/frccast-prediction-markets-for-on-season/514709>

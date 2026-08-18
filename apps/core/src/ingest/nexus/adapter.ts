@@ -116,7 +116,7 @@ export class NexusAdapter {
       this.apply(status);
       // After apply, not before. Resetting first meant an apply that threw
       // counted as failure #1 every single time, so the "loud once, then
-      // quiet" throttle fired every twenty seconds all afternoon — precisely
+      // quiet" throttle fired every twenty seconds all afternoon: precisely
       // the spam it exists to prevent. (apply() no longer throws, but the
       // ordering was wrong on its own terms.)
       this.#failures = 0;
@@ -158,9 +158,9 @@ export class NexusAdapter {
 
     // Each half is caught on its own, and #started latches BEFORE either runs.
     //
-    // This used to be three bare statements. One malformed item — an
+    // This used to be three bare statements. One malformed item (an
     // `announcements: [null]`, or `matches` arriving as an object rather than
-    // an array — threw out of apply() before the last line, so #started stayed
+    // an array) threw out of apply() before the last line, so #started stayed
     // false forever. queue.called is gated on #started, so "teams to the
     // field" never fired again for the rest of the day, while queue.updated
     // kept flowing and everything looked alive.

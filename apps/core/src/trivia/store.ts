@@ -195,7 +195,7 @@ export class TriviaStore {
    * hard reset that also dropped every real player. Under pressure, the
    * longest-idle player who has never locked a SINGLE answer gives up their
    * slot; a rejoin restores everything they had, which is nothing. Idle means
-   * "answered nothing all game", not "scored nothing" — a player who answered
+   * "answered nothing all game", not "scored nothing": a player who answered
    * five questions wrong has been playing, and evicting them mid-question in
    * favor of a joined-and-left squatter would be exactly backwards.
    */
@@ -243,7 +243,7 @@ export class TriviaStore {
     if (this.#phase === 'open') throw new Error('A question is already open.');
     // 'revealed' blocks too: reveal() does not advance the cursor, so opening
     // from here would re-air the question whose correct answer is currently
-    // on the big screen — and a second reveal would pay everyone again. The
+    // on the big screen, and a second reveal would pay everyone again. The
     // host who forgot Next gets told, not obeyed.
     if (this.#phase === 'revealed') {
       throw new Error('The answer is still on the screen. Hit Next first.');
@@ -271,7 +271,7 @@ export class TriviaStore {
     }
     if (this.#answers.has(playerId)) return { locked: true };   // first answer stands
     this.#answers.set(playerId, { choice, at: Date.now() });
-    player.answered++;   // participation, right or wrong — eviction runs on this
+    player.answered++;   // participation, right or wrong: eviction runs on this
     this.#publish();
     return { locked: true };
   }
