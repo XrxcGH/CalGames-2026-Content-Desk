@@ -20,7 +20,7 @@
 
 import { spawn } from 'node:child_process';
 import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { copyFileSync, existsSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -352,7 +352,15 @@ async function main() {
     // video with nothing anywhere reporting it.
     join(ROOT, 'data', 'publish-queue.json'),
   ]);
-  const restoreNow = restoreOnExit(restore);
+  // The event log too, and snapshot() cannot cover it: the desk opens a NEW
+  // file per boot, named for the moment it started, so there is nothing to
+  // back up in advance. The render emits a whole fixture match into it, and
+  // rebuild.ts replays today's logs at the next boot, so a preview run left a
+  // match nobody played in the card ledger, the coverage report and the run of
+  // show. Note what to remove rather than what to keep.
+  const sweepFixtureLog = fixtureLogSweeper(join(ROOT, 'data', 'events'));
+
+  const restoreNow = restoreOnExit(() => { restore(); sweepFixtureLog(); });
 
   // Started with the gate explicitly OFF. That is the documented escape hatch
   // (an empty REMOTE_PIN, see access.ts) and it is the right tool here: this
@@ -417,6 +425,25 @@ async function main() {
  * book — and then the NEXT run snapshotted the polluted file as its baseline,
  * so the pollution became the thing faithfully restored.
  */
+/**
+ * Delete the event logs this render creates, and only those.
+ *
+ * Anything already in the directory belongs to the event and is never touched,
+ * including a log written earlier today by a real desk.
+ */
+function fixtureLogSweeper(dir) {
+  const before = new Set(existsSync(dir) ? readdirSync(dir) : []);
+  return () => {
+    try {
+      for (const name of readdirSync(dir)) {
+        if (!before.has(name) && name.endsWith('.ndjson')) {
+          rmSync(join(dir, name), { force: true });
+        }
+      }
+    } catch { /* no log directory: nothing was written */ }
+  };
+}
+
 function restoreOnExit(restore) {
   let done = false;
   const once = () => {
