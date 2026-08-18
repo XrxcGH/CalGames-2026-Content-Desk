@@ -452,6 +452,12 @@ if (config.audio.enabled) {
     defaultPlaylistUri: config.audio.spotify.playlistUri,
   });
   audio.start();
+  // The cue engine is built before house audio (line ordering it cannot
+  // change without reordering both), which is exactly why attachAudio
+  // exists. It had no caller anywhere, so ctx.audio stayed null and all
+  // three house-audio cues were silent no-ops while the cue panel reported
+  // them armed and firing.
+  cues.attachAudio(audio);
   console.log(music
     ? `[audio] house audio on, ${music.name} configured` +
       (config.audio.spotify.deviceName ? ` for "${config.audio.spotify.deviceName}"` : '')
