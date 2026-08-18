@@ -137,10 +137,37 @@ export class Sponsors {
     return this.#bus.subscribe(ev => this.observe(ev));
   }
 
+  /**
+   * Also the rebuild path: the airing ledger is the proof of performance a
+   * sponsor is shown after the event, and it lived only in memory, so a
+   * restart silently reset every count to zero and the report under-reported
+   * whoever paid most. Rebuilding from the log restores it.
+   *
+   * This cannot double count on the live path. hide() clears #live BEFORE it
+   * emits, so the sponsor.hide that comes back around finds nothing open and
+   * does nothing. During a replay nobody called hide(), #live is whatever the
+   * logged sponsor.show set, and the airing is recorded here instead.
+   */
   observe(ev: DeskEvent): void {
     // A sponsor card must never be on screen when a match starts. The desk
     // manager has enough to do; this gets itself out of the way.
-    if (ev.type === 'match.armed' || ev.type === 'match.start') this.hide();
+    if (ev.type === 'match.armed' || ev.type === 'match.start') { this.hide(); return; }
+
+    if (ev.type === 'sponsor.show') {
+      const id = String((ev.payload as { id?: unknown }).id ?? '').trim();
+      if (id) this.#live = { id, since: ev.ts };
+      return;
+    }
+
+    if (ev.type === 'sponsor.hide' && this.#live) {
+      const live = this.#live;
+      const seconds = Math.max(0, Math.round((ev.ts - live.since) / 1000));
+      // Same one-second floor the live path uses: a card up for under a
+      // second was a mis-tap, and the report is only worth having if a
+      // sponsor could audit it.
+      if (seconds >= 1) this.#airings.push({ id: live.id, at: live.since, seconds });
+      this.#live = null;
+    }
   }
 
   get plan(): SponsorPlan[] { return this.#plan; }

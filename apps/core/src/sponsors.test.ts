@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from './bus.ts';
 import { Sponsors, type SponsorPlan } from './sponsors.ts';
+import type { DeskEvent } from './types.ts';
 
 const PLAN: SponsorPlan[] = [
   { id: 'acme', name: 'Acme Robotics', tier: 'title', line: 'Proud title sponsor' },
@@ -140,4 +141,33 @@ test('a lone sponsor is the one case that repeats, and that is arithmetic', () =
   const s = new Sponsors(new EventBus(), [{ id: 'a', name: 'A' }] as SponsorPlan[]);
   assert.equal(s.next().live!.id, 'a');
   assert.equal(s.next().live!.id, 'a');
+});
+
+test('airing counts survive a restart, and do not double on the live desk', async () => {
+  // The report is the proof of performance a sponsor is shown afterwards, and
+  // it lived only in memory: a restart reset every count to zero, so the
+  // organisation that paid most was the one under-reported.
+  const bus = new EventBus();
+  const live = new Sponsors(bus, PLAN);
+  live.attach();
+  const logged: DeskEvent[] = [];
+  bus.subscribe(ev => { if (ev.type.startsWith('sponsor.')) logged.push(ev); });
+
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+  live.show(PLAN[0]!.id);
+  await wait(1100);
+  live.hide();
+
+  // observe() now watches the same events hide() emits, so the obvious
+  // mistake is counting each airing twice. hide() clears the open card
+  // before it emits, which is what keeps that from happening.
+  assert.equal(live.snapshot.totalAirings, 1, 'the live desk counts it once');
+
+  const rebuilt = new Sponsors(new EventBus(), PLAN);
+  for (const ev of logged) rebuilt.observe(ev);
+  assert.equal(rebuilt.snapshot.totalAirings, 1, 'a restart restores it');
+  assert.deepEqual(
+    rebuilt.snapshot.rows.map(r => r.airings),
+    live.snapshot.rows.map(r => r.airings),
+    'and restores it per sponsor, not just in total');
 });
