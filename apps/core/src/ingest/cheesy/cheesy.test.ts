@@ -708,3 +708,47 @@ test('surrogates come off the field, which is the only place they exist', () => 
   });
   assert.deepEqual(bus.state.match?.surrogates, []);
 });
+
+test('the arena replaying its last result does not reveal a score mid-match', () => {
+  // Cheesy replays every notifier to a display the moment it (re)subscribes.
+  // Every other handler accounts for that; this one did not, so one socket
+  // blip during match 43 cut the program to match 42's final score and let
+  // the auto-queue claim 43's label with a clip ending mid-match.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  const posted = (id: number, r: number, b: number) =>
+    ({ Match: { Id: id }, RedScoreSummary: { Score: r }, BlueScoreSummary: { Score: b } });
+
+  adapter.ingest('matchLoad', { Match: { Id: 42, LongName: 'Qualification 42' } });
+  adapter.ingest('scorePosted', posted(42, 157, 155));
+  adapter.ingest('matchLoad', { Match: { Id: 43, LongName: 'Qualification 43' } });
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod });
+
+  adapter.ingest('scorePosted', posted(42, 157, 155));
+  assert.equal(bus.state.screen, 'match', 'program stays on the live match');
+  assert.equal(bus.state.scorePostedAt, null, 'no reveal is recorded for the running match');
+});
+
+test('a re-committed correction for the loaded match still reveals', () => {
+  // The guard is on identity, not content, precisely so a scorekeeper fixing
+  // a number and committing again reaches air.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', { Match: { Id: 43, LongName: 'Qualification 43' } });
+  adapter.ingest('scorePosted',
+    { Match: { Id: 43 }, RedScoreSummary: { Score: 100 }, BlueScoreSummary: { Score: 90 } });
+  adapter.ingest('scorePosted',
+    { Match: { Id: 43 }, RedScoreSummary: { Score: 105 }, BlueScoreSummary: { Score: 90 } });
+
+  assert.equal(bus.state.screen, 'score');
+  assert.equal(bus.state.score.red.total, 105, 'the corrected number is the one on air');
+});
+
+test('an arena that sends no match id on scorePosted is unaffected', () => {
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', { Match: { Id: 43, LongName: 'Qualification 43' } });
+  adapter.ingest('scorePosted', { RedScoreSummary: { Score: 77 }, BlueScoreSummary: { Score: 70 } });
+  assert.equal(bus.state.screen, 'score');
+});

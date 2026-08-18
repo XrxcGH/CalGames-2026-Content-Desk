@@ -478,6 +478,28 @@ export class CheesyAdapter {
   }
 
   #onScorePosted(msg: ScorePostedMessage): void {
+    // Cheesy replays every notifier to a display the moment it (re)subscribes,
+    // which is how its own audience screen survives a refresh mid-reveal. Every
+    // other handler here already accounts for that: matchLoad checks the id,
+    // realtimeScore diffs, cards dedupe. This one did not, so a socket blip
+    // during match 43 re-delivered match 42's posted score, cut the program to
+    // the score screen mid-match, and let the auto-queue claim 43's label with
+    // a clip that ended mid-match, after which the real post-match queue was
+    // dropped as a duplicate and that match was never uploaded at all.
+    //
+    // Gate on identity, not on content: a desk restarted mid-event has nothing
+    // to compare content against, so the first replay would pass anyway. A
+    // genuine re-commit for the loaded match still gets through, which is what
+    // a scorekeeper correction needs. When either id is unknown (an older arena
+    // build, or a boot where scorePosted lands before matchLoad) behaviour is
+    // unchanged.
+    const posted = msg.Match?.Id === undefined ? null : String(msg.Match.Id);
+    if (posted !== null && this.#loadedMatchId !== null && posted !== this.#loadedMatchId) {
+      console.warn(`[cheesy] ignoring a posted score for match ${posted} while ` +
+        `${this.#loadedMatchId} is loaded: this is the arena replaying its last ` +
+        'result to a reconnecting display, not a new result.');
+      return;
+    }
     this.#emit({
       type: 'match.score_posted',
       payload: {
