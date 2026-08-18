@@ -112,16 +112,26 @@ export class Recorder {
       stderr = (stderr + d).slice(-2000);   // keep the tail, not the whole run
     });
 
-    proc.on('exit', (code, signal) => {
+    // 'exit' and 'error' are alternatives, not a sequence: a spawn that fails
+    // outright (ffmpeg deleted mid-event, a permissions change, a full disk on
+    // the exec path) emits ONLY error, and never exit. With no error listener
+    // the source stayed marked running forever, no retry was ever scheduled,
+    // and the desk reported recording as healthy while nothing was being
+    // written. A false green is the failure vitals.ts exists to catch, so both
+    // events land in the same place and the first one wins.
+    let handled = false;
+    const failed = (why: string): void => {
+      if (handled) return;
+      handled = true;
       st.running = false;
       st.startedAt = null;
       this.#procs.delete(src.id);
       if (this.#stopping) return;
 
-      st.lastError = stderr.trim().split('\n').at(-1) ?? `exit ${code ?? signal}`;
+      st.lastError = why;
       st.restarts++;
 
-      // Backoff caps at 15s: a camera that is genuinely gone shouldn't spin,
+      // Backoff caps at 15s: a camera that is genuinely gone should not spin,
       // but one that is coming back should be picked up quickly.
       const wait = Math.min(15_000, (this.#backoff.get(src.id) ?? 500) * 2);
       this.#backoff.set(src.id, wait);
@@ -129,6 +139,15 @@ export class Recorder {
 
       const t = setTimeout(() => { this.#timers.delete(t); this.#spawn(src); }, wait);
       this.#timers.add(t);
+    };
+
+    proc.on('exit', (code, signal) => {
+      failed(stderr.trim().split(String.fromCharCode(10)).at(-1) ?? `exit ${code ?? signal}`);
+    });
+
+    // Never reaches exit, so it must do its own bookkeeping.
+    proc.on('error', err => {
+      failed(`could not start ffmpeg: ${err.message}`);
     });
 
     // A source that survives a minute is healthy; forget its earlier failures.
