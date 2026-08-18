@@ -909,6 +909,12 @@ function emergPaint(state) {
 
 async function emergency(body) {
   emergError = '';
+  // Which way this request was going, because the honest failure message is
+  // the opposite in each direction. A failed RAISE means nothing reached the
+  // screens. A failed CLEAR means the safety message is STILL UP, and telling
+  // the operator "nothing is on the screens" there sends them away from a
+  // live evacuation notice believing they had already taken it down.
+  const clearing = body.clear === true;
   try {
     const res = await fetch('/api/emergency', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -917,7 +923,9 @@ async function emergency(body) {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
   } catch (err) {
-    emergError = `NOT SENT: ${err.message}. Nothing is on the screens. Try again.`;
+    emergError = clearing
+      ? `NOT CLEARED: ${err.message}. The message is STILL ON every screen. Try again.`
+      : `NOT SENT: ${err.message}. Nothing is on the screens. Try again.`;
   }
   emergPaint(desk.state);
 }
