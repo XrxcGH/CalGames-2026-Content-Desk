@@ -124,7 +124,9 @@ a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 
 <script type="module">
 import { mountNav } from '/shared/nav.js';
-mountNav('talent');
+// No screen takes here. The announcer's tablet sits on a podium and gets
+// knocked; nothing on it should be able to change what is on air.
+mountNav('talent', { screens: false });
 import { connect, startTicker, clockDisplayFor, phaseFor, PHASE_LABEL } from '/shared/desk-client.js';
 import { DEFAULT_THRESHOLDS } from '/shared/rp.js';
 

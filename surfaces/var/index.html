@@ -138,7 +138,10 @@ kbd { font-family: var(--font-num); background: var(--surface-sunken); padding: 
 
 <script type="module">
 import { mountNav } from '/shared/nav.js';
-mountNav('var');
+// No screen takes here. This page is read-only by design and says so in its
+// own banner; the strip's take buttons put a live program change one stray
+// tap away from a referee reviewing a call.
+mountNav('var', { screens: false });
 import { PHASE_LABEL, REBUILT, clockDisplay, connect, phaseAt } from '/shared/desk-client.js';
 
 // The ref says "twelve seconds left", not "second 128", so the big number is
