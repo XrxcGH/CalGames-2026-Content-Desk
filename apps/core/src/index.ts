@@ -141,7 +141,18 @@ if (!tools) {
   const encoder = await chooseEncoder(tools.ffmpeg, arg('encoder') || undefined);
   clips = new ClipStore(tools, encoder, REC_ROOT);
 
-  if (has('record')) {
+  // Recording turns itself on when cameras are configured.
+  //
+  // The documented deployment is "hand out the exe and double-click", and the
+  // launcher has no --record flag to pass, so requiring one meant a desk
+  // deployed exactly as the docs prescribe recorded nothing at all: no
+  // replay, no clips, no match videos, and a publish pipeline with nothing
+  // to publish. Somebody who listed their cameras in config.json has said
+  // what they want. --record still forces it on, which is what
+  // --test-sources needs, and --no-record turns it off for a laptop.
+  const wantRecording = !has('no-record')
+    && (has('record') || validRecordingSources(config.recording.sources).length > 0);
+  if (wantRecording) {
     // `--test-sources` records synthetic color bars so the whole pipeline can
     // be exercised without cameras plugged in.
     const sources: SourceConfig[] = has('test-sources')
@@ -154,7 +165,7 @@ if (!tools) {
       : validRecordingSources(config.recording.sources);
 
     if (!sources.length) {
-      console.warn('[core] --record given with no sources. Pass --test-sources, ' +
+      console.warn('[core] recording asked for but no usable sources. Pass --test-sources, ' +
         'or configure recording.sources in config.json.');
     } else {
       recorder = new Recorder(tools, encoder, {
