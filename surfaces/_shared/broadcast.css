@@ -907,9 +907,15 @@
    differing only in colour and 0.04em of size — which is precisely the
    colour-alone distinction the block comment above rules out, on a stream
    that has been recompressed twice, all weekend, on every carded team. */
+/* A real border, not an inset shadow: the luma key strips every box-shadow
+   in the document (tokens.css), so the outline was the mark's ONLY ink and a
+   carded team showed nothing at all on the keyed feed. box-sizing keeps the
+   outer size identical to the red mark's, so the two still differ in fill and
+   weight rather than in footprint. */
 .cmark--yellow {
   background: none;
-  box-shadow: inset 0 0 0 .13em var(--cg-gold);
+  border: .13em solid var(--cg-gold);
+  box-sizing: border-box;
 }
 /* Filled and larger: a red is heavier than a yellow at a glance, and now the
    two differ in fill as well as in hue. */
