@@ -12,7 +12,7 @@
 
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline/promises';
-import { UPLOAD_SCOPE, MANAGE_SCOPE } from './youtube.ts';
+import { UPLOAD_SCOPE, MANAGE_SCOPE, CAPTION_SCOPE } from './youtube.ts';
 
 const PORT = 8721;
 const REDIRECT = `http://127.0.0.1:${PORT}/callback`;
@@ -42,7 +42,11 @@ authUrl.search = new URLSearchParams({
   client_id: clientId,
   redirect_uri: REDIRECT,
   response_type: 'code',
-  scope: `${UPLOAD_SCOPE} ${MANAGE_SCOPE}`,
+  // force-ssl too, or captions.insert answers 403 for every token this mints
+  // and the caption feature is dead on arrival for anyone who follows the
+  // documented setup. Asking for it here costs one extra line on the consent
+  // screen and is the only moment it can be asked for.
+  scope: `${UPLOAD_SCOPE} ${MANAGE_SCOPE} ${CAPTION_SCOPE}`,
   access_type: 'offline',
   // Without this, Google only returns a refresh token the FIRST time an
   // account authorizes the app. Re-running the helper would silently give
