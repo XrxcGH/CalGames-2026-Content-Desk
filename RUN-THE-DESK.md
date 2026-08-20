@@ -465,6 +465,47 @@ Both go to the program, the side screens and every phone at once. When you send
 a safety message the console goes red so that whoever walks up next can see one
 is live.
 
+### Awards
+
+The Awards section runs the ceremony. The award list is loaded in advance;
+for each one:
+
+1. Pick the award (or type a custom title and definition).
+2. **Type the winner into the winner box now**, while the GA is walking up.
+   It stays hidden — nothing shows it, not even on this console's preview.
+3. Press **Show the award**. The title and definition go up; the GA reads it.
+4. On the GA's cue ("...and the winner is"), press **Reveal the winner**.
+5. Press **Clear** before the next one. Presented awards tick off the list.
+
+The winner genuinely does not exist anywhere the audience can reach until you
+press Reveal, so there is nothing to leak. Do not read the winner aloud to
+anyone standing behind the desk; that is now the only way it can escape early.
+
+### Slides and shout-outs
+
+Slides are the between-matches cards: thank-yous for volunteer crews,
+session announcements, event info. The side screens rotate the whole deck on
+their own all day; **Next slide** steps through the same deck on the program
+when you want one on the big screen.
+
+To add one during the event: pick a kind, type a title and lines (separate
+lines with `|`), press **Add**. It is saved immediately and survives a desk
+restart.
+
+The **shout-out queue** below it fills from `/s/gp` — a phone page where
+anyone in the stands can submit a Gracious Professionalism moment they saw.
+**Nothing from that queue reaches any screen until you press Approve.** Read
+each one; approve the good ones into the deck; reject the rest. Nobody is
+notified of a rejection.
+
+### The event timer
+
+**Field setup 2:00** starts a countdown that takes over the side screens in
+digits readable from the far end of the gym — turn one side-screen TV to face
+the field and the drive teams have their setup clock. It clears itself the
+moment the match starts. The label and minutes boxes run any other countdown:
+meeting starts, doors, end of lunch.
+
 ---
 
 ## Chapter 7 · Cards, replays, and the awkward moments
@@ -715,6 +756,7 @@ Replace `ADDRESS` with what the desk window printed.
 | Pick a screen | `ADDRESS/s/watch` | Hand this to anyone setting up a monitor |
 | When do we play? | `ADDRESS/s/next` | Parents, on their own phones |
 | Trivia play | `ADDRESS/s/quiz` | The crowd's phones |
+| Shout-outs | `ADDRESS/s/gp` | Submit a Gracious Professionalism moment. Moderated at the desk |
 
 ---
 
@@ -763,6 +805,8 @@ Print this. Tick it off.
 - [ ] Sponsors entered
 - [ ] Run of show entered
 - [ ] Walk-up songs in place for playoff introductions
+- [ ] Award titles and definitions entered, in ceremony order
+- [ ] Recognition and info slides entered (setup crew names, session times)
 
 ---
 
