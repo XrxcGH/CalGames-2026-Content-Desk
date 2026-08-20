@@ -237,16 +237,20 @@
      purple); this reads 6.4:1. */
   --st-bad-text:    #FF6B6B;
 }
-:root[data-surface="console"] body {
+/* The lattice paints the ROOT, not the body. The base reset gives html its
+   own background, which blocks body-to-canvas propagation, so a body-level
+   pattern CLIPPED to the content box: it stopped where the page's content
+   stopped and hugged max-width'd bodies on the phone pages. The root always
+   fills the viewport, at any monitor size. */
+:root[data-surface="console"] {
   background-color: var(--page-bg);
-  /* The geometry: two faint chamfer-angled bands and a dot lattice, echoing
-     the broadcast's Gold Sweep skew. Decorative only — at these opacities
-     every text/background pair keeps its computed contrast, and every panel
-     sits on its own solid fill above this. */
   background-image: var(--geo);
   background-size: var(--geo-size);
-  background-attachment: fixed;
+  min-height: 100%;
 }
+/* Transparent on purpose: a solid body would paint the root's lattice back
+   out wherever content happens to be. */
+:root[data-surface="console"] body { background: transparent; }
 /* One shared field treatment so every console input matches. */
 /* The fleet-wide type lift: hint and label text was 13px on every console,
    which reads fine at a desk at home and small on a folding table under gym

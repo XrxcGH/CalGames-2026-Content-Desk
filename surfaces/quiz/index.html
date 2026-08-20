@@ -10,11 +10,16 @@
 /* The audience phone page. Broadcast look, thumb ergonomics: four big answer
    plates, nothing to scroll, nothing to mistap. Polls: a phone that drops
    off the venue wifi for 10s must recover without anyone noticing. */
-html, body { height: 100%; }
-body {
+html {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
   background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-attachment: fixed;
+  min-height: 100%;
+}
+html, body { height: 100%; }
+body {
+  background: transparent;
   color: var(--cg-white);
   display: flex; flex-direction: column;
   padding: 18px 16px calc(18px + env(safe-area-inset-bottom));

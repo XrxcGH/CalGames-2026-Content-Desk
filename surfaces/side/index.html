@@ -7,6 +7,14 @@
 <link rel="stylesheet" href="/shared/fonts.css">
 <link rel="stylesheet" href="/shared/broadcast.css">
 <style>
+html {
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-attachment: fixed;
+  min-height: 100%;
+}
+
 /* Venue side screens: pit TVs and the queueing area, read from 20-60ft.
    The one surface that is ONLY ever seen in the room, so it carries its own
    enlarged type scale locally (72px floor, docs/08-motion.md) now that the
@@ -26,9 +34,7 @@
   --qr-zone: 500px;
 }
 #stage {
-  background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background: transparent;
 }
 
 .panel-screen { position: absolute; inset: 0; display: none; padding: var(--safe-y) var(--safe-x); }

@@ -11,7 +11,7 @@
    Keyboard-first. The producer must be able to run the whole show from here
    with every integration dead. */
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1920px; margin: 0 auto; padding: 20px 24px 64px; }
+.wrap { margin: 0 auto; padding: 20px 24px 64px; }
 /* The jump strip: the page is twenty-odd sections tall, and mid-show nobody
    scroll-hunts. Sticky, one row, every anchor a section that matters under
    pressure. Safety is styled as what it is. */
@@ -39,13 +39,12 @@ h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
   gap: 20px; align-items: start; }
 /* Wide monitors get their whitespace back: the show column flows into two
    real columns, sections unbroken. Small laptops collapse to one. */
-@media (min-width: 1460px) {
-  .grid > div:first-child { columns: 2; column-gap: 20px; }
+/* Column WIDTH, not column count: multicol fits as many 460px show columns
+   as the monitor actually has — one on a laptop, two at 1600, three at 2400,
+   four on an ultrawide. No breakpoints to outgrow, no dead side margins. */
+@media (min-width: 1150px) {
+  .grid > div:first-child { columns: 460px; column-gap: 20px; }
   .grid > div:first-child > section { break-inside: avoid; }
-}
-/* Ultrawide and 4K: three show columns. The right rail stays a rail. */
-@media (min-width: 2100px) {
-  .grid > div:first-child { columns: 3; }
 }
 @media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
 /* Collapsible groups for the tools that are not the show: field-down kit and
@@ -178,8 +177,10 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 #covGaps .ok { color: var(--st-ok); font-size: 13px; }
 #covSum[data-bad] { color: var(--st-bad-text); }
 /* ---- on-camera panel ---- */
-.panel-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 720px) { .panel-cols { grid-template-columns: 1fr; } }
+/* auto-fit, because this section now lives inside a multicol whose column is
+   ~460px: a hard 1fr/1fr split squeezed both halves into 230px ribbons. Below
+   ~280px per half it stacks instead. */
+.panel-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .pbook, .ponair { background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 10px;
   padding: 8px; min-height: 96px; max-height: 260px; overflow-y: auto; }
 /* Rows WITH a leading checkbox (the profile book). Rows without one (slides,

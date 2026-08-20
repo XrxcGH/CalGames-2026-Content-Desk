@@ -19,6 +19,13 @@
  * a smart TV browser or an ancient laptop, and anything clever is a thing that
  * can fail in a room nobody is watching.
  */
+html {
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-attachment: fixed;
+  min-height: 100%;
+}
 html, body {
   margin: 0; height: 100%; overflow: hidden;
   background: #000; color: var(--cg-white);
@@ -53,9 +60,7 @@ html, body {
    good pit screen, and better than a black rectangle. */
 #backdrop {
   position: absolute; inset: 0;
-  background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background: transparent;
 }
 
 /* Nothing is clickable, so the cursor is noise on a permanent display. */

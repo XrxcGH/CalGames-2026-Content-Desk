@@ -13,11 +13,16 @@
    desk. Everything typed here stays server-side until the desk presses
    Reveal during the ceremony; the audience feeds never see it, and the desk
    crew cannot see it either until the JA hands this code over. */
-html, body { min-height: 100%; }
-body {
+html {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
   background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-attachment: fixed;
+  min-height: 100%;
+}
+html, body { min-height: 100%; }
+body {
+  background: transparent;
   color: var(--cg-white);
   margin: 0 auto; max-width: 680px;
   padding: 22px 16px calc(24px + env(safe-area-inset-bottom));
