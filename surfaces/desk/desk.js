@@ -1530,3 +1530,174 @@ $('tmClear').onclick = async () => {
     $('tmHint').textContent = `Still running: ${err.message}. Press Clear again.`;
   }
 };
+
+
+// ---- event setup: the content half of config, edited at the desk ------------
+// GET/POST /api/setup, desk-gated. The server sanitizes and persists to
+// data/event-content.json and overlays the live config; content.ts's
+// allowlist is what keeps credentials out of reach of this panel.
+let setupDraft = null;
+
+async function loadSetup() {
+  try {
+    const res = await fetch('/api/setup');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    setupDraft = {
+      sponsors: (s.sponsors.list ?? []).map(x => ({ ...x })),
+      rundown: (s.rundown.segments ?? []).map(x => ({ ...x })),
+      services: (s.accessibility.services ?? []).map(x => ({ ...x })),
+    };
+    $('setEvName').value = s.event.name ?? '';
+    $('setEvYear').value = s.event.year ?? '';
+    $('setEvKey').value = s.event.key ?? '';
+    $('setEvUrl').value = s.event.resultsUrl ?? '';
+    $('setRpFuel').value = s.game.rpEnergizedFuel ?? '';
+    $('setRpSuper').value = s.game.rpSuperchargedFuel ?? '';
+    $('setRpTower').value = s.game.rpTraversalTower ?? '';
+    $('setFieldUrl').value = s.kiosk.fieldStreamUrl ?? '';
+    $('setWebcast').value = s.stream.webcastUrl ?? '';
+    $('setAxAsk').value = s.accessibility.ask ?? '';
+    paintSetupRows();
+  } catch (err) {
+    $('setEvMsg').textContent = `Setup could not load: ${err.message}`;
+  }
+}
+
+async function saveSetup(section, value, msgId, okText) {
+  try {
+    const res = await fetch('/api/setup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section, value }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $(msgId).textContent = okText;
+    await loadSetup();          // repaint from the sanitized truth
+    return true;
+  } catch (err) {
+    $(msgId).textContent = err.message;
+    return false;
+  }
+}
+
+/**
+ * One editor for all three lists. Each item renders as a sunken chip of
+ * inputs bound straight to the draft object; Save posts the whole draft and
+ * repaints from what the server actually stored.
+ */
+function paintRowEditor(box, items, fields, noun) {
+  box.replaceChildren(...items.map((item, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'setrow';
+    const line = document.createElement('div');
+    line.className = 'row';
+    for (const f of fields) {
+      let input;
+      if (f.options) {
+        input = document.createElement('select');
+        for (const opt of f.options) {
+          const o = document.createElement('option');
+          o.value = opt; o.textContent = opt;
+          input.append(o);
+        }
+        input.value = f.options.includes(item[f.key]) ? item[f.key] : f.options[0];
+        input.onchange = () => { item[f.key] = input.value; };
+      } else {
+        input = document.createElement('input');
+        if (f.num) { input.type = 'number'; input.min = '0'; }
+        input.placeholder = f.ph ?? '';
+        input.value = item[f.key] ?? '';
+        input.oninput = () => {
+          item[f.key] = f.num ? (Number(input.value) || 0) : input.value;
+        };
+      }
+      input.setAttribute('aria-label', `${noun} ${i + 1}: ${f.name}`);
+      input.style.flex = f.flex ?? '1 1 110px';
+      line.append(input);
+    }
+
+    const up = document.createElement('button');
+    up.className = 'btn';
+    up.textContent = 'Up';
+    up.disabled = i === 0;
+    up.setAttribute('aria-label', `Move ${noun} ${i + 1} up`);
+    up.onclick = () => {
+      [items[i - 1], items[i]] = [items[i], items[i - 1]];
+      paintSetupRows();
+    };
+    const kill = document.createElement('button');
+    kill.className = 'btn kill';
+    kill.textContent = 'Remove';
+    kill.setAttribute('aria-label', `Remove ${noun} ${i + 1}`);
+    kill.onclick = () => { items.splice(i, 1); paintSetupRows(); };
+    line.append(up, kill);
+    chip.append(line);
+    return chip;
+  }));
+  if (!items.length) {
+    box.innerHTML = `<p class="hint" style="padding:4px 0 8px">None yet. Add the first ${noun} below.</p>`;
+  }
+}
+
+function paintSetupRows() {
+  if (!setupDraft) return;
+  paintRowEditor($('setSpRows'), setupDraft.sponsors, [
+    { key: 'name', name: 'name', ph: 'Sponsor name', flex: '2 1 150px' },
+    { key: 'tier', name: 'tier', options: ['supporting', 'major', 'title'] },
+    { key: 'line', name: 'announcer line', ph: 'One line the announcer can read', flex: '3 1 190px' },
+    { key: 'logo', name: 'logo path', ph: '/media/sponsors/acme.png', flex: '2 1 150px' },
+  ], 'sponsor');
+  paintRowEditor($('setRdRows'), setupDraft.rundown, [
+    { key: 'label', name: 'label', ph: 'Quals block 1', flex: '2 1 130px' },
+    { key: 'kind', name: 'kind', options: ['matches', 'break', 'ceremony', 'selection', 'awards', 'gap'] },
+    { key: 'matches', name: 'match count', ph: 'Matches', num: true, flex: '0 1 86px' },
+    { key: 'minutes', name: 'minutes', ph: 'Min', num: true, flex: '0 1 70px' },
+    { key: 'audience', name: 'audience label', ph: 'Shown on the countdown', flex: '2 1 160px' },
+  ], 'segment');
+  paintRowEditor($('setAxRows'), setupDraft.services, [
+    { key: 'label', name: 'service', ph: 'Quiet room', flex: '1 1 130px' },
+    { key: 'detail', name: 'where and when', ph: 'Room D-4, all day', flex: '2 1 190px' },
+  ], 'service');
+}
+
+$('setSpAdd').onclick = () => { setupDraft?.sponsors.push({ name: '' }); paintSetupRows(); };
+$('setRdAdd').onclick = () => { setupDraft?.rundown.push({ label: '', kind: 'break' }); paintSetupRows(); };
+$('setAxAdd').onclick = () => { setupDraft?.services.push({ label: '', detail: '' }); paintSetupRows(); };
+
+$('setEvSave').onclick = () => void saveSetup('event', {
+  name: $('setEvName').value, year: Number($('setEvYear').value) || undefined,
+  key: $('setEvKey').value, resultsUrl: $('setEvUrl').value,
+}, 'setEvMsg', 'Saved. Stream titles and descriptions use it from now on.');
+
+$('setRpSave').onclick = () => void saveSetup('game', {
+  rpEnergizedFuel: Number($('setRpFuel').value),
+  rpSuperchargedFuel: Number($('setRpSuper').value),
+  rpTraversalTower: Number($('setRpTower').value),
+}, 'setRpMsg', 'Saved. The badges follow the new numbers now.');
+
+$('setScrSave').onclick = async () => {
+  const ok = await saveSetup('kiosk', { fieldStreamUrl: $('setFieldUrl').value },
+    'setScrMsg', 'Saved.');
+  if (ok) {
+    await saveSetup('stream', { webcastUrl: $('setWebcast').value },
+      'setScrMsg', 'Saved. Pit monitors pick the feed up on their next reload.');
+  }
+};
+
+$('setSpSave').onclick = () => void saveSetup('sponsors', { list: setupDraft?.sponsors ?? [] },
+  'setSpMsg', 'Saved. The rotation restarts from the top of the list.');
+
+$('setRdSave').onclick = () => void saveSetup('rundown', { segments: setupDraft?.rundown ?? [] },
+  'setRdMsg', 'Saved. Segments that kept their label keep their progress.');
+
+$('setAxSave').onclick = () => void saveSetup('accessibility', {
+  services: setupDraft?.services ?? [], ask: $('setAxAsk').value,
+}, 'setAxMsg', 'Saved. The screens update on their next rotation.');
+
+// Loaded when the group is first opened, not at boot: this panel is a
+// before-doors tool and the desk's first paint should spend its time on the
+// show surfaces.
+$('eventSetup').addEventListener('toggle', () => {
+  if ($('eventSetup').open && !setupDraft) void loadSetup();
+});

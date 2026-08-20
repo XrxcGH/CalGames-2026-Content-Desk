@@ -25,6 +25,11 @@ data/awards-staged.json.tmp
 data/slides.json
 data/slides.json.tmp
 
+# Event content edited at the desk: awards, sponsors, run of show, and the
+# rest of the content half of config.json. Event-specific by definition.
+data/event-content.json
+data/event-content.json.tmp
+
 # The on-camera profile book. Real people's names, filled in at the event and
 # specific to it; a fresh clone starts empty and fills itself again.
 data/profiles.json

@@ -366,9 +366,10 @@ whatever the display does to them, it does to the score bar.
 ### The field feed behind the program screen
 
 `/s/watch?screen=program` shows the overlay on top of a live picture of the
-field. That picture comes from a setting the content desk lead fills in
-(`kiosk.fieldStreamUrl`). If it is blank you get the overlay on the CalGames
-backdrop instead, which looks intentional and is fine.
+field. That picture comes from a setting the content desk lead fills in on
+the desk console: **Event setup, then Screens and stream, then Field feed
+URL**. If it is blank you get the overlay on the CalGames backdrop instead,
+which looks intentional and is fine.
 
 ---
 
@@ -486,7 +487,10 @@ Awards involve a second code, and it is not yours.
 
 The **Judge Advisor holds the awards code**. All day, as judging wraps up, the
 JA loads each award's winner from their own page (`ADDRESS/s/awards`, which
-takes only their code, not the desk PIN). While that is happening, your
+takes only their code, not the desk PIN). That page is also where the award
+list itself gets built: **Add an award** for each judged award in ceremony
+order, **Edit title or description** to fix wording, **Remove from the
+ceremony** if plans change. No file editing, ever. While that is happening, your
 Awards section shows a lock: you can see the award titles and nothing else.
 That is deliberate. Nobody at the desk can see, type, or reveal a winner, so
 nobody at the desk can leak one, even by accident, even with a camera pointed
@@ -534,6 +538,37 @@ digits readable from the far end of the gym — turn one side-screen TV to face
 the field and the drive teams have their setup clock. It clears itself the
 moment the match starts. The label and minutes boxes run any other countdown:
 meeting starts, doors, end of lunch.
+
+### Event setup: names, sponsors, and the run of show
+
+At the bottom of the right column, folded shut, is **Event setup**. It is a
+before-doors tool: everything about the event that used to require editing a
+file now lives here, saves the moment you press the section's Save button,
+takes effect immediately, and survives a restart.
+
+- **Event**: the event name and year (stream titles use them), the TBA event
+  key, and the results link that goes in video descriptions.
+- **Bonus RP thresholds**: the offseason committee's numbers. Saving moves
+  the badges and the talent view together, immediately.
+- **Screens and stream**: the field feed URL behind the pit monitors, and
+  the webcast URL registered on TBA.
+- **Sponsor list**: name, tier, one line the announcer can read, and an
+  optional logo path. Tier decides how often a card comes round, never how
+  big it is drawn.
+- **Run of show editor**: the day as a list. A matches block takes a match
+  COUNT and times itself from measured pace; everything else takes minutes.
+  Editing mid-day keeps the progress of every segment that kept its label.
+- **Accessibility services**: each line is something a person in the
+  building can act on, plus who to ask. Never list a service the event does
+  not have.
+
+Two things stay in `config.json` on the desk machine on purpose: credentials
+(API tokens, the PINs) and machine wiring (the camera list). If a screen in
+this group asks for something you do not have, that is a question for
+whoever set the desk up, not a file for you to edit.
+
+The awards list is the one content list NOT here: it belongs to the Judge
+Advisor's own page, behind the awards code (chapter 6, Awards).
 
 ---
 
@@ -836,10 +871,11 @@ Print this. Tick it off.
 **Content**
 
 - [ ] Robot photos uploaded (`/s/media`)
-- [ ] Sponsors entered
-- [ ] Run of show entered
+- [ ] Sponsors entered (desk, Event setup)
+- [ ] Run of show entered (desk, Event setup)
+- [ ] Event name, year, and TBA key checked (desk, Event setup)
 - [ ] Walk-up songs in place for playoff introductions
-- [ ] Award titles and definitions entered, in ceremony order
+- [ ] Award titles and definitions entered, in ceremony order (the JA's page, `/s/awards`)
 - [ ] Awards code set and given to the Judge Advisor (and to nobody else);
       JA shown their page (`/s/awards`)
 - [ ] Recognition and info slides entered (setup crew names, session times)

@@ -33,8 +33,9 @@ admin password attached. A private copy under the user's own profile needs no el
 with nothing already installed, and can be deleted afterwards by deleting one folder. If the
 machine already has Node 22.6 or newer, the launcher uses that instead and installs nothing.
 
-**Your files are never overwritten.** `config.json`, `data/trivia.json`, the event logs, and the
-robot photo library all survive a re-run. The operator edits the question bank from the trivia
+**Your files are never overwritten.** `config.json`, `data/trivia.json`, `data/event-content.json`
+(the desk's own Event setup edits), the event logs, and the robot photo library all survive a
+re-run. The operator edits the question bank from the trivia
 console during the event, and shipping a fresh copy over the top of that would quietly delete an
 afternoon of somebody's work. Everything else is replaced, so re-running the launcher is also how
 you update the desk.
@@ -111,7 +112,8 @@ front of it, so a monitor needs nothing but a browser in full screen.
 | Trivia | `/s/watch?screen=trivia` | The crowd game, showing the join code between questions |
 | When do we play? | `/s/watch?screen=next` | Per-team schedule with drift-adjusted start times |
 
-The field feed behind the program overlay comes from `kiosk.fieldStreamUrl` in `config.json`. It
+The field feed behind the program overlay comes from the desk's Event setup group (or its seed,
+`kiosk.fieldStreamUrl` in `config.json`). It
 takes a YouTube live URL, an MJPEG stream off a capture box or IP camera, or any video URL a
 browser plays on its own. Leave it blank and the overlay draws on the CalGames backdrop instead of
 a black rectangle, which is the right failure mode for a monitor nobody is watching yet.

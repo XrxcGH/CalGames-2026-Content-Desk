@@ -34,6 +34,7 @@ import type { CardLedger } from './cards.ts';
 import type { Rundown } from './rundown.ts';
 import type { Sponsors } from './sponsors.ts';
 import type { Awards } from './awards.ts';
+import type { EventContent } from './content.ts';
 import type { Slides } from './slides.ts';
 import { CONTROL_ACTIONS, controlGroups } from './control-map.ts';
 import type { Vitals } from './vitals.ts';
@@ -131,6 +132,8 @@ export interface ServerOpts {
   slides?: Slides | null;
   /** LAN-reachable base URL, e.g. "http://10.0.100.23:8720", for QR codes. */
   lanBase?: string | null;
+  /** Desk-editable event content, overlaid on config.json. */
+  content?: EventContent | null;
 }
 
 export function startServer(opts: ServerOpts) {
@@ -139,7 +142,7 @@ export function startServer(opts: ServerOpts) {
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
-          lanBase = null } = opts;
+          lanBase = null, content = null } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -880,6 +883,13 @@ export function startServer(opts: ServerOpts) {
               return json(res, 200, { ok: true });
             case 'unstage':
               return json(res, 200, { removed: await awards.unstage(String(body.id ?? '')) });
+            // The list itself is the JA's too: adding an award, fixing a
+            // description, retiring one. No config.json required.
+            case 'define':
+              return json(res, 200, { award: awards.define(body) });
+            case 'remove':
+              await awards.remove(String(body.id ?? ''));
+              return json(res, 200, { ok: true });
             default: return json(res, 404, { error: 'Unknown award action.' });
           }
         } catch (err) {
@@ -1032,6 +1042,65 @@ export function startServer(opts: ServerOpts) {
             case 'reset':   return json(res, 200, rundown.reset(String(body.id ?? '')));
             default: return json(res, 404, { error: 'Unknown rundown action.' });
           }
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // ---- event setup: the content half of config, editable at the desk ----
+      // Both verbs are desk-gated (needsAuth allowlists nothing under
+      // /api/setup). The allowlist of editable sections lives in content.ts;
+      // credentials and machine wiring are not in it and 422 out by name.
+      if (path === '/api/setup' && req.method !== 'POST') {
+        if (!config || !content) return json(res, 503, { error: 'Setup is not available.' });
+        return json(res, 200, {
+          event: config.event,
+          game: config.game,
+          kiosk: config.kiosk,
+          stream: config.stream,
+          sponsors: config.sponsors,
+          rundown: config.rundown,
+          accessibility: config.accessibility,
+          overridden: content.overridden,
+        });
+      }
+
+      if (path === '/api/setup' && req.method === 'POST') {
+        if (!config || !content) return json(res, 503, { error: 'Setup is not available.' });
+        try {
+          const body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8')) as
+            { section?: string; value?: unknown };
+          const section = String(body.section ?? '');
+          const stored = await content.set(section, body.value, config);
+          // The store changed the config object; now the live modules and the
+          // bus have to hear about it, per section.
+          switch (section) {
+            case 'sponsors':
+              sponsors?.setPlan(config.sponsors.list);
+              break;
+            case 'rundown':
+              rundown?.setPlan(config.rundown.segments);
+              break;
+            case 'game':
+              // Same event the boot path emits, so the reducer, the badges and
+              // the talent view move together and a replayed log carries the
+              // thresholds the matches were actually scored against.
+              bus.emit({
+                type: 'game.thresholds', source: 'manual',
+                payload: {
+                  energizedFuel: config.game.rpEnergizedFuel,
+                  superchargedFuel: config.game.rpSuperchargedFuel,
+                  traversalTower: config.game.rpTraversalTower,
+                },
+              });
+              break;
+            case 'accessibility':
+              bus.emit({ type: 'event.accessibility', source: 'manual', payload: config.accessibility });
+              break;
+            // event, kiosk and stream are read from config at the moment of
+            // use, so the in-place overlay already took care of them.
+          }
+          return json(res, 200, { ok: true, section, value: stored });
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }

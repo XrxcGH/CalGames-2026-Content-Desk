@@ -1,5 +1,6 @@
 {
   "//": "Copy to config.json and fill in. config.json is gitignored, so never commit it.",
+  "//content": "The content sections (event, game, kiosk, stream, sponsors, awards.list, rundown, accessibility) only SEED the first run: the desk's Event setup group and the Judge Advisor's awards page edit them live, and those edits land in data/event-content.json, which overrides this file from then on. Credentials and the camera list live only here.",
 
   "event": {
     "//key": "TBA event key. CalGames 2026 is expected to be 2026cacg. Confirm on thebluealliance.com before the event.",

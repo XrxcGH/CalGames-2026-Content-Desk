@@ -235,3 +235,57 @@ test('an unknown id is refused by name', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('the JA can define, correct, and retire awards without config.json', async () => {
+  // The list used to be config-only, which meant "add an award" required
+  // finding the right laptop and editing JSON by hand mid-event. define() and
+  // remove() are the JA page's editor; onListChanged is how the caller
+  // persists the result.
+  const dir = await scratch();
+  try {
+    const awards = new Awards(dir, new EventBus(), LIST);
+    let saved: unknown = null;
+    awards.onListChanged = list => { saved = list; };
+
+    const made = awards.define({ title: "Judges' Special Award", description: 'Invented on Sunday.' });
+    assert.equal(made.id, 'judges-special-award', 'ids are minted from the title');
+    assert.equal(awards.definitions.length, 3);
+    assert.ok(Array.isArray(saved) && (saved as unknown[]).length === 3,
+      'every change hands the full list to the persistence hook');
+
+    // A typo fix keeps the id (staged winners and the checklist key off it).
+    awards.define({ id: 'judges-special-award', title: "Judges' Special Award",
+      description: 'Decided by the judging panel on the day.' });
+    assert.equal(awards.definitions.length, 3);
+    assert.match(awards.definitions[2]!.description, /judging panel/);
+
+    await awards.remove('judges-special-award');
+    assert.equal(awards.definitions.length, 2);
+
+    assert.throws(() => awards.define({ id: 'nope', title: 'X' }), /no award "nope"/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a presented award cannot be removed, and removing one discards its staged winner', async () => {
+  const dir = await scratch();
+  try {
+    const bus = new EventBus();
+    const awards = new Awards(dir, bus, LIST);
+    awards.attach();                      // the presented ledger fills off the bus
+    awards.show({ id: 'directors', winner: 'The Funky Monkeys' });
+    awards.reveal();
+    await assert.rejects(() => awards.remove('directors'), /has been presented/);
+
+    // Retiring an award with a winner already staged takes the secret with it.
+    await awards.stage('spirit', { winner: 'The Quiet Ones' });
+    await awards.remove('spirit');
+    const reopened = new Awards(dir, new EventBus(), LIST);
+    await reopened.load();
+    assert.equal(reopened.snapshot(true).list.find(a => a.id === 'spirit')?.staged ?? null, null,
+      'the staged winner must not survive the award it belonged to');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

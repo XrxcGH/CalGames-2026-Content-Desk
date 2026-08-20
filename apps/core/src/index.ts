@@ -29,6 +29,7 @@ import { loadRefreshToken, saveRefreshToken } from './audio/token-store.ts';
 import { TriviaStore } from './trivia/store.ts';
 import { DEFAULT_QUESTIONS } from './trivia/questions.ts';
 import { loadConfig, publishReadiness } from './config.ts';
+import { EventContent } from './content.ts';
 import { arcadeLabel } from './publish/naming.ts';
 import { PublishQueue } from './publish/queue.ts';
 import { chooseEncoder, findFfmpeg } from './ffmpeg.ts';
@@ -127,6 +128,14 @@ attachPace(bus);
 // Loaded here rather than with the publish section it mostly serves, because
 // the recorder's camera list lives in config.json too.
 const config = await loadConfig(ROOT);
+
+// Event content edited at the desk overlays config.json before anything reads
+// it: the award list, sponsors, the run of show and friends are editable from
+// the desk now, and data/event-content.json is where those edits live.
+// config.json still seeds the first run and keeps the credentials.
+const content = new EventContent(ROOT);
+await content.load();
+content.apply(config);
 
 // ---- recording ------------------------------------------------------------
 // Optional. Everything else runs without ffmpeg; only recording and replay
@@ -532,6 +541,12 @@ if (config.rundown.segments.length) {
 const awards = new Awards(ROOT, bus, config.awards.list);
 awards.attach();
 await awards.load();
+// The JA edits the award list from their own page; every change lands in
+// data/event-content.json so it survives a restart without touching config.
+awards.onListChanged = list => {
+  void content.set('awards', { list }, config)
+    .catch(err => console.warn('[awards] list could not be saved:', (err as Error).message));
+};
 
 // Recognition and info slides, plus the moderated shout-out queue. Additions
 // typed at the event persist to data/slides.json.
@@ -645,7 +660,7 @@ if (config.publish.autoQueueArcade && !has('demo') && !has('replay')) {
 const server = startServer({
   bus, media, root: ROOT, port, host, recorder, clips, publish, config, cheesy, cues, obs,
   arcade, trivia, audio, audioClips, profiles, coverage, vitals, cardLedger,
-  rundown, sponsors, awards, slides, lanBase,
+  rundown, sponsors, awards, slides, lanBase, content,
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).

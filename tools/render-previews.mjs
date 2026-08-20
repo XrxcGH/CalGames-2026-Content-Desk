@@ -410,6 +410,10 @@ async function main() {
     join(ROOT, 'data', 'publish-queue.json'),
     // The slide deck and shout-out queue: the render adds fixtures to both.
     join(ROOT, 'data', 'slides.json'),
+    // Desk-edited event content: nothing in the render edits it today, but
+    // the fixture desk and the operator's desk share this file, and the
+    // snapshot costs nothing.
+    join(ROOT, 'data', 'event-content.json'),
   ]);
   // The event log too, and snapshot() cannot cover it: the desk opens a NEW
   // file per boot, named for the moment it started, so there is nothing to

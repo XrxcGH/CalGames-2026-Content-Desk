@@ -7,12 +7,13 @@
 <link rel="stylesheet" href="/theme/tokens.css">
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
-/* The Judge Advisor's own page: load each award's winner as judging wraps up.
-   Deliberately NOT part of the desk console, and deliberately not gated by
-   the desk PIN — the JA gets one URL and one code and never has to learn the
-   desk. Everything typed here stays server-side until the desk presses
-   Reveal during the ceremony; the audience feeds never see it, and the desk
-   crew cannot see it either until the JA hands this code over. */
+/* The Judge Advisor's own page: build the ceremony list and load each award's
+   winner as judging wraps up. Deliberately NOT part of the desk console, and
+   deliberately not gated by the desk PIN — the JA gets one URL and one code
+   and never has to learn the desk. Everything typed here stays server-side
+   until the desk presses Reveal during the ceremony; the audience feeds never
+   see it, and the desk crew cannot see it either until the JA hands this code
+   over. */
 html {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
@@ -42,12 +43,13 @@ h1 { margin: 0 0 4px; text-align: center;
 
 label { display: block; font-family: var(--font-cond); font-weight: 600; font-size: 14px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--cg-white-dim); margin: 10px 0 6px; }
-input { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px;
+input, textarea { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px;
   font-family: var(--font-display); background: var(--cg-purple-lo); color: var(--cg-white);
   border: 2px solid var(--cg-purple-hi); }
-input::placeholder { color: var(--cg-white-dim); }
-input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
-  border-color: var(--cg-gold); }
+textarea { min-height: 74px; resize: vertical; font-size: 16px; line-height: 1.5; }
+input::placeholder, textarea::placeholder { color: var(--cg-white-dim); }
+input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-ring);
+  outline-offset: 2px; border-color: var(--cg-gold); }
 
 .btn-go { padding: 13px 22px; border: 0; cursor: pointer;
   background: var(--cg-gold); color: var(--cg-black);
@@ -68,7 +70,7 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 .ok-line { color: var(--st-ok); font-size: 15px; margin: 10px 0 0; }
 
 /* One card per award. */
-.aw-row h2 { margin: 0; font-size: 20px; font-weight: 800;
+.aw-row h2, .add-h { margin: 0; font-size: 20px; font-weight: 800;
   font-variation-settings: "wdth" var(--wdth-display); text-transform: uppercase; }
 .aw-desc { margin: 4px 0 10px; font-size: 14px; line-height: 1.5; color: var(--cg-white-dim); }
 .aw-state { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
@@ -80,6 +82,7 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 .row .grow { flex: 3 1 220px; }
 .row .team { flex: 0 1 110px; }
 .row .act { flex: 0 0 auto; }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -87,9 +90,10 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 
   <div class="card" id="gate">
     <p class="sub" style="margin-bottom:10px">This page is for the Judge Advisor.
-      Load each award's winner here as judging wraps up. Winners stay locked
-      away from every screen, every feed, and the desk crew until the ceremony —
-      hand the code to the desk right before playoffs, and they run the reveal.</p>
+      Build the ceremony list and load each award's winner here as judging wraps
+      up. Winners stay locked away from every screen, every feed, and the desk
+      crew until the ceremony. Hand the code to the desk right before playoffs,
+      and they run the reveal.</p>
     <label for="code">Awards code</label>
     <form id="unlockForm">
       <div class="row">
@@ -130,26 +134,56 @@ function show(unlocked) {
   $('list').hidden = !unlocked;
 }
 
+// ---- tiny element helpers ---------------------------------------------------
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+const labelEl = text => el('label', '', text);
+const textIn = (value, placeholder, label) => {
+  const n = document.createElement('input');
+  n.value = value; n.placeholder = placeholder;
+  if (label) n.setAttribute('aria-label', label);
+  return n;
+};
+const areaIn = (value, placeholder, label) => {
+  const n = document.createElement('textarea');
+  n.value = value; n.placeholder = placeholder;
+  if (label) n.setAttribute('aria-label', label);
+  return n;
+};
+const goBtn = text => { const b = el('button', 'btn-go', text); b.type = 'button'; return b; };
+const quietBtn = text => { const b = el('button', 'btn-quiet', text); b.type = 'button'; return b; };
+const sayErr = (note, err) => { note.className = 'err'; note.textContent = err.message; };
+
 function paint(snap) {
   const box = $('list');
-  if (!snap.list.length) {
-    box.innerHTML = '<div class="card"><p class="sub" style="margin:0">No awards are ' +
-      'configured yet. The content desk lead adds them to config.json; custom awards ' +
-      'typed at the desk during the ceremony work regardless.</p></div>';
-    return;
-  }
-  box.replaceChildren(...snap.list.map(a => {
-    const card = document.createElement('div');
-    card.className = 'card aw-row';
+  const cards = snap.list.length
+    ? snap.list.map(a => awardCard(a))
+    : [emptyCard()];
+  box.replaceChildren(...cards, addCard());
+}
 
-    const h = document.createElement('h2');
-    h.textContent = a.title;
-    const desc = document.createElement('p');
-    desc.className = 'aw-desc';
-    desc.textContent = a.description || '';
+function emptyCard() {
+  const card = el('div', 'card');
+  card.append(el('p', 'sub', 'No awards yet. Add the ceremony list below, in the ' +
+    'order it will be presented. A custom award typed at the desk on the day works too.'));
+  card.querySelector('p').style.margin = '0';
+  return card;
+}
 
-    const state = document.createElement('div');
-    state.className = 'aw-state';
+function awardCard(a) {
+  const card = el('div', 'card aw-row');
+  const note = el('p');
+  note.setAttribute('role', 'status');
+
+  const paintView = () => {
+    card.replaceChildren();
+    card.append(el('h2', '', a.title), el('p', 'aw-desc', a.description || ''));
+
+    const state = el('div', 'aw-state');
     if (a.presented) {
       state.dataset.v = 'presented';
       state.textContent = `Presented · ${a.presented.winner}`;
@@ -161,26 +195,18 @@ function paint(snap) {
       state.dataset.v = 'empty';
       state.textContent = 'No winner loaded yet';
     }
-    card.append(h, desc, state);
+    card.append(state);
 
     if (!a.presented) {
-      const row = document.createElement('div');
-      row.className = 'row';
-      const winner = document.createElement('input');
+      const row = el('div', 'row');
+      const winner = textIn(a.staged?.winner ?? '',
+        'Winner (team or person, exactly as announced)', `Winner of ${a.title}`);
       winner.className = 'grow';
-      winner.value = a.staged?.winner ?? '';
-      winner.placeholder = 'Winner (team or person, exactly as announced)';
-      winner.setAttribute('aria-label', `Winner of ${a.title}`);
-      const team = document.createElement('input');
+      const team = textIn(a.staged?.team ?? '', 'Team #', `Winning team number for ${a.title}`);
       team.className = 'team';
       team.inputMode = 'numeric';
-      team.value = a.staged?.team ?? '';
-      team.placeholder = 'Team #';
-      team.setAttribute('aria-label', `Winning team number for ${a.title}`);
-      const save = document.createElement('button');
-      save.className = 'btn-go act';
-      save.type = 'button';
-      save.textContent = a.staged ? 'Replace' : 'Load winner';
+      const save = goBtn(a.staged ? 'Replace' : 'Load winner');
+      save.classList.add('act');
       save.onclick = async () => {
         try {
           await api({ action: 'stage', id: a.id, winner: winner.value.trim(),
@@ -188,31 +214,83 @@ function paint(snap) {
           note.className = 'ok-line';
           note.textContent = 'Loaded. Re-read it above: what is loaded is what gets revealed.';
           await load();
-        } catch (err) {
-          note.className = 'err';
-          note.textContent = err.message;
-        }
+        } catch (err) { sayErr(note, err); }
       };
       row.append(winner, team, save);
-      const note = document.createElement('p');
-      note.setAttribute('role', 'status');
-      card.append(row, note);
+      card.append(row);
 
       if (a.staged) {
-        const drop = document.createElement('button');
-        drop.className = 'btn-quiet';
-        drop.type = 'button';
+        const drop = quietBtn('Remove the loaded winner');
         drop.style.marginTop = '10px';
-        drop.textContent = 'Remove the loaded winner';
         drop.onclick = async () => {
           try { await api({ action: 'unstage', id: a.id }); await load(); }
-          catch (err) { note.className = 'err'; note.textContent = err.message; }
+          catch (err) { sayErr(note, err); }
         };
         card.append(drop);
       }
     }
-    return card;
-  }));
+
+    const tools = el('div', 'tools');
+    const edit = quietBtn('Edit title or description');
+    edit.onclick = paintEdit;
+    tools.append(edit);
+    if (!a.presented) {
+      const retire = quietBtn('Remove from the ceremony');
+      retire.onclick = async () => {
+        const also = a.staged ? ' Its loaded winner is discarded with it.' : '';
+        if (!confirm(`Remove "${a.title}" from the ceremony list?${also}`)) return;
+        try { await api({ action: 'remove', id: a.id }); await load(); }
+        catch (err) { sayErr(note, err); }
+      };
+      tools.append(retire);
+    }
+    card.append(tools, note);
+  };
+
+  const paintEdit = () => {
+    card.replaceChildren();
+    const t = textIn(a.title, 'Award title, exactly as read on stage', `Title of ${a.title}`);
+    const d = areaIn(a.description || '',
+      'What the award means: the sentences the GA reads aloud', `Description of ${a.title}`);
+    const save = goBtn('Save');
+    save.onclick = async () => {
+      try {
+        await api({ action: 'define', id: a.id,
+          title: t.value.trim(), description: d.value.trim() });
+        await load();
+      } catch (err) { sayErr(note, err); }
+    };
+    const cancel = quietBtn('Cancel');
+    cancel.onclick = paintView;
+    const row = el('div', 'tools');
+    row.append(save, cancel);
+    card.append(labelEl('Title'), t, labelEl('Description'), d, row, note);
+  };
+
+  paintView();
+  return card;
+}
+
+function addCard() {
+  const card = el('div', 'card');
+  card.append(el('div', 'add-h', 'Add an award'));
+  const note = el('p');
+  note.setAttribute('role', 'status');
+  const t = textIn('', 'Exactly as it will be read on stage', 'New award title');
+  const d = areaIn('', 'What it means: one or two sentences the GA reads aloud',
+    'New award description');
+  const add = goBtn('Add to the ceremony');
+  add.onclick = async () => {
+    if (!t.value.trim()) { sayErr(note, new Error('An award needs a title.')); return; }
+    try {
+      await api({ action: 'define', title: t.value.trim(), description: d.value.trim() });
+      await load();
+    } catch (err) { sayErr(note, err); }
+  };
+  const row = el('div', 'tools');
+  row.append(add);
+  card.append(labelEl('Title'), t, labelEl('Description'), d, row, note);
+  return card;
 }
 
 $('unlockForm').addEventListener('submit', async e => {

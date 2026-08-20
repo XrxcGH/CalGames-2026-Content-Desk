@@ -26,6 +26,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EventBus } from './bus.ts';
 import type { DeskEvent } from './types.ts';
+import { uniqueSlug } from './content.ts';
 
 export interface AwardDef {
   id: string;
@@ -143,6 +144,62 @@ export class Awards {
     const had = this.#staged.delete(id);
     if (had) await this.#save();
     return had;
+  }
+
+  /**
+   * Called with the full list after every define/remove, so the caller can
+   * persist it. The list used to be config.json-only, which meant adding an
+   * award required finding the desk laptop and editing JSON by hand; now the
+   * Judge Advisor's own page manages it and this hook writes it down.
+   */
+  onListChanged: ((list: AwardDef[]) => void) | null = null;
+
+  get definitions(): AwardDef[] { return this.#list.map(a => ({ ...a })); }
+
+  /**
+   * Add an award, or rewrite the title/description of an existing one.
+   * JA-tier only (enforced at the route): definitions are the JA's, the same
+   * as winners. An award already presented keeps its id but can still have a
+   * typo in its description fixed for the record.
+   */
+  define(opts: { id?: string; title?: string; description?: string }): AwardDef {
+    const title = clean(opts.title, 80);
+    if (!title) throw new Error('An award needs a title.');
+    const description = clean(opts.description, 400);
+    const id = clean(opts.id, 40);
+
+    const existing = id ? this.#list.find(a => a.id === id) : undefined;
+    if (id && !existing) throw new Error(`There is no award "${id}".`);
+    let def: AwardDef;
+    if (existing) {
+      existing.title = title;
+      existing.description = description;
+      def = existing;
+    } else {
+      def = { id: uniqueSlug(title, new Set(this.#list.map(a => a.id))), title, description };
+      this.#list.push(def);
+    }
+    this.onListChanged?.(this.definitions);
+    return { ...def };
+  }
+
+  /**
+   * Remove an award from the ceremony list. Refused once presented: the
+   * presentation is history and the checklist must keep showing it happened.
+   * A staged winner for it is discarded along with it.
+   */
+  async remove(id: string): Promise<void> {
+    const idx = this.#list.findIndex(a => a.id === id);
+    if (idx < 0) throw new Error(`There is no award "${id}".`);
+    if (this.#presented.has(id)) {
+      throw new Error('That award has been presented; the record stays on the list.');
+    }
+    if (this.#live?.id === id) {
+      throw new Error('That award is on screen right now. Clear it first.');
+    }
+    this.#list.splice(idx, 1);
+    if (this.#staged.delete(id)) await this.#save();
+    this.onListChanged?.(this.definitions);
   }
 
   /** Exposed so a restart rebuilds the ceremony checklist from the log. */

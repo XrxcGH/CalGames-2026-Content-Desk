@@ -172,6 +172,22 @@ export class Sponsors {
 
   get plan(): SponsorPlan[] { return this.#plan; }
 
+  /**
+   * Replace the plan while the desk is running: the sponsor list is editable
+   * at the desk now, and a restart mid-event to pick up a new sponsor would
+   * cost more than the sponsor bought. The airing ledger is kept: it is the
+   * proof of performance, and a sponsor edited out mid-day was still shown
+   * all morning. If the sponsor currently on air was removed, it comes down
+   * first so its airing is counted before the plan forgets its name.
+   */
+  setPlan(plan: SponsorPlan[]): void {
+    const next = plan.filter(s => s?.id && s?.name);
+    if (this.#live && !next.some(s => s.id === this.#live!.id)) this.hide();
+    this.#plan = next;
+    this.#order = this.#weighted();
+    this.#cursor = 0;
+  }
+
   /** Put the next sponsor up, in rotation order. */
   next(): SponsorSnapshot {
     if (!this.#order.length) throw new Error('No sponsors are configured.');

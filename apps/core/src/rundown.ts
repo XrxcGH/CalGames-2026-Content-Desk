@@ -98,6 +98,21 @@ export class Rundown {
     return this.#bus.subscribe(ev => this.observe(ev));
   }
 
+  /**
+   * Replace the plan while the desk is running, keeping the day's progress:
+   * a segment that keeps its id keeps its pending/live/done state, so editing
+   * lunch's label at 11am does not un-happen the morning.
+   */
+  setPlan(plan: SegmentPlan[]): void {
+    this.#plan = plan.filter(s => s?.id && s?.label);
+    const old = this.#state;
+    this.#state = new Map();
+    for (const s of this.#plan) {
+      this.#state.set(s.id, old.get(s.id) ?? { state: 'pending', startedAt: null, endedAt: null });
+    }
+    this.#publish();
+  }
+
   observe(ev: DeskEvent): void {
     // Counting real matches is what lets a matches block shrink as it is
     // played, rather than projecting the same finish time all morning.
