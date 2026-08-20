@@ -383,7 +383,7 @@ export function startServer(opts: ServerOpts) {
    * A second code, held by the JA and nobody on the desk crew, gating the
    * spoiler-bearing half of the awards system: winner entry, the award
    * editor, and the reveal itself. The committee's worry is premature
-   * reveals; the mechanic is that the desk PIN alone cannot reach a winner —
+   * reveals; the mechanic is that the desk PIN alone cannot reach a winner:
    * not to type one, not to read one, not to put one on screen. The JA
    * stages winners from their own page (/s/awards) as judging concludes, and
    * hands the code to the desk right before the ceremony, which is the
@@ -806,7 +806,7 @@ export function startServer(opts: ServerOpts) {
 
       // ---- awards -----------------------------------------------------------
       // The Judge Advisor's door. Mirrors /api/auth exactly: POST body only,
-      // same lockout counters (shared with the desk door on purpose — an
+      // same lockout counters (shared with the desk door on purpose: an
       // attacker does not get a fresh budget per door), same failure delay.
       if (path === '/api/awards/auth' && req.method === 'POST') {
         const addr = req.socket.remoteAddress ?? 'unknown';
@@ -838,7 +838,7 @@ export function startServer(opts: ServerOpts) {
 
       // The ceremony: title and definition up while the GA reads it, winner
       // revealed on a button. The winner is held OUT of the bus until the
-      // reveal — every open surface reads the fan-out, and a spoiler in a
+      // reveal: every open surface reads the fan-out, and a spoiler in a
       // JSON field would beat the GA to the moment. See awards.ts.
       if (path === '/api/awards' && req.method !== 'POST') {
         if (!awards) return json(res, 200, null);
@@ -855,7 +855,7 @@ export function startServer(opts: ServerOpts) {
 
       if (path === '/api/awards' && req.method === 'POST') {
         if (!awards) return json(res, 503, { error: 'Awards are not available.' });
-        // Every write — staging, the editor, show, reveal, clear — sits
+        // Every write (staging, the editor, show, reveal, clear) sits
         // behind the JA tier. The desk session alone gets a plain sentence
         // about who to find, not a mystery 403.
         if (!isJa(req)) {
@@ -934,7 +934,7 @@ export function startServer(opts: ServerOpts) {
       }
 
       // A Gracious Professionalism shout-out from a phone in the stands. Open
-      // on purpose — the whole point is that anyone can send one — and safe on
+      // on purpose (the whole point is that anyone can send one) and safe on
       // purpose: screened, rate-limited per address, capped, and above all
       // MODERATED. Nothing from here reaches a screen until a human at the
       // desk approves it into the deck.
@@ -1621,7 +1621,7 @@ export function startServer(opts: ServerOpts) {
         // Cut at the LOAD of the current match, not a minute before its
         // start: the old minus-60s window reached back into the previous
         // match's final minute, and both consumers painted those markers on
-        // the new match's timeline — a head referee reviewing last match's
+        // the new match's timeline: a head referee reviewing last match's
         // "red takes the lead" against this match's recording, the wrong
         // robot presented as evidence.
         const since = Number(url.searchParams.get('since') || 0)

@@ -262,7 +262,7 @@ async function loadMarkers() {
   const marks = await res.json().catch(() => []);
   // Paint the empty state instead of returning: the early-return held the
   // PREVIOUS match's flagged moments on screen indefinitely once the feed
-  // emptied at a match change — exactly the list a referee must never review
+  // emptied at a match change: exactly the list a referee must never review
   // against the wrong recording. Also skip the rebuild when nothing changed,
   // so a ref keyboard-stepping the list does not lose focus every 10s.
   const sig = JSON.stringify(marks.map(m => m.ts ?? m.label));

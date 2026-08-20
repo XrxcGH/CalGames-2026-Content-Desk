@@ -136,8 +136,8 @@ it as a door code and not a secret.
 
 **The awards code is a second, separate door.** If `awards.pin` is set in `config.json` (or the
 `JA_PIN` env var), the Judge Advisor holds that code and the desk crew does not, until right
-before the ceremony. It opens exactly one thing — the awards system, including the JA's own
-staging page at `/s/awards` — and nothing else on the desk. Unset, awards run on the ordinary
+before the ceremony. It opens exactly one thing, the awards system (including the JA's own
+staging page at `/s/awards`), and nothing else on the desk. Unset, awards run on the ordinary
 PIN, which is right for a small event where the producer is the JA. The reasoning behind where the line falls is in the README
 under *Who can drive it*.
 

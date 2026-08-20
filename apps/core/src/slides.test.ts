@@ -33,7 +33,7 @@ test('the deck rotates and the show takes the program screen', async () => {
 });
 
 test('slides typed at the event survive a restart', async () => {
-  // Names get typed on Saturday. A desk restart at lunch must not eat them —
+  // Names get typed on Saturday. A desk restart at lunch must not eat them;
   // that is the entire reason data/slides.json exists.
   const dir = await scratch();
   try {

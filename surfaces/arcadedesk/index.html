@@ -10,7 +10,7 @@
 body { font-size: var(--font-ui-body); }
 .wrap { margin: 0 auto; padding: 18px 22px 60px; }
 /* Column WIDTH, not page width: sections flow into as many 460px columns as
-   the monitor actually has — the same rule as the desk console. */
+   the monitor actually has, the same rule as the desk console. */
 @media (min-width: 1150px) {
   /* 620, not the desk's 460: this page has five sections, and 460 makes four
      columns on a 2400 monitor with nothing left for the fourth. */
@@ -261,7 +261,7 @@ function paint(s) {
   if (set) {
     // Rebuild only when the ROSTER changes; a score change updates numbers in
     // place. The full innerHTML rebuild recreated the +1 button after every
-    // press, dropping keyboard focus to the body forty times a set — and
+    // press, dropping keyboard focus to the body forty times a set, and
     // re-announcing the whole roster through the aria-live wrapper.
     const rosterSig = JSON.stringify(set.players.map(p => p.name + (p.team ?? '')));
     if (rosterSig !== lastRosterSig) {

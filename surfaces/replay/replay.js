@@ -122,7 +122,7 @@ function paintMarkers() {
   }
 
   // The LIST seeks. It used to be inert text while the only clickable
-  // targets were the 3-to-5-pixel slivers on the track — the operator read
+  // targets were the 3-to-5-pixel slivers on the track: the operator read
   // "red 8 fuel burst 1:36" in comfortable type, clicked it, and nothing
   // happened; the real target needed aiming under a 20-second replay window.
   // Each row frames the same window the track sliver does.

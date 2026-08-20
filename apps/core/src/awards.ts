@@ -14,7 +14,7 @@
  * and the open websocket fan-out, so a winner carried in the `award.show`
  * payload would be readable on any phone in the gym while the GA is still
  * building suspense. The pending winner is held here, in this process's
- * memory, and first touches the bus inside `award.presented` — at which point
+ * memory, and first touches the bus inside `award.presented`, at which point
  * it is public because it just happened on stage.
  *
  * Presented awards are remembered (and rebuilt from the log after a restart)
@@ -61,7 +61,7 @@ export class Awards {
    * Winners the Judge Advisor loaded ahead of the ceremony, keyed by award id.
    *
    * Persisted to data/awards-staged.json, and the persistence is not
-   * optional: the JA stages winners as judging concludes — early afternoon —
+   * optional: the JA stages winners as judging concludes (early afternoon)
    * and may be unreachable by the ceremony. A desk restart at 4pm that lost
    * every staged winner would wreck the one segment that cannot be re-run.
    * The file lives in the same trust domain as config.json (the desk laptop,
@@ -129,7 +129,7 @@ export class Awards {
 
   /**
    * The Judge Advisor loading a winner ahead of the ceremony. Overwrites any
-   * previous staging for the award — re-entering is how a typo gets fixed.
+   * previous staging for the award: re-entering is how a typo gets fixed.
    */
   async stage(id: string, opts: { winner?: string; team?: number | null }): Promise<void> {
     if (!this.#list.some(a => a.id === id)) throw new Error(`There is no award "${id}".`);
@@ -219,7 +219,7 @@ export class Awards {
    * Put the award up: title and description, winner withheld.
    *
    * Either an `id` from the config list, or a free `title`/`description` pair
-   * for the award nobody wrote down in July — a judges' special award invented
+   * for the award nobody wrote down in July: a judges' special award invented
    * on Sunday morning is a thing that actually happens.
    */
   show(opts: { id?: string; title?: string; description?: string;
@@ -277,12 +277,12 @@ export class Awards {
    * The ceremony as a checklist, in two tiers.
    *
    * The FULL view is for a Judge Advisor session: it includes the staged
-   * winners, because the JA typed them and has to be able to proof-read them
-   * — a typo nobody can re-read goes on the projector at the reveal.
+   * winners, because the JA typed them and has to be able to proof-read them;
+   * a typo nobody can re-read goes on the projector at the reveal.
    *
    * The LOCKED view is what a desk session sees before the JA hands over the
    * code: titles, definitions, and what has already been presented (public
-   * by then). No staged winners, and no staged FLAGS either — "a winner is
+   * by then). No staged winners, and no staged FLAGS either: "a winner is
    * loaded for Directors'" is itself timing information the desk does not
    * need before the ceremony.
    */

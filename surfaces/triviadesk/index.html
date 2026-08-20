@@ -10,7 +10,7 @@
 body { font-size: var(--font-ui-body); }
 .wrap { margin: 0 auto; padding: 18px 22px 60px; }
 /* Column WIDTH, not page width: sections flow into as many 460px columns as
-   the monitor actually has — the same rule as the desk console. */
+   the monitor actually has, the same rule as the desk console. */
 @media (min-width: 1150px) {
   .wrap { columns: 460px; column-gap: 18px; }
   .wrap > section { break-inside: avoid; }
@@ -230,7 +230,7 @@ function paintSessions(s) {
   if (!sessions.length) { row.textContent = ''; return; }
   // Rebuild only when something changed: the 2s poll used to replaceChildren
   // unconditionally, killing keyboard focus on a round button within two
-  // seconds of landing on it — the picker was unusable by keyboard.
+  // seconds of landing on it: the picker was unusable by keyboard.
   const sig = JSON.stringify([sessions, s.session?.name ?? null]);
   if (sig === lastSessionsSig) return;
   lastSessionsSig = sig;

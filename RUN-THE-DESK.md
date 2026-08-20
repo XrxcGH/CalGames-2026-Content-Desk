@@ -525,7 +525,7 @@ To add one during the event: pick a kind, type a title and lines (separate
 lines with `|`), press **Add**. It is saved immediately and survives a desk
 restart.
 
-The **shout-out queue** below it fills from `/s/gp` — a phone page where
+The **shout-out queue** below it fills from `/s/gp`, a phone page where
 anyone in the stands can submit a Gracious Professionalism moment they saw.
 **Nothing from that queue reaches any screen until you press Approve.** Read
 each one; approve the good ones into the deck; reject the rest. Nobody is
@@ -534,7 +534,7 @@ notified of a rejection.
 ### The event timer
 
 **Field setup 2:00** starts a countdown that takes over the side screens in
-digits readable from the far end of the gym — turn one side-screen TV to face
+digits readable from the far end of the gym; turn one side-screen TV to face
 the field and the drive teams have their setup clock. It clears itself the
 moment the match starts. The label and minutes boxes run any other countdown:
 meeting starts, doors, end of lunch.

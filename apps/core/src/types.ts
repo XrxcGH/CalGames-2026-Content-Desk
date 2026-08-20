@@ -439,7 +439,7 @@ export interface DeskState {
    * When the CURRENT match was loaded. The marker feed cuts on this: markers
    * from before it belong to the previous match, and serving them once put
    * the last match's "red takes the lead" in front of a head referee
-   * reviewing the current one — the wrong robot, presented as evidence.
+   * reviewing the current one: the wrong robot, presented as evidence.
    */
   matchLoadedAt: number | null;
   /** Wall clock of the buzzer, and of the score actually being posted. The gap
@@ -532,7 +532,7 @@ export interface DeskState {
   /** The card call currently on air, or null. */
   cardCall: CardCall | null;
   /**
-   * The award on the program screen. `winner` stays null until the reveal —
+   * The award on the program screen. `winner` stays null until the reveal:
    * this state is served openly, and a spoiler in it would be readable on any
    * phone in the gym while the GA is still building suspense.
    */
@@ -544,7 +544,7 @@ export interface DeskState {
   slide: { id: string; kind: string; title: string; lines: string[] } | null;
   /**
    * The event countdown: field setup, a meeting, doors. Rendered big on the
-   * side screens, which face the hall — and the field, when one is turned.
+   * side screens, which face the hall (and the field, when one is turned).
    */
   timer: { label: string; endsAt: number; startedAt: number } | null;
   /** The sponsor on air, or null. */

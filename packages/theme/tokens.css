@@ -47,11 +47,11 @@
   --cg-white-dim:     #C9BCD0;  /* white tinted toward purple, not gray */
   --cg-white-mute:    #8E7F97;
   /* The chamfer lattice: a symmetric, tessellating octagon-and-diamond line
-     pattern shared by every purple field — consoles, audience pages, and the
+     pattern shared by every purple field: consoles, audience pages, and the
      opaque broadcast plates. One motif per 320px tile with nearly a motif's
      width of open space between neighbours: present across a full screen
-     without getting busy. Line art at 5% white — invisible to every contrast
-     calculation, mirrored on both axes so the tiling is symmetric. */
+     without getting busy. Line art at 5% white (invisible to every contrast
+     calculation), mirrored on both axes so the tiling is symmetric. */
   --geo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.05' stroke-width='1.5'%3E%3Cpath d='M120 72h80l48 48v80l-48 48h-80l-48-48v-80z'/%3E%3Cpath d='M160 96l64 64-64 64-64-64z'/%3E%3C/g%3E%3C/svg%3E");
   --geo-size: 320px 320px;  /* dimmest legible ink on purple-lo: 4.5:1 where purple-hi reads 2:1 */
 
@@ -333,7 +333,7 @@
   outline-offset: 2px;
 }
 /* Anything chamfered clips its own outline: clip-path clips painting, and a
-   ring drawn OUTSIDE the shape is silently invisible. Verified by rendering —
+   ring drawn OUTSIDE the shape is silently invisible. Verified by rendering:
    the +2px ring above produces nothing at all on a .btn. Chamfered things get
    the ring drawn INSET instead, the pattern next/remote/quiz already carry. */
 :root[data-surface="console"] .btn:focus-visible,
@@ -544,7 +544,7 @@ html, body {
   font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
   /* Its own face, not the section's. Buttons sat directly on a raised panel
      used to share its exact fill, so "Reveal" and "Next" rendered as bare
-     uppercase text indistinguishable from the labels beside them — a
+     uppercase text indistinguishable from the labels beside them: a
      first-time host saw one gold button and a row of captions. */
   background: var(--btn-face, var(--cg-purple-hi));
   color: var(--text);

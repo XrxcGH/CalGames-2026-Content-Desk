@@ -1027,7 +1027,7 @@
    Awards.
 
    Two beats on one plate. The title and definition are up while the GA reads
-   the definition aloud — the committee's "clear award titles/definitions",
+   the definition aloud: the committee's "clear award titles/definitions",
    said to the room, not only mailed in advance. The winner block enters on
    `award.presented`, which is also the first moment the winner exists
    anywhere the audience can read: the reveal belongs to the stage, and the
@@ -1038,7 +1038,7 @@
   /* NO display here, and that absence is load-bearing. These sections are
      appended after `.screen { display:none }`, so a bare `display:flex` at
      equal specificity would win on source order and leave both plates
-     PERMANENTLY visible — full-frame opaque backdrops sitting over every
+     PERMANENTLY visible: full-frame opaque backdrops sitting over every
      other screen. That is precisely what happened: every preview whose live
      screen was not one of these two rendered as an empty purple backdrop,
      byte-identical across shots, while the interactive DOM looked correct in
@@ -1106,7 +1106,7 @@
 
 /* ==========================================================================
    Slides: recognition, info, shout-outs. The sponsor plate's shape without
-   the sponsor ledger — see slides.ts for why they must not share a system.
+   the sponsor ledger; see slides.ts for why they must not share a system.
    ========================================================================== */
 .sl {
   position: absolute; inset: 0;

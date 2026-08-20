@@ -431,7 +431,7 @@ test('a slide takes the screen and leaves it clean', () => {
 test('an award beats a manual screen hold, and clearing hands the screen back', () => {
   // The operator pressing "Show the award" IS a manual take. During a
   // ceremony they have usually just held a screen by hand, and an award that
-  // silently lost to that hold was a button that did nothing — found by the
+  // silently lost to that hold was a button that did nothing, found by the
   // preview renderer, whose shots hold screens exactly the way an operator
   // does between awards.
   let s = reduce(initialState(), ev('screen.change', 500, { screen: 'blank' }));

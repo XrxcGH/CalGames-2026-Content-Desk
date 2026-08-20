@@ -111,7 +111,7 @@ function paintLiveState(s) {
 
   // The field-down kit surfaces exactly when it becomes relevant: the
   // moment the bridge drops, the hand-scoring tools unfold on their own.
-  // It never closes itself — the operator may still be typing a score in
+  // It never closes itself: the operator may still be typing a score in
   // the seconds after a flapping bridge reconnects.
   if (s.connected && s.connected.cheesy === false && !fieldKitOpened) {
     fieldKitOpened = true;
@@ -119,7 +119,7 @@ function paintLiveState(s) {
   }
 
   // The match beats: light the one the show is at, so the row teaches its own
-  // order. Every button stays pressable — out-of-order is the recovery path.
+  // order. Every button stays pressable: out-of-order is the recovery path.
   const beat = s.matchStartedAt ? 'match.start'
     : s.scorePostedAt ? 'match.score_posted'
       : s.matchEndedAt ? 'match.end'
@@ -178,7 +178,7 @@ for (const b of document.querySelectorAll('[data-score]')) {
 // Manual screen take: one button per screen, lit from live state.
 //
 // Built from the control map's Screen group rather than a hand-kept list, so
-// this row, the Stream Deck, and the remote cannot drift apart — the old
+// this row, the Stream Deck, and the remote cannot drift apart: the old
 // dropdown was missing `sponsor` entirely, and a hardware button could take a
 // screen the main console could not. The fallback list only exists for the
 // seconds before the map loads.
@@ -1454,7 +1454,7 @@ function paintGpQueue(queue) {
     const msg = document.createElement('span');
     msg.textContent = `"${q.message}" `;
     const from = document.createElement('b');
-    from.textContent = `— ${q.name}${q.team ? `, ${q.team}` : ''}`;
+    from.textContent = `- ${q.name}${q.team ? `, ${q.team}` : ''}`;
     who.append(msg, from);
     const ok = document.createElement('button');
     ok.className = 'btn';

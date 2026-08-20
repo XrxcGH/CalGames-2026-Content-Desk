@@ -240,7 +240,7 @@ const desk = connect('remote');
 
 /**
  * The gate covers the page; `inert` makes the covered page true for keyboards
- * and screen readers too — without it, focus tabbed straight through the
+ * and screen readers too: without it, focus tabbed straight through the
  * opaque overlay into invisible Start and Abort buttons. Focus lands on the
  * PIN field the moment the gate shows, because that is the only thing to do.
  */
@@ -444,7 +444,7 @@ async function audio(action, body) {
 
 // Success toasts fire when the request RESOLVES, not when the finger lands:
 // the optimistic version toasted "Music off" and then, on failure, stacked
-// the error under it — two contradictory toasts back to back.
+// the error under it: two contradictory toasts back to back.
 $('audPlay').onclick = tap(async () => { if (await audio('play')) toast('Music on'); });
 $('audPause').onclick = tap(async () => { if (await audio('pause')) toast('Music off'); });
 $('audNext').onclick = tap(async () => { if (await audio('next')) toast('Skipped'); });

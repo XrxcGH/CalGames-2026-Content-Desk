@@ -464,7 +464,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'card.call_clear':
         return { ...state, cardCall: null };
 
-      // The awards ceremony, two stages. Show carries no winner — the state is
+      // The awards ceremony, two stages. Show carries no winner: the state is
       // served openly, and the reveal is the GA's moment, not a JSON field's.
       case 'award.show': {
         const p = ev.payload as { id?: unknown; title?: unknown; description?: unknown };
@@ -479,7 +479,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           },
           // A manual TAKE, not an auto() suggestion. The operator pressing
           // "Show the award" is the same intent as taking a screen by hand,
-          // and during a ceremony they have usually just held one — an award
+          // and during a ceremony they have usually just held one; an award
           // that silently loses to that hold is a button that does nothing.
           // The hold also keeps a gap-filler cue from stomping the ceremony.
           screen: 'award',

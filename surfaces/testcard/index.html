@@ -181,7 +181,7 @@ function readout() {
   const dpr = devicePixelRatio || 1;
   $('res').textContent = `${Math.round(w * dpr)} × ${Math.round(h * dpr)}`;
   const ratio = (w / h).toFixed(3);
-  const near = Math.abs(w / h - 16 / 9) < 0.01 ? ' (16:9)' : ` (not 16:9 — expected 1.778)`;
+  const near = Math.abs(w / h - 16 / 9) < 0.01 ? ' (16:9)' : ` (not 16:9, expected 1.778)`;
   $('detail').textContent =
     `viewport ${w} × ${h} css px · scale ${dpr} · aspect ${ratio}${near}`;
 }

@@ -108,8 +108,8 @@ const isBannedWord = (word: string): boolean => {
 /**
  * A coarse screen for arbitrary text: a shout-out message, a typed slide line.
  *
- * Word-level only — pass one of screenName, over both the raw and the folded
- * split — because the whole-name collapse pass is meaningless on a sentence.
+ * Word-level only (pass one of screenName, over both the raw and the folded
+ * split), because the whole-name collapse pass is meaningless on a sentence.
  * This is NOT a moderation gate and must never be treated as one: it exists to
  * spare the human moderator the worst of the queue, and the human is the gate.
  */

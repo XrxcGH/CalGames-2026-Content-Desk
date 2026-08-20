@@ -102,7 +102,7 @@ class DeskClient extends EventTarget {
     // One REST read for the first frame. The websocket snapshot is the source
     // of truth, but it loses a race the venue actually runs: a headless
     // capture screenshots, and a cold pit monitor paints, before the socket
-    // finishes its handshake. The guard keeps the order honest — if the
+    // finishes its handshake. The guard keeps the order honest: if the
     // socket won, the fetch result is stale and goes nowhere.
     fetch('/api/state').then(r => (r.ok ? r.json() : null))
       .then(state => { if (state && !this.state) this.#apply(state); })
@@ -250,7 +250,7 @@ export function applyDisplayMode() {
 /**
  * Camera-scene display names, shared by every console that shows a cut
  * button. This lived as two hand-kept copies (desk and remote) and they had
- * already drifted ("Field wide" vs "Field") — one table, one vocabulary.
+ * already drifted ("Field wide" vs "Field"). One table, one vocabulary.
  */
 export const SCENE_LABEL = {
   intro: 'Intro', match: 'Field wide', score: 'Score',

@@ -40,7 +40,7 @@ h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
 /* Wide monitors get their whitespace back: the show column flows into two
    real columns, sections unbroken. Small laptops collapse to one. */
 /* Column WIDTH, not column count: multicol fits as many 460px show columns
-   as the monitor actually has — one on a laptop, two at 1600, three at 2400,
+   as the monitor actually has: one on a laptop, two at 1600, three at 2400,
    four on an ultrawide. No breakpoints to outgrow, no dead side margins. */
 @media (min-width: 1150px) {
   .grid > div:first-child { columns: 460px; column-gap: 20px; }
@@ -316,7 +316,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <!-- Direct buttons, not a dropdown-and-Take: the two-step select hid
              the live screen inside a closed control, could not even LIST the
              runtime screens (award, sponsor, card call), and mid-ceremony
-             asserted "alliance overview" while the award plate was up — one
+             asserted "alliance overview" while the award plate was up, one
              believed lie away from an operator yanking the ceremony off air.
              The row is built from the control map so it cannot drift from
              what a Stream Deck sees, and the live screen is always lit. -->

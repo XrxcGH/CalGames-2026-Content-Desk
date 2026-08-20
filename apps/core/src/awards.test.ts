@@ -25,7 +25,7 @@ test('the winner NEVER rides the bus before the reveal', async () => {
   // reads the websocket fan-out, so a winner in the award.show payload would
   // be readable on any phone in the gym while the GA is still building the
   // moment. Typed at show time, held in process memory, first on the bus at
-  // the reveal — because that is the moment it stops being a secret.
+  // the reveal, because that is the moment it stops being a secret.
   const dir = await scratch();
   try {
     const bus = new EventBus();
@@ -54,7 +54,7 @@ test('a staged winner survives a desk restart and rides the reveal', async () =>
   // The Judge Advisor's flow: winners loaded in the early afternoon as
   // judging concludes, ceremony hours later, JA possibly unreachable in
   // between. A restart that lost the staging would wreck the one segment
-  // that cannot be re-run — so it persists, and the reveal picks it up with
+  // that cannot be re-run, so it persists, and the reveal picks it up with
   // nobody re-typing anything.
   const dir = await scratch();
   try {
@@ -117,7 +117,7 @@ test('the locked snapshot carries no winners and no staging flags', async () => 
 
 test('the full snapshot shows the JA their own typing, for proof-reading', async () => {
   // The JA has to be able to re-read what they staged: a typo nobody can
-  // check goes on the projector at the reveal. No spoiler risk — the JA is
+  // check goes on the projector at the reveal. No spoiler risk: the JA is
   // the person the secret belongs to.
   const dir = await scratch();
   try {

@@ -3,9 +3,9 @@
  *
  * Three kinds, all from the 2026 planning committee's brainstorm:
  *
- *   recognition  "Thank you, Friday setup crew" — the volunteer/BOD/intern
+ *   recognition  "Thank you, Friday setup crew": the volunteer/BOD/intern
  *                recognition the committee wants on screen, with names.
- *   info         "SystemCore session, 12:30, Room 201" — the session
+ *   info         "SystemCore session, 12:30, Room 201": the session
  *                announcements, meeting calls, and food-truck-hours class of
  *                thing that otherwise lives on a paper sign nobody reads.
  *   shoutout     A Gracious Professionalism moment somebody submitted from
@@ -20,7 +20,7 @@
  *
  * The deck is config.json's list plus whatever gets added at the event (typed
  * at the desk, or approved from the shout-out queue). Runtime additions
- * persist to data/slides.json — names get typed on Saturday, and a desk
+ * persist to data/slides.json: names get typed on Saturday, and a desk
  * restart must not eat them.
  *
  * Shout-outs are the one crowd-writable path, and the gate is a HUMAN. The
@@ -189,8 +189,8 @@ export class Slides {
   }
 
   /**
-   * A shout-out from a phone in the stands. Screened, rate-limited, queued —
-   * and NOT on any screen until a human approves it.
+   * A shout-out from a phone in the stands. Screened, rate-limited, queued.
+   * And NOT on any screen until a human approves it.
    */
   async submit(opts: { name?: unknown; team?: unknown; message?: unknown },
     addr = 'unknown'): Promise<GpSubmission> {
@@ -242,7 +242,7 @@ export class Slides {
       title: 'Gracious Professionalism',
       lines: [
         sub.message,
-        `— ${sub.name}${sub.team ? `, Team ${sub.team}` : ''}`,
+        `- ${sub.name}${sub.team ? `, Team ${sub.team}` : ''}`,
       ],
     };
     this.#added.push(slide);
