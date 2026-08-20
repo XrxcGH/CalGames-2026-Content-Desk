@@ -52,7 +52,7 @@ const CSS = `
   background: var(--surface-sunken); color: var(--text); }
 .opnav a:hover, .opnav button:hover { background: var(--btn-hover); }
 .opnav a:focus-visible, .opnav button:focus-visible {
-  outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+  outline: 3px solid var(--focus-ring); outline-offset: -5px; }
 /* Where you are, said twice: color and a filled background, so it is not
    color alone doing the work. */
 .opnav a[aria-current="page"] { background: var(--accent); color: var(--text-on-accent); }
@@ -74,6 +74,24 @@ export function mountNav(current, opts = {}) {
   const style = document.createElement('style');
   style.textContent = CSS;
   document.head.appendChild(style);
+
+  // The skip link: ~19 tab stops of nav strip sit before every console's
+  // content, and a keyboard operator should not have to walk them all to
+  // reach the first control. One link, visually hidden until focused.
+  const skip = document.createElement('a');
+  skip.href = '#main';
+  skip.textContent = 'Skip to the console';
+  skip.style.cssText = 'position:absolute;left:-9999px;top:8px;z-index:100;'
+    + 'padding:8px 14px;background:var(--cg-gold);color:#101014;'
+    + 'font-family:var(--font-cond);font-weight:700;text-transform:uppercase;'
+    + 'letter-spacing:.1em;font-size:13px;';
+  skip.addEventListener('focus', () => { skip.style.left = '8px'; });
+  skip.addEventListener('blur', () => { skip.style.left = '-9999px'; });
+  document.body.prepend(skip);
+  // The landmark the link needs: the page's own wrapper, promoted.
+  const wrap = document.querySelector('.wrap, main');
+  if (wrap && !wrap.id) wrap.id = 'main';
+  if (wrap && wrap.tagName !== 'MAIN') wrap.setAttribute('role', 'main');
 
   const nav = document.createElement('nav');
   nav.className = 'opnav';
@@ -122,6 +140,8 @@ export function mountNav(current, opts = {}) {
             ? state?.screenHold === false
             : b.dataset.screen === screen;
           b.classList.toggle('live', !!on);
+          // The class is the paint; this is the same fact for a screen reader.
+          b.setAttribute('aria-pressed', String(!!on));
         }
       } catch { /* not a state frame */ }
     });
@@ -137,7 +157,13 @@ export function mountNav(current, opts = {}) {
 
   for (const b of nav.querySelectorAll('button[data-screen]')) {
     b.onclick = () => {
-      if (!ready) return;
+      // Say so instead of doing nothing: a take pressed during a desk restart
+      // used to no-op with no clue anywhere on the strip.
+      if (!ready) {
+        b.animate?.([{ opacity: 1 }, { opacity: .3 }, { opacity: 1 }], { duration: 300 });
+        b.title = 'Reconnecting to the desk. Try again in a second.';
+        return;
+      }
       ws.send(JSON.stringify({
         t: 'emit',
         init: { type: 'screen.change', payload: { screen: b.dataset.screen } },

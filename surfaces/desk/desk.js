@@ -28,38 +28,116 @@ desk.on('link', up => {
   if (signedOut) return;
   $('dot').dataset.up = String(up);
   $('linkText').textContent = up ? 'linked' : 'reconnecting...';
+  // Everything that rides the websocket goes DEAD while the link is down.
+  // emit() silently drops on a closed socket, so an enabled button was a lie:
+  // pressing End at the buzzer during a desk restart did nothing, and the
+  // only clue was this dot. The stream section already models honest-disabled.
+  for (const b of document.querySelectorAll('[data-emit], [data-score], [data-screen-take]')) {
+    b.disabled = !up;
+  }
 });
 
 // ---- live readout ----------------------------------------------------------
+// Writes are guarded: setting textContent mutates the node even when the
+// string is identical, and the Now readout's fields are aria-live, so
+// unguarded writes made a screen reader re-announce the score several times a
+// second all match. Same guard the audience pages already carry.
+function setText(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
 desk.on('state', s => {
-  $('nRed').textContent = s.score.red.total;
-  $('nBlue').textContent = s.score.blue.total;
-  // Keep the manual-take dropdown honest about what program is showing, but
-  // never yank it out from under an operator who is mid-choice.
-  if (document.activeElement !== $('screenSel')
-      && [...$('screenSel').options].some(o => o.value === s.screen)) {
-    $('screenSel').value = s.screen;
-  }
-  $('nMatch').textContent = s.match
+  setText($('nRed'), String(s.score.red.total));
+  setText($('nBlue'), String(s.score.blue.total));
+  paintScreenRow(s);
+  setText($('nMatch'), s.match
     // Both, and only both when they differ, which is the state worth
     // noticing: an official total sitting over a typed-in breakdown.
     ? `${s.match.displayName} · screen: ${s.screen} · ${s.totalConfidence}`
       + (s.confidence === s.totalConfidence ? '' : ` (breakdown ${s.confidence})`)
-    : 'No match loaded';
-  $('nRedTeams').textContent = (s.match?.red ?? []).map(t => t.number).join(' · ') || '-';
-  $('nBlueTeams').textContent = (s.match?.blue ?? []).map(t => t.number).join(' · ') || '-';
+    : 'No match loaded');
+  setText($('nRedTeams'), (s.match?.red ?? []).map(t => t.number).join(' · ') || '-');
+  setText($('nBlueTeams'), (s.match?.blue ?? []).map(t => t.number).join(' · ') || '-');
+  paintLiveState(s);
 });
+
+/**
+ * Re-sync the console to what is ALREADY live, so a reload tells the truth.
+ *
+ * The panel, the card call, the lower third, the status card and the timer
+ * all live in server state, but the page used to render only what happened
+ * while it was open: a console reloaded mid-show said "Nobody on air" under
+ * four faces on the broadcast, and pressing Put on air then silently replaced
+ * them with an empty panel. This paints the live facts into each section's
+ * own hint line, where the operator is already looking.
+ */
+let fieldKitOpened = false;
+
+function paintLiveState(s) {
+  // The card call: emphasize Clear while one is latched, like Safety does.
+  const cardUp = !!s.cardCall;
+  $('ccClear').classList.toggle('btn--go', cardUp);
+  if (cardUp && !$('ccHint').textContent) {
+    setText($('ccHint'),
+      `A ${s.cardCall.color} card for ${s.cardCall.team} is ON SCREEN. Clear it before the score.`);
+  } else if (!cardUp && $('ccHint').textContent.includes('ON SCREEN')) {
+    setText($('ccHint'), '');
+  }
+
+  // The panel: a reload must not claim an empty desk under a full graphic.
+  if (!onAir.length && (s.panel?.people?.length ?? 0) > 0) {
+    setText($('panelHint'),
+      `ON AIR NOW: ${s.panel.people.map(p => p.name).join(', ')}. `
+      + 'Tick names and press Put on air to replace them.');
+  }
+
+  // The event timer.
+  if (s.timer) {
+    const left = Math.max(0, Math.ceil((s.timer.endsAt - desk.serverNow) / 1000));
+    setText($('tmHint'),
+      `${s.timer.label} is RUNNING on the side screens: ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left.`);
+  } else if ($('tmHint').textContent.includes('RUNNING')) {
+    setText($('tmHint'), 'Cleared.');
+  }
+
+  // The lower third.
+  if (s.lowerThird && !$('thirdHint').textContent) {
+    setText($('thirdHint'), `On air: "${s.lowerThird.line1}". Y hides it.`);
+  } else if (!s.lowerThird && $('thirdHint').textContent.startsWith('On air:')) {
+    setText($('thirdHint'), '');
+  }
+
+  // The field-down kit surfaces exactly when it becomes relevant: the
+  // moment the bridge drops, the hand-scoring tools unfold on their own.
+  // It never closes itself — the operator may still be typing a score in
+  // the seconds after a flapping bridge reconnects.
+  if (s.connected && s.connected.cheesy === false && !fieldKitOpened) {
+    fieldKitOpened = true;
+    $('fieldDownKit').open = true;
+  }
+
+  // The match beats: light the one the show is at, so the row teaches its own
+  // order. Every button stays pressable — out-of-order is the recovery path.
+  const beat = s.matchStartedAt ? 'match.start'
+    : s.scorePostedAt ? 'match.score_posted'
+      : s.matchEndedAt ? 'match.end'
+        : s.screen === 'match' ? 'match.armed'
+          : s.match ? 'match.preview' : null;
+  for (const b of document.querySelectorAll('[data-emit]')) {
+    b.classList.toggle('live-beat', b.dataset.emit === beat);
+  }
+}
 
 startTicker(() => {
   const c = desk.matchClock;
-  $('nClock').textContent = clockDisplayFor(desk.state, c);
-  $('nPhase').textContent = PHASE_LABEL[phaseFor(desk.state, c)] ?? '';
+  setText($('nClock'), clockDisplayFor(desk.state, c));
+  setText($('nPhase'), PHASE_LABEL[phaseFor(desk.state, c)] ?? '');
 });
 
 // ---- event log -------------------------------------------------------------
 // Built with textContent, never innerHTML: type and source arrive over the WS
 // from any client on the production LAN and must render as text, not markup.
-desk.on('desk', ev => {
+function logLine(ev) {
   const row = document.createElement('li');
   const t = document.createElement('span');
   t.className = 't';
@@ -75,7 +153,15 @@ desk.on('desk', ev => {
   row.append(t, what);
   $('log').prepend(row);
   while ($('log').children.length > 120) $('log').lastChild.remove();
-});
+}
+desk.on('desk', logLine);
+
+// Backfilled on load: the server keeps the last 200 events, and a console
+// that reloads mid-show (the documented re-auth remedy) should still answer
+// "what just happened", not open with an empty log.
+fetch('/api/events/recent').then(r => (r.ok ? r.json() : []))
+  .then(events => { for (const ev of (events ?? []).slice(-120)) logLine(ev); })
+  .catch(() => { /* the live feed still fills it */ });
 
 // ---- actions ---------------------------------------------------------------
 const emit = (type, payload) => desk.emit({ type, payload });
@@ -87,10 +173,73 @@ for (const b of document.querySelectorAll('[data-score]')) {
   b.onclick = () => score(b.dataset.score);
 }
 
-// Manual screen take. The lifecycle buttons drive screens on their own; this
-// is the override for everything else: analysis segments, the arcade bumper,
-// or recovering from a state the automation didn't expect.
-$('screenTake').onclick = () => emit('screen.change', { screen: $('screenSel').value });
+// Manual screen take: one button per screen, lit from live state.
+//
+// Built from the control map's Screen group rather than a hand-kept list, so
+// this row, the Stream Deck, and the remote cannot drift apart — the old
+// dropdown was missing `sponsor` entirely, and a hardware button could take a
+// screen the main console could not. The fallback list only exists for the
+// seconds before the map loads.
+const SCREEN_FALLBACK = ['overview', 'match', 'score', 'analysis', 'arcade',
+  'selection', 'explain', 'sponsor', 'blank', 'auto'];
+const SCREEN_WORDS = {
+  overview: 'Overview', match: 'Score bar', score: 'Final', analysis: 'Analysis',
+  arcade: 'Arcade', selection: 'Selection', explain: 'Explainer',
+  sponsor: 'Sponsor', slide: 'Slide', award: 'Award', cardcall: 'Card',
+  blank: 'Blank', auto: 'Auto',
+};
+let screenIds = SCREEN_FALLBACK;
+
+function buildScreenRow() {
+  const row = $('screenRow');
+  row.replaceChildren(...screenIds.map(id => {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.dataset.screenTake = id;
+    b.textContent = SCREEN_WORDS[id] ?? id;
+    if (id === 'auto') {
+      b.title = 'Release the hold: the screen follows the match again.';
+      b.style.marginLeft = 'auto';
+    }
+    b.onclick = () => emit('screen.change', { screen: id });
+    return b;
+  }));
+}
+
+function paintScreenRow(s) {
+  let listed = false;
+  for (const b of $('screenRow').querySelectorAll('[data-screen-take]')) {
+    const id = b.dataset.screenTake;
+    const on = id === 'auto' ? s.screenHold === false : id === s.screen;
+    if (id === s.screen) listed = true;
+    b.classList.toggle('live', on && id !== 'auto');
+    b.classList.toggle('live-beat', on && id === 'auto');
+    b.setAttribute('aria-pressed', String(on));
+  }
+  // A runtime screen the row has no button for (card call mid-reveal, a
+  // slide) still gets NAMED, so the row never asserts the wrong thing the
+  // way the dropdown did.
+  let chip = $('screenRow').querySelector('.showing');
+  if (!listed && s.screen) {
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.className = 'hint showing';
+      chip.style.alignSelf = 'center';
+      $('screenRow').append(chip);
+    }
+    setText(chip, `showing: ${SCREEN_WORDS[s.screen] ?? s.screen}`);
+  } else if (chip) {
+    chip.remove();
+  }
+}
+
+buildScreenRow();
+fetch('/api/control-map').then(r => (r.ok ? r.json() : null)).then(map => {
+  const ids = (map?.actions ?? [])
+    .filter(a => a.id.startsWith('screen.'))
+    .map(a => a.id.slice('screen.'.length));
+  if (ids.length) { screenIds = ids; buildScreenRow(); if (desk.state) paintScreenRow(desk.state); }
+}).catch(() => { /* the fallback row stands */ });
 
 // ---- status card -----------------------------------------------------------
 // One press puts the "why we're waiting" card up; minutes are optional.
@@ -135,8 +284,7 @@ function showThird(pinned) {
   }
   emit('lower_third.show', { line1, line2: $('t2').value.trim(), pinned });
 }
-$('thirdShow').onclick = () => showThird(false);
-$('thirdPin').onclick = () => showThird(true);
+$('thirdShow').onclick = () => showThird($('thirdPinned').checked);
 $('thirdHide').onclick = () => emit('lower_third.hide');
 
 const teamList = str => str.trim().split(/\s+/).filter(Boolean)
@@ -452,8 +600,22 @@ function paintBook() {
     const kill = document.createElement('button');
     kill.className = 'btn kill';
     kill.textContent = 'Forget';
+    // Two presses, because this deletes a real person's saved profile and it
+    // sits one button-width from the Student toggle. The arm decays on its
+    // own so an abandoned first press cannot linger as a trap.
     kill.onclick = async e => {
       e.preventDefault();
+      if (kill.dataset.armed !== 'true') {
+        kill.dataset.armed = 'true';
+        kill.textContent = 'Forget?';
+        kill.classList.add('btn--go');
+        setTimeout(() => {
+          kill.dataset.armed = '';
+          kill.textContent = 'Forget';
+          kill.classList.remove('btn--go');
+        }, 3000);
+        return;
+      }
       await fetch('/api/profiles/delete', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: p.id }),
@@ -635,8 +797,12 @@ async function audio(action, body) {
   }
 }
 
-$('audPlay').onclick = () => audio('play');
-$('audPause').onclick = () => audio('pause');
+// One toggle, because the console has live state and a big source label to
+// anchor it. The REMOTE keeps separate Music on / Music off buttons on
+// purpose: a phone waking from sleep can hold stale state for the seconds
+// before the socket recovers, and a panic press must be idempotent.
+$('audToggle').onclick = () =>
+  audio(audioSnap?.source === 'playlist' ? 'pause' : 'play');
 $('audNext').onclick = () => audio('next');
 $('audPrev').onclick = () => audio('previous');
 $('audConsole').onclick = () => audio('source', { source: 'console', reason: 'Game audio, from the desk' });
@@ -666,6 +832,10 @@ function paintAudio(s) {
   $('audioWho').textContent = dev ? `· ${dev}` : '·';
   $('audioSrc').dataset.s = s.source;
   $('audDuck').classList.toggle('btn--go', !!s.music?.ducked);
+  $('audDuck').setAttribute('aria-pressed', String(!!s.music?.ducked));
+  setText($('audDuck'), s.music?.ducked ? 'Unduck' : 'Duck');
+  setText($('audToggle'), s.source === 'playlist' ? 'Pause music' : 'Play music');
+  $('audToggle').setAttribute('aria-pressed', String(s.source === 'playlist'));
 
   // Do not fight the operator's thumb: a poll landing mid-drag would snap the
   // slider back to the value the server last heard about.
@@ -1015,6 +1185,56 @@ $('ccClear').onclick = async () => {
 
 desk.on('state', paintCardTeams);
 
+// ---- sponsors ---------------------------------------------------------------
+// The rotation was reachable only from a Stream Deck before: the operator doc
+// lists "Sponsor" as a between-matches action, and no console had the button.
+async function sponsorAction(action) {
+  try {
+    const res = await fetch('/api/sponsors', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    setText($('spHint'), action === 'hide'
+      ? 'Hidden.'
+      : `On program: ${out.live?.name ?? out.card?.name ?? 'next sponsor'}.`);
+  } catch (err) {
+    setText($('spHint'), err.message);
+  }
+}
+$('spNext').onclick = () => void sponsorAction('next');
+$('spHide').onclick = () => void sponsorAction('hide');
+
+// ---- run of show ------------------------------------------------------------
+async function loadRundown() {
+  try {
+    const res = await fetch('/api/rundown');
+    if (!res.ok) return;
+    const rd = await res.json();
+    if (!rd?.segments?.length) return;
+    const now = rd.live ? `Live: ${rd.live.label}` : 'Nothing live';
+    const next = rd.next ? ` · next: ${rd.next.label}` : '';
+    setText($('rdNow'), now + next);
+  } catch { /* transient */ }
+}
+$('rdAdvance').onclick = async () => {
+  try {
+    const res = await fetch('/api/rundown', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'advance' }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    setText($('rdHint'), 'Advanced.');
+    await loadRundown();
+  } catch (err) {
+    setText($('rdHint'), err.message);
+  }
+};
+void loadRundown();
+setInterval(loadRundown, 30_000);
+
 // ---- awards -----------------------------------------------------------------
 // The winner is typed HERE and held by the server until Reveal: it must never
 // ride the open state feed while the GA is still building the moment.
@@ -1052,6 +1272,10 @@ $('awUnlock').onclick = async () => {
 };
 
 function paintAwards() {
+  // Reveal is only a real button while an award is on screen: the server
+  // refuses it otherwise, and a disabled button explains that before the
+  // press instead of after.
+  $('awReveal').disabled = !awardSnap?.live;
   const box = $('awList');
   const list = awardSnap?.list ?? [];
   if (!list.length) {
@@ -1187,7 +1411,8 @@ function paintSlideDeck({ deck = [], live = null }) {
     return;
   }
   box.replaceChildren(...deck.map(sl => {
-    const row = document.createElement('label');
+    const row = document.createElement('div');
+    row.className = 'pline';
     const who = document.createElement('span');
     who.className = 'who';
     const name = document.createElement('b');
@@ -1222,7 +1447,8 @@ function paintGpQueue(queue) {
     return;
   }
   box.replaceChildren(...queue.map(q => {
-    const row = document.createElement('label');
+    const row = document.createElement('div');
+    row.className = 'pline';
     const who = document.createElement('span');
     who.className = 'who';
     const msg = document.createElement('span');
@@ -1285,7 +1511,10 @@ async function startTimer(label, seconds) {
 }
 
 $('tmSetup').onclick = () => void startTimer('Field setup', 120);
-$('tmFive').onclick = () => void startTimer($('tmLabelIn').value.trim() || 'Countdown', 300);
+// A preset ignores the label box, both of them, consistently: "5:00" used to
+// silently read it while "Field setup 2:00" did not, so one preset was
+// secretly a form. The custom row below is the labeled path.
+$('tmFive').onclick = () => void startTimer('Break', 300);
 $('tmStart').onclick = () => {
   const min = Number($('tmMinIn').value);
   if (!min || min <= 0) { $('tmHint').textContent = 'How many minutes?'; return; }

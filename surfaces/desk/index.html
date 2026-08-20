@@ -11,7 +11,22 @@
    Keyboard-first. The producer must be able to run the whole show from here
    with every integration dead. */
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 24px 64px; }
+.wrap { max-width: 1760px; margin: 0 auto; padding: 20px 24px 64px; }
+/* The jump strip: the page is twenty-odd sections tall, and mid-show nobody
+   scroll-hunts. Sticky, one row, every anchor a section that matters under
+   pressure. Safety is styled as what it is. */
+.jump { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap;
+  gap: 6px; padding: 8px 0; margin: 0 0 10px;
+  background: var(--page-bg); }
+.jump a { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
+  letter-spacing: .1em; text-transform: uppercase; text-decoration: none;
+  color: var(--text-dim); padding: 6px 12px; background: var(--surface-raised);
+  clip-path: var(--chamfer); --ch: 7px; }
+.jump a:hover { color: var(--text); background: var(--btn-hover); }
+.jump a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -5px; }
+.jump a.danger { background: var(--st-bad); color: #fff; }
+/* Sections get scroll room under the sticky strip. */
+section { scroll-margin-top: 56px; }
 
 header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 18px; }
 h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
@@ -20,7 +35,28 @@ h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
 .dot { width: 10px; height: 10px; clip-path: var(--chamfer); --ch: 3px; background: var(--st-bad); }
 .dot[data-up="true"] { background: var(--st-ok); }
 
-.grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  gap: 20px; align-items: start; }
+/* Wide monitors get their whitespace back: the show column flows into two
+   real columns, sections unbroken. Small laptops collapse to one. */
+@media (min-width: 1460px) {
+  .grid > div:first-child { columns: 2; column-gap: 20px; }
+  .grid > div:first-child > section { break-inside: avoid; }
+}
+@media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
+/* Collapsible groups for the tools that are not the show: field-down kit and
+   setup. Native details, keyboard-free of charge. */
+details.group { margin-bottom: 20px; }
+details.group > summary { cursor: pointer; list-style: none;
+  font-family: var(--font-cond); font-weight: 700; font-size: 14px;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--text-dim);
+  padding: 10px 14px; background: var(--surface-raised);
+  clip-path: var(--chamfer); --ch: 8px; }
+details.group > summary::before { content: '▸ '; }
+details.group[open] > summary::before { content: '▾ '; }
+details.group > summary:hover { color: var(--text); }
+details.group > summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -5px; }
+details.group > section { margin-top: 12px; }
 section { background: var(--surface-raised); padding: 18px 20px; margin-bottom: 16px;
   clip-path: var(--chamfer); --ch: 14px; }
 h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
@@ -77,7 +113,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 
 #log { font-family: var(--font-mono); font-size: 13px; line-height: 1.65;
   max-height: 340px; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
-#log li { display: grid; grid-template-columns: 58px 1fr; gap: 8px;
+#log li { display: grid; grid-template-columns: 66px 1fr; gap: 8px;
   padding: 2px 0; border-bottom: 1px solid var(--surface-sunken); }
 #log .t { color: var(--text-dim); }
 #log .ty { color: var(--accent); }
@@ -101,6 +137,13 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 #audioHint[data-warn] { color: var(--st-bad-text); }
 .btn--danger { background: var(--st-bad); color: #fff; }
 #emergSection[data-live] { outline: 3px solid var(--st-bad); outline-offset: -3px; }
+#emergState[data-failed] { color: var(--st-bad-text); font-weight: 700; }
+/* The match beat the show is at, so the row teaches its own order. A ring
+   rather than a fill: the beat is a POSITION, not a pressed state, and it
+   must stay visually distinct from btn--go primaries beside it. */
+[data-emit].live-beat, #screenRow .btn.live-beat { box-shadow: inset 0 0 0 2px var(--cg-gold); }
+/* The live program screen, same vocabulary as the nav strip's takes. */
+#screenRow .btn.live { background: var(--accent); color: var(--text-on-accent); font-weight: 700; }
 #emergState[data-live] { color: var(--st-bad-text); font-weight: 700; }
 /* ---- cameras ---- */
 #sceneRow .btn { min-width: 92px; }
@@ -135,8 +178,15 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 @media (max-width: 720px) { .panel-cols { grid-template-columns: 1fr; } }
 .pbook, .ponair { background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 10px;
   padding: 8px; min-height: 96px; max-height: 260px; overflow-y: auto; }
+/* Rows WITH a leading checkbox (the profile book). Rows without one (slides,
+   the shout-out queue, awards) use .pline below: putting a title in the 20px
+   checkbox track rendered it one word per line. */
 .pbook label { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 8px;
-  align-items: center; padding: 7px 8px; margin: 0; cursor: pointer;
+  align-items: center; padding: 7px 8px; margin: 0;
+  font-family: var(--font-display); font-size: 14px; font-weight: 400;
+  letter-spacing: 0; text-transform: none; color: var(--text); }
+.pbook .pline { display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
+  align-items: center; padding: 7px 8px; margin: 0;
   font-family: var(--font-display); font-size: 14px; font-weight: 400;
   letter-spacing: 0; text-transform: none; color: var(--text); }
 .pbook label:hover { background: var(--btn-hover); }
@@ -178,9 +228,20 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
     <span class="link" role="status" aria-live="polite"><span class="dot" id="dot" aria-hidden="true"></span><span id="linkText">connecting</span></span>
   </header>
 
+  <nav class="jump" aria-label="Jump to a section">
+    <a href="#sec-match">Match</a>
+    <a href="#sec-cameras">Cameras</a>
+    <a href="#sec-audio">Audio</a>
+    <a href="#sec-oncamera">On camera</a>
+    <a href="#sec-slides">Slides</a>
+    <a href="#sec-timer">Timer</a>
+    <a href="#sec-awards">Awards</a>
+    <a href="#sec-safety" class="danger">Safety</a>
+  </nav>
+
   <div class="grid">
     <div>
-      <section>
+<section>
         <h2>Now</h2>
         <div class="now">
           <div>
@@ -201,7 +262,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <div class="hint" id="nMatch" aria-live="polite">No match loaded</div>
       </section>
 
-      <section>
+<section id="sec-match">
         <h2>Match</h2>
         <div class="row">
           <button class="btn" data-emit="match.preview" aria-label="Preview (keyboard shortcut 1)">Preview<kbd aria-hidden="true">1</kbd></button>
@@ -218,12 +279,13 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint">Puts the card on screen so the announcer has something on air
           while they explain it. Do it between the buzzer and the score reveal.</p>
         <div class="row">
-          <select id="ccColor" style="flex:0 1 130px">
+          <select id="ccColor" aria-label="Card color" style="flex:0 1 130px">
             <option value="yellow">Yellow</option>
             <option value="red">Red</option>
           </select>
-          <select id="ccTeamSel" style="flex:1 1 150px"></select>
-          <input id="ccReasonIn" placeholder="What for, in the GA's words" style="flex:3 1 240px">
+          <select id="ccTeamSel" aria-label="Team the card is for" style="flex:1 1 150px"></select>
+          <input id="ccReasonIn" aria-label="Reason for the card"
+            placeholder="What for, in the GA's words" style="flex:3 1 240px">
         </div>
         <div class="row">
           <button class="btn btn--go" id="ccShow">Put the card up</button>
@@ -231,26 +293,68 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <p class="hint" id="ccHint" aria-live="polite"></p>
 
-        <label for="screenSel">Program screen: manual take</label>
-        <div class="row">
-          <select id="screenSel" style="flex:1; min-width: 220px">
-            <option value="overview">Pre-match · alliance overview</option>
-            <option value="match">In-match · score bar</option>
-            <option value="score">Post-match · final score</option>
-            <option value="analysis">Analysis desk</option>
-            <option value="arcade">Video games · arcade bumper</option>
-            <option value="selection">Alliance selection board</option>
-            <option value="explain">How to watch · explainer loop</option>
-            <option value="blank">Blank</option>
-            <option value="auto">Auto (follow the match)</option>
-          </select>
-          <button class="btn" id="screenTake">Take</button>
-        </div>
+        <label id="screenRowLabel">Program screen: one press takes it</label>
+        <!-- Direct buttons, not a dropdown-and-Take: the two-step select hid
+             the live screen inside a closed control, could not even LIST the
+             runtime screens (award, sponsor, card call), and mid-ceremony
+             asserted "alliance overview" while the award plate was up — one
+             believed lie away from an operator yanking the ceremony off air.
+             The row is built from the control map so it cannot drift from
+             what a Stream Deck sees, and the live screen is always lit. -->
+        <div class="row" id="screenRow" role="group" aria-labelledby="screenRowLabel"></div>
         <p class="hint"><b>B</b> takes blank instantly, from anywhere on this page. A manual take
           holds until you pick <b>Auto</b>, so the next match loading will not move it.</p>
       </section>
 
-      <section>
+<section id="sec-cameras">
+        <h2>Cameras <span class="hint" id="sceneNote">·</span></h2>
+        <div class="row" id="sceneRow"></div>
+        <p class="hint">The shot, not the graphic. Screens follow the match on their own,
+          so a late cut leaves the graphics right. Autopilot never cuts away from the field
+          mid-match; you always can.</p>
+      </section>
+
+<section>
+        <h2>Replay markers</h2>
+        <div class="row">
+          <button class="btn" id="mark" aria-label="Mark replay moment (keyboard shortcut space bar)" style="width:100%">Mark<kbd aria-hidden="true">SPACE</kbd></button>
+        </div>
+        <p class="hint">Drops a marker at <b>now − 2s</b>, because human reaction time
+          is real. Automation catches the scoring; a human catches the interesting.</p>
+        <div id="markers" class="hint"></div>
+      </section>
+
+<section id="sec-audio">
+        <h2>House audio <span class="hint" id="audioWho">·</span></h2>
+        <div class="now-audio">
+          <div>
+            <div class="ah-title" id="audioTitle">Nothing playing</div>
+            <div class="ah-sub" id="audioSub">house bus only, never the stream</div>
+          </div>
+          <span class="ah-src" id="audioSrc">Silent</span>
+        </div>
+        <div class="row">
+          <button class="btn btn--go" id="audToggle">Play music</button>
+          <button class="btn" id="audPrev">◀◀</button>
+          <button class="btn" id="audNext">▶▶</button>
+          <button class="btn" id="audDuck">Duck</button>
+          <button class="btn" id="audConsole">Game audio</button>
+          <button class="btn" id="audWake">Wake player</button>
+        </div>
+        <div class="row">
+          <label class="in" for="audVol" style="margin:0">Volume</label>
+          <input id="audVol" type="range" min="0" max="100" step="5" style="flex:1 1 160px">
+          <span class="mono" id="audVolText">70</span>
+          <select id="audPlaylist" aria-label="Spotify playlist" style="flex:2 1 200px"><option value="">Playlist...</option></select>
+        </div>
+        <label>Walk-ups and stingers</label>
+        <div class="row" id="audClips"></div>
+        <p class="hint" id="audioHint">The player runs on the music machine at
+          <b>/s/house</b>. Walk-up files go in <b>media/audio/walkups</b>, named for the
+          team.</p>
+      </section>
+
+<section>
         <h2>Delay &amp; status card</h2>
         <p class="hint">Puts a "why we're waiting" card on program and the side screens.
           An unexplained stoppage reads as dead air; a named one reads as process.</p>
@@ -270,72 +374,21 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
       </section>
 
-      <section>
-        <h2>Shadow scoring <span style="color:var(--st-warn)">· estimated</span></h2>
-        <p class="hint">Typed scores publish at <b>estimated</b> confidence and render
-          <b>outlined</b> on air, never solid. We don't present a guess as official.</p>
-        <div class="row">
-          <button class="btn" data-score="red:fuel:1" aria-label="Red plus 1 fuel (keyboard shortcut Q)">Red +1 fuel<kbd aria-hidden="true">Q</kbd></button>
-          <button class="btn" data-score="red:fuel:5" aria-label="Red plus 5 fuel (keyboard shortcut W)">Red +5<kbd aria-hidden="true">W</kbd></button>
-          <button class="btn" data-score="red:tower:10" aria-label="Red climb level 1 (keyboard shortcut E)">Red climb L1<kbd aria-hidden="true">E</kbd></button>
-          <button class="btn" data-score="red:tower:20" aria-label="Red climb level 2">L2</button>
-          <button class="btn" data-score="red:tower:30" aria-label="Red climb level 3">L3</button>
-        </div>
-        <div class="row">
-          <button class="btn" data-score="blue:fuel:1" aria-label="Blue plus 1 fuel (keyboard shortcut A)">Blue +1 fuel<kbd aria-hidden="true">A</kbd></button>
-          <button class="btn" data-score="blue:fuel:5" aria-label="Blue plus 5 fuel (keyboard shortcut S)">Blue +5<kbd aria-hidden="true">S</kbd></button>
-          <button class="btn" data-score="blue:tower:10" aria-label="Blue climb level 1 (keyboard shortcut D)">Blue climb L1<kbd aria-hidden="true">D</kbd></button>
-          <button class="btn" data-score="blue:tower:20" aria-label="Blue climb level 2">L2</button>
-          <button class="btn" data-score="blue:tower:30" aria-label="Blue climb level 3">L3</button>
-        </div>
-      </section>
-
-      <section>
+<section>
         <h2>Lower third</h2>
         <label for="t1">Line 1</label>
         <input id="t1" placeholder="Priya Raman">
         <label for="t2">Line 2</label>
         <input id="t2" placeholder="Analyst · CalGames Content Desk">
         <div class="row" style="margin-top:12px">
-          <button class="btn" id="thirdShow" aria-label="Show lower third (keyboard shortcut T)">Show<kbd aria-hidden="true">T</kbd></button>
-          <button class="btn" id="thirdPin">Show pinned</button>
+          <button class="btn btn--go" id="thirdShow" aria-label="Show lower third (keyboard shortcut T)">Show<kbd aria-hidden="true">T</kbd></button>
+          <label class="pstu" for="thirdPinned"><input type="checkbox" id="thirdPinned">Pin (stays up)</label>
           <button class="btn" id="thirdHide" aria-label="Hide lower third (keyboard shortcut Y)">Hide<kbd aria-hidden="true">Y</kbd></button>
         </div>
         <p class="hint" id="thirdHint" aria-live="polite"></p>
       </section>
 
-      <section>
-        <h2>House audio <span class="hint" id="audioWho">·</span></h2>
-        <div class="now-audio">
-          <div>
-            <div class="ah-title" id="audioTitle">Nothing playing</div>
-            <div class="ah-sub" id="audioSub">house bus only, never the stream</div>
-          </div>
-          <span class="ah-src" id="audioSrc">Silent</span>
-        </div>
-        <div class="row">
-          <button class="btn btn--go" id="audPlay">Playlist</button>
-          <button class="btn" id="audPause">Pause</button>
-          <button class="btn" id="audPrev">◀◀</button>
-          <button class="btn" id="audNext">▶▶</button>
-          <button class="btn" id="audDuck">Duck</button>
-          <button class="btn" id="audConsole">Game audio</button>
-          <button class="btn" id="audWake">Wake player</button>
-        </div>
-        <div class="row">
-          <label class="in" for="audVol" style="margin:0">Volume</label>
-          <input id="audVol" type="range" min="0" max="100" step="5" style="flex:1 1 160px">
-          <span class="mono" id="audVolText">70</span>
-          <select id="audPlaylist" style="flex:2 1 200px"><option value="">Playlist...</option></select>
-        </div>
-        <label>Walk-ups and stingers</label>
-        <div class="row" id="audClips"></div>
-        <p class="hint" id="audioHint">The player runs on the music machine at
-          <b>/s/house</b>. Walk-up files go in <b>media/audio/walkups</b>, named for the
-          team.</p>
-      </section>
-
-      <section>
+<section id="sec-oncamera">
         <h2>On camera</h2>
         <label for="panelTitle">Segment</label>
         <input id="panelTitle" placeholder="Analysis desk">
@@ -344,9 +397,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
             <label>Saved profiles</label>
             <div id="profileList" class="pbook"></div>
             <div class="row" style="margin-top:8px">
-              <input id="pName" placeholder="Name" style="flex:2 1 120px">
-              <input id="pRole" placeholder="Role" style="flex:2 1 120px">
-              <input id="pTeam" placeholder="Team" inputmode="numeric" style="flex:0 1 78px">
+              <input id="pName" aria-label="Name" placeholder="Name" style="flex:2 1 120px">
+              <input id="pRole" aria-label="Role" placeholder="Role" style="flex:2 1 120px">
+              <input id="pTeam" aria-label="Team number" placeholder="Team" inputmode="numeric" style="flex:0 1 78px">
               <label class="pstu" for="pStudent"><input type="checkbox" id="pStudent">Student</label>
               <button class="btn" id="pAdd">Add</button>
             </div>
@@ -371,7 +424,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
       </section>
 
-      <section>
+<section>
         <h2>Telestrator</h2>
         <label for="analyst">Analyst name (shown on the ANALYSIS chip)</label>
         <input id="analyst" placeholder="Priya Raman">
@@ -388,26 +441,85 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <button class="btn" id="teleHide">Hide</button>
         </div>
       </section>
-
-      <section>
-        <h2>Load match</h2>
-        <label for="mName">Match name</label>
-        <input id="mName" placeholder="Qualification 42" value="Qualification 42">
-        <label for="mRed">Red alliance: team numbers</label>
-        <input id="mRed" placeholder="846 1868 253" value="846 1868 253">
-        <label for="mBlue">Blue alliance: team numbers</label>
-        <input id="mBlue" placeholder="100 115 670" value="100 115 670">
-        <div class="row" style="margin-top:12px">
-          <button class="btn" id="loadMatch">Load</button>
-        </div>
-        <p class="hint">With the Cheesy bridge up, names fill in from the field's team
-          list on their own. Running desk-only, numbers alone are enough for the overview to
-          build itself.</p>
-      </section>
     </div>
 
     <div>
-      <section>
+<section id="emergSection">
+        <h2>Safety message</h2>
+        <p class="hint">Goes on every screen at once and stays there until you clear it.
+          It covers the match graphic. Use it for the room, not for a delay.</p>
+        <div class="row">
+          <select id="emergKindSel" aria-label="Safety message kind" style="flex:1 1 150px">
+            <option value="hold">Hold</option>
+            <option value="medical">Medical</option>
+            <option value="evacuate">Evacuate</option>
+            <option value="shelter">Shelter in place</option>
+            <option value="allclear">All clear</option>
+            <option value="custom">Announcement</option>
+          </select>
+          <input id="emergMsgIn" aria-label="Safety message, the words on every screen" placeholder="What the room needs to do" style="flex:3 1 240px">
+        </div>
+        <div class="row">
+          <input id="emergDetailIn" aria-label="Safety message detail line" placeholder="Where to go (optional)" style="flex:3 1 240px">
+          <button class="btn btn--danger" id="emergRaise">Put on every screen</button>
+          <button class="btn" id="emergClear">Clear</button>
+        </div>
+        <p class="hint" id="emergState" aria-live="assertive" role="alert"></p>
+      </section>
+
+<section id="sec-slides">
+        <h2>Slides &amp; shout-outs</h2>
+        <p class="hint">Recognition and info slides. <b>Next</b> steps through the deck
+          on program; the side screens also rotate the whole deck on their own.</p>
+        <div id="slList" class="pbook" style="max-height:180px"></div>
+        <div class="row" style="margin-top:8px">
+          <select id="slKindSel" aria-label="Slide kind" style="flex:0 1 150px">
+            <option value="recognition">Recognition</option>
+            <option value="info">Info</option>
+          </select>
+          <input id="slTitleIn" aria-label="Slide title" placeholder="Title" style="flex:2 1 160px">
+          <input id="slLinesIn" aria-label="Slide lines, separated by vertical bars" placeholder="Lines, separated by |" style="flex:3 1 220px">
+          <button class="btn" id="slAdd">Add</button>
+        </div>
+        <div class="row">
+          <button class="btn btn--go" id="slNext">Next slide</button>
+          <button class="btn" id="slHide">Take it down</button>
+        </div>
+        <label>Shout-out queue</label>
+        <p class="hint">From phones in the stands (<b>/s/gp</b>, on the side-screen QR).
+          Nothing goes up without your press. Approving adds it to the deck.</p>
+        <div id="gpQueue" class="pbook" style="max-height:180px"></div>
+        <p class="hint" id="slHint" aria-live="polite"></p>
+      </section>
+
+      <section id="sec-sponsor">
+        <h2>Sponsors</h2>
+        <p class="hint">The rotation the broadcast owes the people who paid.
+          <b>Next sponsor</b> steps through the plan on program; every airing
+          is counted for the post-event report.</p>
+        <div class="row">
+          <button class="btn btn--go" id="spNext">Next sponsor</button>
+          <button class="btn" id="spHide">Hide</button>
+        </div>
+        <p class="hint" id="spHint" aria-live="polite"></p>
+      </section>
+
+<section id="sec-timer">
+        <h2>Event timer</h2>
+        <p class="hint">Counts down huge on the side screens: turn one to face the
+          field for robot setup. It clears itself the moment a match starts.</p>
+        <div class="row">
+          <button class="btn" id="tmSetup">Field setup 2:00</button>
+          <button class="btn" id="tmFive">5:00</button>
+          <input id="tmLabelIn" aria-label="Timer label" placeholder="Label" style="flex:2 1 140px">
+          <input id="tmMinIn" aria-label="Timer minutes" placeholder="Min" inputmode="numeric" style="flex:0 1 70px">
+          <button class="btn" id="tmStart">Start</button>
+          <button class="btn" id="tmClear">Clear</button>
+        </div>
+        <p class="hint" id="tmHint" aria-live="polite"></p>
+      </section>
+
+<section id="sec-awards">
         <h2>Awards</h2>
 
         <!-- The lock. When a Judge Advisor code is configured, the whole
@@ -457,57 +569,18 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
       </section>
 
-      <section>
-        <h2>Slides &amp; shout-outs</h2>
-        <p class="hint">Recognition and info slides. <b>Next</b> steps through the deck
-          on program; the side screens also rotate the whole deck on their own.</p>
-        <div id="slList" class="pbook" style="max-height:180px"></div>
-        <div class="row" style="margin-top:8px">
-          <select id="slKindSel" style="flex:0 1 150px">
-            <option value="recognition">Recognition</option>
-            <option value="info">Info</option>
-          </select>
-          <input id="slTitleIn" placeholder="Title" style="flex:2 1 160px">
-          <input id="slLinesIn" placeholder="Lines, separated by |" style="flex:3 1 220px">
-          <button class="btn" id="slAdd">Add</button>
-        </div>
+      <section id="sec-rundown">
+        <h2>Run of show</h2>
+        <p class="hint">The day as a list, timed from measured pace. The side
+          screens count down to whatever is next.</p>
+        <p class="hint" id="rdNow" aria-live="polite">No run of show planned.</p>
         <div class="row">
-          <button class="btn btn--go" id="slNext">Next slide</button>
-          <button class="btn" id="slHide">Take it down</button>
+          <button class="btn" id="rdAdvance">Finish segment, start the next</button>
         </div>
-        <label>Shout-out queue</label>
-        <p class="hint">From phones in the stands (<b>/s/gp</b>, on the side-screen QR).
-          Nothing goes up without your press. Approving adds it to the deck.</p>
-        <div id="gpQueue" class="pbook" style="max-height:180px"></div>
-        <p class="hint" id="slHint" aria-live="polite"></p>
+        <p class="hint" id="rdHint" aria-live="polite"></p>
       </section>
 
-      <section>
-        <h2>Event timer</h2>
-        <p class="hint">Counts down huge on the side screens: turn one to face the
-          field for robot setup. It clears itself the moment a match starts.</p>
-        <div class="row">
-          <button class="btn" id="tmSetup">Field setup 2:00</button>
-          <button class="btn" id="tmFive">5:00</button>
-          <input id="tmLabelIn" placeholder="Label" style="flex:2 1 140px">
-          <input id="tmMinIn" placeholder="Min" inputmode="numeric" style="flex:0 1 70px">
-          <button class="btn" id="tmStart">Start</button>
-          <button class="btn" id="tmClear">Clear</button>
-        </div>
-        <p class="hint" id="tmHint" aria-live="polite"></p>
-      </section>
-
-      <section>
-        <h2>Replay markers</h2>
-        <div class="row">
-          <button class="btn" id="mark" aria-label="Mark replay moment (keyboard shortcut space bar)" style="width:100%">Mark<kbd aria-hidden="true">SPACE</kbd></button>
-        </div>
-        <p class="hint">Drops a marker at <b>now − 2s</b>, because human reaction time
-          is real. Automation catches the scoring; a human catches the interesting.</p>
-        <div id="markers" class="hint"></div>
-      </section>
-
-      <section>
+<section>
         <h2>Publish a segment</h2>
         <p class="hint">Matches queue themselves when the score posts; this is for everything
           else. Press <b>Start</b> when the segment begins and <b>Queue</b> when it ends. The
@@ -537,7 +610,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="segState" aria-live="polite">Not marking.</p>
       </section>
 
-      <section>
+<section>
         <h2>Stream</h2>
         <p class="hint" id="streamState" aria-live="polite">Checking OBS...</p>
         <div class="row">
@@ -555,38 +628,51 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="streamMsg" aria-live="polite"></p>
       </section>
 
-      <section id="emergSection">
-        <h2>Safety message</h2>
-        <p class="hint">Goes on every screen at once and stays there until you clear it.
-          It covers the match graphic. Use it for the room, not for a delay.</p>
-        <div class="row">
-          <select id="emergKindSel" style="flex:1 1 150px">
-            <option value="hold">Hold</option>
-            <option value="medical">Medical</option>
-            <option value="evacuate">Evacuate</option>
-            <option value="shelter">Shelter in place</option>
-            <option value="allclear">All clear</option>
-            <option value="custom">Announcement</option>
-          </select>
-          <input id="emergMsgIn" placeholder="What the room needs to do" style="flex:3 1 240px">
+      <!-- The degraded-mode kit. Closed on a normal day so a first-timer
+           never scrolls past hand-scoring buttons; desk.js swings it open the
+           moment the field bridge drops, which is exactly when it matters. -->
+      <details class="group" id="fieldDownKit">
+        <summary>Field-down kit: run matches by hand</summary>
+<section>
+        <h2>Load match</h2>
+        <label for="mName">Match name</label>
+        <input id="mName" placeholder="Qualification 42" value="Qualification 42">
+        <label for="mRed">Red alliance: team numbers</label>
+        <input id="mRed" placeholder="846 1868 253" value="846 1868 253">
+        <label for="mBlue">Blue alliance: team numbers</label>
+        <input id="mBlue" placeholder="100 115 670" value="100 115 670">
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="loadMatch">Load</button>
         </div>
-        <div class="row">
-          <input id="emergDetailIn" placeholder="Where to go (optional)" style="flex:3 1 240px">
-          <button class="btn btn--danger" id="emergRaise">Put on every screen</button>
-          <button class="btn" id="emergClear">Clear</button>
-        </div>
-        <p class="hint" id="emergState"></p>
+        <p class="hint">With the Cheesy bridge up, names fill in from the field's team
+          list on their own. Running desk-only, numbers alone are enough for the overview to
+          build itself.</p>
       </section>
 
-      <section>
-        <h2>Cameras <span class="hint" id="sceneNote">·</span></h2>
-        <div class="row" id="sceneRow"></div>
-        <p class="hint">The shot, not the graphic. Screens follow the match on their own,
-          so a late cut leaves the graphics right. Autopilot never cuts away from the field
-          mid-match; you always can.</p>
+<section>
+        <h2>Shadow scoring <span style="color:var(--st-warn)">· estimated</span></h2>
+        <p class="hint">Typed scores publish at <b>estimated</b> confidence and render
+          <b>outlined</b> on air, never solid. We don't present a guess as official.</p>
+        <div class="row">
+          <button class="btn" data-score="red:fuel:1" aria-label="Red plus 1 fuel (keyboard shortcut Q)">Red +1 fuel<kbd aria-hidden="true">Q</kbd></button>
+          <button class="btn" data-score="red:fuel:5" aria-label="Red plus 5 fuel (keyboard shortcut W)">Red +5<kbd aria-hidden="true">W</kbd></button>
+          <button class="btn" data-score="red:tower:10" aria-label="Red climb level 1 (keyboard shortcut E)">Red climb L1<kbd aria-hidden="true">E</kbd></button>
+          <button class="btn" data-score="red:tower:20" aria-label="Red climb level 2">L2</button>
+          <button class="btn" data-score="red:tower:30" aria-label="Red climb level 3">L3</button>
+        </div>
+        <div class="row">
+          <button class="btn" data-score="blue:fuel:1" aria-label="Blue plus 1 fuel (keyboard shortcut A)">Blue +1 fuel<kbd aria-hidden="true">A</kbd></button>
+          <button class="btn" data-score="blue:fuel:5" aria-label="Blue plus 5 fuel (keyboard shortcut S)">Blue +5<kbd aria-hidden="true">S</kbd></button>
+          <button class="btn" data-score="blue:tower:10" aria-label="Blue climb level 1 (keyboard shortcut D)">Blue climb L1<kbd aria-hidden="true">D</kbd></button>
+          <button class="btn" data-score="blue:tower:20" aria-label="Blue climb level 2">L2</button>
+          <button class="btn" data-score="blue:tower:30" aria-label="Blue climb level 3">L3</button>
+        </div>
       </section>
+      </details>
 
-      <section>
+      <details class="group" id="setupGroup">
+        <summary>Setup &amp; end of day</summary>
+<section>
         <h2>Doors check <span class="vdot" id="vitalsDot"></span></h2>
         <p class="hint">Everything the desk can check about itself. The point is the
           failures nothing else complains about: a muted announcer mic, a disk that
@@ -598,7 +684,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
       </section>
 
-      <section>
+<section>
         <h2>Coverage <span class="hint" id="covSum">·</span></h2>
         <p class="hint">Every match that reached the buzzer, against every video that
           exists. The point is the matches nothing was ever queued for: everything else
@@ -609,7 +695,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
       </section>
 
-      <section>
+<section>
         <h2>Day VOD chapters</h2>
         <p class="hint">Paste-ready YouTube chapters, timed off the event log. Give it the
           wall-clock time the stream recording started.</p>
@@ -621,8 +707,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           style="width:100%; margin-top:8px; display:none"></textarea>
         <p class="hint" id="chapState" aria-live="polite"></p>
       </section>
+      </details>
 
-      <section>
+<section>
         <h2>Event log</h2>
         <ul id="log" aria-label="Event log"></ul>
       </section>

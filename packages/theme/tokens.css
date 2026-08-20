@@ -229,14 +229,30 @@
      purple); this reads 6.4:1. */
   --st-bad-text:    #FF6B6B;
 }
-:root[data-surface="console"] body { background: var(--page-bg); }
+:root[data-surface="console"] body {
+  background-color: var(--page-bg);
+  /* The geometry: two faint chamfer-angled bands and a dot lattice, echoing
+     the broadcast's Gold Sweep skew. Decorative only — at these opacities
+     every text/background pair keeps its computed contrast, and every panel
+     sits on its own solid fill above this. */
+  background-image:
+    linear-gradient(102deg, transparent 0 38%, rgba(240, 175, 0, .028) 38% 46%, transparent 46% 100%),
+    linear-gradient(102deg, transparent 0 62%, rgba(255, 255, 255, .022) 62% 74%, transparent 74% 100%),
+    radial-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 28px 28px;
+  background-attachment: fixed;
+}
 /* One shared field treatment so every console input matches. */
 :root[data-surface="console"] input,
 :root[data-surface="console"] select,
 :root[data-surface="console"] textarea {
   background: var(--surface-sunken);
   color: var(--text);
-  border: 2px solid #3A1349;
+  /* The old #3A1349 border measured 1.30:1 against the field's own fill and
+     1.16:1 against the panel behind it: unfocused fields were borderless
+     dark-on-dark, findable only by their placeholder. WCAG 1.4.11 wants the
+     boundary itself at 3:1; this mute reads 4.8:1 on the panel. */
+  border: 2px solid var(--cg-white-mute, #8E7F97);
 }
 :root[data-surface="console"] input:focus,
 :root[data-surface="console"] select:focus,
@@ -276,6 +292,20 @@
 :root[data-surface="light"] :focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
+}
+/* Anything chamfered clips its own outline: clip-path clips painting, and a
+   ring drawn OUTSIDE the shape is silently invisible. Verified by rendering —
+   the +2px ring above produces nothing at all on a .btn. Chamfered things get
+   the ring drawn INSET instead, the pattern next/remote/quiz already carry. */
+:root[data-surface="console"] .btn:focus-visible,
+:root[data-surface="light"] .btn:focus-visible {
+  outline-offset: -6px;
+}
+/* And on a gold pressed face the gold ring vanishes a second way (1.27:1).
+   Black on gold is 10.84:1. */
+:root[data-surface="console"] .btn[aria-pressed="true"]:focus-visible,
+:root[data-surface="light"] .btn[aria-pressed="true"]:focus-visible {
+  outline-color: var(--cg-black);
 }
 
 /* --------------------------------------------------------------------------
@@ -473,11 +503,16 @@ html, body {
 .btn {
   font-family: var(--font-cond);
   font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
-  background: var(--surface-raised);
+  /* Its own face, not the section's. Buttons sat directly on a raised panel
+     used to share its exact fill, so "Reveal" and "Next" rendered as bare
+     uppercase text indistinguishable from the labels beside them — a
+     first-time host saw one gold button and a row of captions. */
+  background: var(--btn-face, var(--cg-purple-hi));
   color: var(--text);
   border: 0;
   clip-path: var(--chamfer); --ch: 9px;
-  padding: 10px 20px;
+  padding: 12px 22px;
+  font-size: 15px;
   cursor: pointer;
   transition: transform var(--dur-tap) var(--ease-pop),
               background var(--dur-tap) linear,
@@ -485,8 +520,15 @@ html, body {
 }
 .btn:hover  { background: var(--btn-hover); }
 .btn:active { transform: scale(.96); background: var(--cg-gold-lo); }
-.btn:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+/* Inset: the chamfer clips an outset ring into nothing. See the console
+   focus block above. */
+.btn:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
 .btn[aria-pressed="true"] { background: var(--accent); color: var(--text-on-accent); }
+.btn[aria-pressed="true"]:focus-visible { outline-color: var(--cg-black); }
+/* Disabled has to LOOK dead. The media consent row uses the disabled button
+   as its current-state marker, and without this rule all three states
+   rendered identically. */
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
 
 /* --------------------------------------------------------------------------
    LOCKDOWN: endgame (matchClock >= 110).
