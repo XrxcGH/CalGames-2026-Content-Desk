@@ -31,15 +31,26 @@ const CONSOLES = [
 
 const CSS = `
 .opnav { position: sticky; top: 0; z-index: 50;
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap;
   padding: 8px 14px; margin-bottom: 14px;
   background: var(--surface-raised); border-bottom: 2px solid var(--surface-sunken); }
+/* The strip wraps in GROUPS, never item by item: the console links are one
+   unit and the screen takes are another, so a width that cannot hold both
+   drops the whole take row to its own line instead of orphaning one button
+   ("Auto", alone on row two, was how this was found). Each group still
+   wraps internally once it has a row to itself, so tablets get tidy rows
+   rather than a horizontal scrollbar. */
+.opnav .grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  min-width: 0; }
 .opnav a, .opnav button {
-  font-family: var(--font-cond); font-weight: 600; font-size: 14px;
-  letter-spacing: .06em; text-transform: uppercase; text-decoration: none;
-  padding: 8px 12px; cursor: pointer; border: 0;
+  font-family: var(--font-cond); font-weight: 600;
+  /* Metrics breathe with the viewport, so the single-row layout survives on
+     monitors the fixed sizes overflowed by a button or two. */
+  font-size: clamp(12px, 0.75vw, 14px);
+  letter-spacing: .05em; text-transform: uppercase; text-decoration: none;
+  padding: 8px clamp(7px, 0.65vw, 12px); cursor: pointer; border: 0;
   clip-path: var(--chamfer); --ch: 6px;
-  background: var(--surface-sunken); color: var(--text); }
+  background: var(--surface-sunken); color: var(--text); white-space: nowrap; }
 .opnav a:hover, .opnav button:hover { background: var(--btn-hover); }
 .opnav a:focus-visible, .opnav button:focus-visible {
   outline: 3px solid var(--focus-ring); outline-offset: -5px; }
@@ -51,7 +62,7 @@ const CSS = `
   text-transform: uppercase; color: var(--text-dim); }
 .opnav .take { background: var(--accent); color: var(--text-on-accent); }
 .opnav .live { background: var(--st-ok); color: var(--cg-black); }
-@media (max-width: 900px) { .opnav .lbl { display: none; } }
+@media (max-width: 900px) { .opnav .lbl, .opnav .sep { display: none; } }
 `;
 
 /**
@@ -90,12 +101,16 @@ export function mountNav(current, opts = {}) {
   nav.setAttribute('aria-label', 'Operator consoles');
 
   nav.innerHTML =
-    CONSOLES.map(c =>
+    '<span class="grp" role="presentation">'
+    + CONSOLES.map(c =>
       `<a href="/s/${c.id}"${c.id === current ? ' aria-current="page"' : ''}>${c.label}</a>`).join('')
+    + '</span>'
     + (withScreens
-      ? '<span class="sep" aria-hidden="true"></span><span class="lbl">On air</span>'
+      ? '<span class="grp" role="presentation">'
+        + '<span class="sep" aria-hidden="true"></span><span class="lbl">On air</span>'
         + SCREENS.map(s =>
           `<button type="button" data-screen="${s.id}" title="Take the ${s.label} screen">${s.label}</button>`).join('')
+        + '</span>'
       : '');
 
   document.body.prepend(nav);

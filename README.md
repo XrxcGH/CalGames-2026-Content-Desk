@@ -343,6 +343,11 @@ Note the `-Profile Private` above: don't open the port on a public profile you d
 
 Copy [config.example.json](config.example.json) to `config.json` (gitignored because it holds
 credentials) and fill it in. `npm run auth:youtube` walks through getting a YouTube refresh token.
+Only credentials and machine wiring actually live in the file: the content half of the event
+(name and year, award list, sponsors, run of show, accessibility services, the RP thresholds)
+is edited from the desk itself, in the desk console's **Event setup** fold and on the Judge
+Advisor's own awards page, and lands in `data/event-content.json`, which overrides the file
+from then on. config.json seeds the first run; nobody edits JSON mid-event.
 Everything at the event queues itself: matches when the score posts, practice included
 (`publish.autoQueuePractice` turns just the automatic practice path off; TBA gets no link
 because it has no practice keys), arcade sets when they end, and everything else as a two-tap
