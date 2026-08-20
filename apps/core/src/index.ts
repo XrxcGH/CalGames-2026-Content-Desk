@@ -111,7 +111,16 @@ try { await media.scan(); } catch (err) {
   console.warn('[media] scan failed, robot cutouts unavailable:', (err as Error).message);
 }
 try {
-  await bus.openLog(logPathFor(join(ROOT, 'data', 'events')));
+  // A --demo or --replay session is a rehearsal: it emits real-looking match
+  // lifecycles, and an untagged log fed them to the next boot's rebuild as
+  // the day's history (rehearsal cards on the ledger, phantom coverage,
+  // inflated sponsor counts). Tagged names are refused by isFromDay().
+  const rehearsalTag = has('demo') || has('replay') ? 'rehearsal' : undefined;
+  await bus.openLog(logPathFor(join(ROOT, 'data', 'events'), new Date(), rehearsalTag));
+  if (rehearsalTag) {
+    console.log('[bus] rehearsal session: logging to a .rehearsal file the ' +
+      'boot-time rebuild will ignore');
+  }
 } catch (err) {
   console.warn('[bus] event log disabled, this session cannot be replayed later:',
     (err as Error).message);
@@ -579,8 +588,16 @@ coverage.attach(bus);
  * air. See rebuild.ts.
  */
 {
-  const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'),
-    [cardLedger, coverage, rundown, sponsors, awards]);
+  const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'), [
+    cardLedger, coverage, rundown, sponsors, awards,
+    // The overlay's card marks read the STATE SNAPSHOT (the program overlay
+    // is an open surface; /api/discipline is gated), and the snapshot opens
+    // empty: the ledger came back after a restart while every match graphic
+    // showed carded teams clean. card.issued events carry their match name,
+    // so folding them back through the reducer rebuilds byTeam with the
+    // right phase, and restore() touches nothing but the snapshot.
+    { observe: ev => { if (ev.type === 'card.issued') bus.restore(ev); } },
+  ]);
   if (rebuilt.events) {
     console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log(s) today: ` +
       'cards, coverage, run of show and sponsor counts carried over'

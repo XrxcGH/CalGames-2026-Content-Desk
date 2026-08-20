@@ -171,3 +171,47 @@ test('airing counts survive a restart, and do not double on the live desk', asyn
     live.snapshot.rows.map(r => r.airings),
     'and restores it per sponsor, not just in total');
 });
+
+test('log replay closes an auto-hidden airing at its logged time and stays off the bus', async () => {
+  // The rebuild path: a card shown at T, auto-hidden by a match arm at
+  // T+120s, desk restarted hours later. Replay used to close the airing at
+  // the RESTART's wall clock (an hours-long airing in the proof-of-
+  // performance report) and emit a bogus sponsor.hide onto the live bus.
+  const { test: _t } = await import('node:test');
+  const bus = new EventBus();
+  const emitted: string[] = [];
+  bus.subscribe(ev => emitted.push(ev.type));
+  const sponsors = new Sponsors(bus, [{ id: 'acme', name: 'Acme Robotics' }]);
+
+  const t0 = 1_000_000;
+  // Fed straight into observe(), the way rebuildFromLog does; NOT via the bus.
+  sponsors.observe({
+    type: 'sponsor.show', ts: t0, seq: 1, id: 'e1', schemaVersion: 1,
+    matchClock: null, source: 'manual', confidence: 'authoritative',
+    payload: { id: 'acme', name: 'Acme Robotics' },
+  } as never);
+  sponsors.observe({
+    type: 'match.armed', ts: t0 + 120_000, seq: 2, id: 'e2', schemaVersion: 1,
+    matchClock: null, source: 'cheesy', confidence: 'authoritative',
+    payload: {},
+  } as never);
+
+  const row = sponsors.snapshot.rows.find(r => r.id === 'acme')!;
+  assert.equal(row.airings, 1);
+  assert.equal(row.seconds, 120, 'the airing is closed at the logged arm time, not at Date.now()');
+  assert.equal(emitted.length, 0, 'replay must not emit anything onto the live bus');
+});
+
+test('the live auto-hide still takes the card down on the bus', () => {
+  const bus = new EventBus();
+  const sponsors = new Sponsors(bus, [{ id: 'acme', name: 'Acme Robotics' }]);
+  sponsors.attach();
+  const emitted: string[] = [];
+  bus.subscribe(ev => emitted.push(ev.type));
+
+  sponsors.show('acme');
+  bus.emit({ type: 'match.armed', source: 'manual', payload: {} });
+  assert.ok(emitted.includes('sponsor.hide'),
+    'the live path must still emit the hide that clears the overlay');
+  assert.equal(sponsors.snapshot.live, null);
+});

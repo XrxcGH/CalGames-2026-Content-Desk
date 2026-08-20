@@ -35,6 +35,20 @@ export interface VideoMeta {
   categoryId?: string;
 }
 
+/**
+ * YouTube refuses '<' and '>' anywhere in snippet.title or
+ * snippet.description: the API answers 400 invalidTitle or
+ * invalidDescription, and that verdict is permanent, not transient, so a
+ * single 'Winner: <team 254>' typed into a segment note burned every retry
+ * and stranded the item in failed with an error that never mentioned the
+ * brackets. The metadata is assembled from free text (operator notes, award
+ * names, config credit lines), so the brackets are swapped out here at the
+ * API boundary, where every caller passes through, instead of being chased
+ * through each text source. Parentheses rather than deletion, so
+ * 'Winner: (team 254)' still reads as intended.
+ */
+const noAngles = (s: string): string => s.replace(/</g, '(').replace(/>/g, ')');
+
 export class YouTubeClient {
   #auth: YouTubeAuth;
   #token: string | null = null;
@@ -84,8 +98,8 @@ export class YouTubeClient {
       },
       body: JSON.stringify({
         snippet: {
-          title: meta.title.slice(0, 100),          // hard API limit
-          description: meta.description.slice(0, 5000),
+          title: noAngles(meta.title).slice(0, 100),          // hard API limit
+          description: noAngles(meta.description).slice(0, 5000),
           tags: meta.tags?.slice(0, 30),
           categoryId: meta.categoryId ?? '28',
         },

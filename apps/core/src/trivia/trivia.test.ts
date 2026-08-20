@@ -293,6 +293,39 @@ test('no match loaded means no prediction round', () => {
   assert.throws(() => store.pick(), /No match is loaded/);
 });
 
+test('a pick does not survive into the next boot', () => {
+  // Every bank edit persists the whole array, picks included, so a pick
+  // queued in the morning used to ride data/trivia.json into the next boot:
+  // it came back as a question whose match was scored hours ago, reveal()
+  // refused it, next() discarded the round unscored in front of a room that
+  // had just answered it, and its id blocked that match name from ever being
+  // picked again. Predictions are session-scoped: the store drops them at
+  // construction, whatever a file claims.
+  const bus = new EventBus();
+  bus.emit({
+    type: 'match.loaded', source: 'cheesy',
+    payload: { id: 'q13', displayName: 'Qualification 13', red: [], blue: [] },
+  });
+  const store = new TriviaStore(bus, [...BANK]);
+  store.pick();
+  assert.ok(store.bank().some(q => q.id === 'pick-qualification-13'),
+    'live in its own session, exactly as before');
+
+  // The reboot: a fresh store fed what saveBank persisted, which is the whole
+  // bank minus the transient live flag.
+  const persisted = store.bank().map(({ live, ...q }) => q);
+  const bus2 = new EventBus();
+  bus2.emit({
+    type: 'match.loaded', source: 'cheesy',
+    payload: { id: 'q13', displayName: 'Qualification 13', red: [], blue: [] },
+  });
+  const reopened = new TriviaStore(bus2, persisted);
+  assert.ok(!reopened.bank().some(q => q.id === 'pick-qualification-13'),
+    'the prediction stays behind with the session that made it');
+  assert.equal(reopened.bank().length, BANK.length, 'the real questions all arrive');
+  reopened.pick();   // and the same match name is free to be picked again
+});
+
 test('the bank rejects questions that would break the overlay', () => {
   const store = new TriviaStore(new EventBus(), []);
   const ok = { text: 'What?', options: ['a', 'b', 'c', 'd'], answer: 2 };

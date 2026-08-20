@@ -100,7 +100,16 @@ export class TriviaStore {
 
   constructor(bus: EventBus, questions: TriviaQuestion[] = DEFAULT_QUESTIONS) {
     this.#bus = bus;
-    this.#questions = questions;
+    // Pick-the-winner rounds are session-scoped and must not arrive from
+    // disk. Every bank edit persists the whole array, picks included, so a
+    // pick queued in the morning rode data/trivia.json into the next boot:
+    // it came back as a question whose match was scored hours ago, reveal()
+    // rightly refused it ("the field has moved on"), the host's only exit
+    // discarded the round unscored in front of a room that had just answered
+    // it, and its id blocked that match name from ever being picked again.
+    // A prediction only means anything in the session that made it, so it is
+    // dropped at the door rather than trusted from a file.
+    this.#questions = questions.filter(q => q.kind !== 'match');
   }
 
   setJoinUrl(url: string): void { this.#joinUrl = url; }

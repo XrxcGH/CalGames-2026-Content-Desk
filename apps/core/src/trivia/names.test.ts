@@ -42,6 +42,23 @@ test('impersonating event staff is refused too', () => {
   assert.equal(screenName('Adminah').ok, true, 'only the whole word, not a prefix');
 });
 
+test('reserved terms are refused as suffixes too, not only prefixes', () => {
+  // The old check was exact-or-prefix, so "Referee Bob" was refused while
+  // "Head Referee" walked straight past it: "head referee" does not start
+  // with "head ref " because the character after "head ref" is an e, not a
+  // space. That is the most natural spelling of the exact impersonation the
+  // "head ref" entry was added to stop.
+  for (const name of ['Head Referee', 'The Announcer', 'Senior Moderator',
+    'Bob Referee', 'HeadRef', 'Team FTA']) {
+    assert.equal(screenName(name).ok, false, `${name} could pose as staff`);
+  }
+  // Still whole words only, in both directions: a reserved term buried inside
+  // a longer word is somebody's name, not staff.
+  for (const name of ['Adminah', 'Refereely', 'Announcery']) {
+    assert.equal(screenName(name).ok, true, `${name} is a name, not a title`);
+  }
+});
+
 test('a name of pure punctuation is refused rather than rendering blank', () => {
   assert.equal(screenName('...').ok, false);
   assert.equal(screenName('   ').ok, false);

@@ -26,7 +26,7 @@
  */
 
 import type { EventBus } from './bus.ts';
-import type { Alliance, DeskEvent } from './types.ts';
+import { phaseOf, type Alliance, type DeskEvent } from './types.ts';
 
 export type CardColor = 'yellow' | 'red';
 
@@ -51,12 +51,7 @@ export type Phase = 'practice' | 'qualification' | 'playoff';
  * they are, and guessing "qualification" for one would carry a spent card
  * into Sunday, which is the failure being fixed.
  */
-export function phaseOf(match: string): Phase {
-  const m = match.trim().toLowerCase();
-  if (m.startsWith('practice') || /^p\d/.test(m)) return 'practice';
-  if (m.startsWith('qual') || /^q\d/.test(m)) return 'qualification';
-  return 'playoff';
-}
+export { phaseOf };
 
 export interface CardRecord {
   team: number;

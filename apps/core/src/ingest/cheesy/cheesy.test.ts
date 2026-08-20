@@ -263,7 +263,8 @@ test('a card is announced once, not once per score frame', () => {
 
   const cards = () => seen.filter(e => e.type === 'card.issued');
   assert.equal(cards().length, 1);
-  assert.deepEqual(cards()[0]?.payload, { alliance: 'red', team: 846, card: 'yellow' });
+  assert.deepEqual(cards()[0]?.payload,
+    { alliance: 'red', team: 846, card: 'yellow', match: 'Qualification 1' });
 
   // An upgrade to red is a new fact and is announced again.
   adapter.ingest('realtimeScore', { ...frame(4), RedCards: { '846': 'red' } });
@@ -751,4 +752,36 @@ test('an arena that sends no match id on scorePosted is unaffected', () => {
   adapter.ingest('matchLoad', { Match: { Id: 43, LongName: 'Qualification 43' } });
   adapter.ingest('scorePosted', { RedScoreSummary: { Score: 77 }, BlueScoreSummary: { Score: 70 } });
   assert.equal(bus.state.screen, 'score');
+});
+
+test('a reconnect echo of matchLoad in the post-score gap does not wipe the score', () => {
+  // The field sits in PreMatch for minutes after a score posts, and Cheesy
+  // replays every notifier when a display socket reconnects. That echo used
+  // to run the full load reset: score off air, program yanked back to the
+  // finished match's overview, the timestamps the gap cue and publish cut
+  // key off nulled. Same id, no IsReplay, score still on the board = echo.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  const load = { Match: { Id: 42, LongName: 'Qualification 12', Type: 'qualification' } };
+
+  adapter.ingest('matchLoad', load);
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+  adapter.ingest('scorePosted', {
+    Match: { Id: 42, LongName: 'Qualification 12', Type: 'qualification' },
+    RedScoreSummary: { Score: 100 }, BlueScoreSummary: { Score: 80 },
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  assert.ok(bus.state.scorePostedAt !== null, 'fixture sanity: a score is on the board');
+
+  const loadsBefore = bus.recent.filter(e => e.type === 'match.loaded').length;
+  adapter.ingest('matchLoad', load);                    // the reconnect echo
+  assert.equal(bus.recent.filter(e => e.type === 'match.loaded').length, loadsBefore,
+    'the echo must not re-emit match.loaded');
+  assert.ok(bus.state.scorePostedAt !== null, 'the posted score must stay on air');
+
+  // A GENUINE scorekeeper re-run of the same match says so, and still resets.
+  adapter.ingest('matchLoad', { ...load, IsReplay: true });
+  assert.equal(bus.recent.filter(e => e.type === 'match.loaded').length, loadsBefore + 1,
+    'a flagged replay is a real re-run and must reset');
 });

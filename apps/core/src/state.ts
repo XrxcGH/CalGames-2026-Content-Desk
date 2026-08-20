@@ -7,6 +7,7 @@
  */
 
 import { clockDisplay, clockFrom, hubActiveAt, isLockdown, phaseAt } from './clock.ts';
+import { phaseOf } from './types.ts';
 import {
   emptyAllianceScore, REBUILT,
   type Alliance, type AllianceScore, type CardCall, type Confidence,
@@ -115,9 +116,15 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           score: { red: emptyAllianceScore(), blue: emptyAllianceScore() },
           confidence: ev.confidence,
           totalConfidence: ev.confidence,
-          // Per-match card state resets; the running per-team totals do not,
-          // because a yellow from match 12 is still live in match 40.
-          cards: { ...state.cards, thisMatch: [] },
+          // Per-match card state resets; the per-team totals survive WITHIN
+          // the phase (a yellow from Q12 is still live in Q40) and drop at a
+          // phase boundary (that same yellow must not mark the team's
+          // playoff graphic; manual S6.6, same rule the ledger applies).
+          cards: {
+            byTeam: Object.fromEntries(Object.entries(state.cards.byTeam)
+              .filter(([, c]) => c.phase === phaseOf(p?.displayName ?? ''))),
+            thisMatch: [],
+          },
           cardCall: null,
           // Still validated rather than trusted: the payload arrives off a
           // socket, and a bad entry here puts an "S" on the wrong team.
@@ -407,7 +414,14 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         const color = p.card;
         if (state.cards.thisMatch.some(c => c.team === team && c.color === color)) return state;
 
-        const prior = state.cards.byTeam[team] ?? { yellows: 0, reds: 0 };
+        // The phase comes from the event when the emitter said so (which is
+        // what makes a boot-time restore of card.issued alone reconstruct
+        // this correctly), falling back to the loaded match. A prior entry
+        // from an OLDER phase starts over rather than accumulating: the
+        // manual's rule is that no card crosses a phase boundary.
+        const phase = phaseOf(String((p as { match?: unknown }).match ?? state.match?.displayName ?? ''));
+        const prior0 = state.cards.byTeam[team];
+        const prior = prior0 && prior0.phase === phase ? prior0 : { yellows: 0, reds: 0, phase };
         return {
           ...state,
           cards: {
@@ -416,6 +430,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
               [team]: {
                 yellows: prior.yellows + (color === 'yellow' ? 1 : 0),
                 reds: prior.reds + (color === 'red' ? 1 : 0),
+                phase,
               },
             },
             thisMatch: [...state.cards.thisMatch,

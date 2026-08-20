@@ -108,7 +108,15 @@ export class ObsClient {
   }
 
   #reconnect(why: string): void {
+    // Re-entry guard: the timeout path tears a wedged socket down with
+    // terminate(), whose own close event lands right back here. One
+    // teardown, one status flip, one re-dial.
+    if (!this.#ws && this.#timer) return;
     this.#ready = false;
+    // terminate, not close: a half-open socket's close handshake never
+    // completes, and this path exists precisely for sockets that stopped
+    // answering. On an already-dead socket this is a no-op.
+    this.#ws?.terminate();
     this.#ws = null;
     // Fail every in-flight request rather than leaving a cue hanging forever.
     for (const [, p] of this.#pending) { clearTimeout(p.timer); p.reject(new Error(`OBS ${why}`)); }
@@ -121,6 +129,9 @@ export class ObsClient {
     this.#timer = setTimeout(() => { this.#timer = null; this.connect(); }, wait);
   }
 
+  /** Consecutive request timeouts. Two in a row means the socket is lying. */
+  #timeouts = 0;
+
   request<T = unknown>(requestType: string, requestData: unknown = {}, timeoutMs = 4000): Promise<T> {
     if (!this.#ready || !this.#ws) return Promise.reject(new Error('OBS is not connected'));
     const requestId = `r${this.#seq++}`;
@@ -129,8 +140,21 @@ export class ObsClient {
       const timer = setTimeout(() => {
         this.#pending.delete(requestId);
         reject(new Error(`OBS ${requestType} timed out`));
+        // A timeout is evidence, and two in a row is a verdict: a half-open
+        // socket (OBS machine's network path gone without a FIN) or a hung
+        // OBS keeps readyState OPEN while answering nothing, so waiting for
+        // a close event meant every cue burned its 4s and scene automation
+        // was dead with the status still green. Tear it down and re-dial;
+        // a healthy OBS is back in under a second.
+        if (++this.#timeouts >= 2) {
+          this.#timeouts = 0;
+          this.#reconnect('answered nothing twice running');
+        }
       }, timeoutMs);
-      this.#pending.set(requestId, { resolve: resolve as (d: unknown) => void, reject, timer });
+      this.#pending.set(requestId, {
+        resolve: d => { this.#timeouts = 0; (resolve as (v: unknown) => void)(d); },
+        reject, timer,
+      });
       this.#ws!.send(JSON.stringify({ op: OP.Request, d: { requestType, requestId, requestData } }));
     });
   }

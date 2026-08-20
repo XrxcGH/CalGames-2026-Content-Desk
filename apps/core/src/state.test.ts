@@ -444,3 +444,28 @@ test('an award beats a manual screen hold, and clearing hands the screen back', 
   assert.equal(s.screen, 'blank', 'no stale plate');
   assert.equal(s.screenHold, false, 'and the lifecycle can take over again');
 });
+
+test('a yellow card does not cross the phase boundary on the overlay snapshot', () => {
+  // Manual S6.6, the same rule the ledger applies: a yellow carries forward
+  // within its phase and dies at the phase boundary. byTeam is what the
+  // program overlay renders, and it used to accumulate forever, so a yellow
+  // spent in quals marked the team's graphic for every playoff match.
+  let s = initialState();
+  s = reduce(s, ev('match.loaded', T0, { id: 'q12', displayName: 'Qualification 12', red: [], blue: [] }));
+  s = reduce(s, ev('card.issued', T0 + 1, { team: 846, card: 'yellow', alliance: 'red' }));
+  assert.equal(s.cards.byTeam[846]?.yellows, 1);
+
+  // Still carrying through later quals.
+  s = reduce(s, ev('match.loaded', T0 + 2, { id: 'q40', displayName: 'Qualification 40', red: [], blue: [] }));
+  assert.equal(s.cards.byTeam[846]?.yellows, 1);
+
+  // The playoff boundary clears it.
+  s = reduce(s, ev('match.loaded', T0 + 3, { id: 'sf1', displayName: 'Playoff 3', red: [], blue: [] }));
+  assert.equal(s.cards.byTeam[846], undefined,
+    'a quals yellow must not mark the playoff graphic');
+
+  // A fresh playoff card counts from zero, phased by its own event payload.
+  s = reduce(s, ev('card.issued', T0 + 4, { team: 846, card: 'yellow', alliance: 'red', match: 'Playoff 3' }));
+  assert.equal(s.cards.byTeam[846]?.yellows, 1);
+  assert.equal(s.cards.byTeam[846]?.phase, 'playoff');
+});

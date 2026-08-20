@@ -11,7 +11,7 @@
  * implementation. See docs/04 and docs/11.
  */
 
-import { mkdir, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { duration, run, type EncoderChoice, type FfmpegTools } from './ffmpeg.ts';
 
@@ -247,27 +247,35 @@ export class ClipStore {
     const outSeek = offset / speed;
     const outLen = wanted / speed;
 
-    const { code, stderr } = await run(this.#tools.ffmpeg, [
-      '-hide_banner', '-loglevel', 'error', '-y',
-      '-f', 'concat', '-safe', '0', '-i', listFile,
-      // -ss AFTER -i is the accurate (decode-and-discard) seek. Before -i is
-      // faster but keyframe-bound, which lands replays on the wrong moment.
-      '-ss', outSeek.toFixed(3),
-      '-t', outLen.toFixed(3),
-      ...(filters.length ? ['-vf', filters.join(',')] : []),
-      '-c:v', this.#encoder.encoder, ...this.#encoder.args,
-      // Audio rides along at realtime: match videos and segments upload with
-      // the announcer and the crowd, which is most of why anyone watches them.
-      // Slow-mo drops audio instead: setpts stretches only video, so keeping
-      // the track would desync it, and a half-speed crowd is noise anyway.
-      // A source with no audio stream (test patterns) simply yields no track;
-      // -c:a without a forced -map never fails on silent input.
-      ...(speed === 1 ? ['-c:a', 'aac', '-b:a', '192k'] : ['-an']),
-      outFile,
-    ], 300_000);
+    try {
+      const { code, stderr } = await run(this.#tools.ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'concat', '-safe', '0', '-i', listFile,
+        // -ss AFTER -i is the accurate (decode-and-discard) seek. Before -i is
+        // faster but keyframe-bound, which lands replays on the wrong moment.
+        '-ss', outSeek.toFixed(3),
+        '-t', outLen.toFixed(3),
+        ...(filters.length ? ['-vf', filters.join(',')] : []),
+        '-c:v', this.#encoder.encoder, ...this.#encoder.args,
+        // Audio rides along at realtime: match videos and segments upload with
+        // the announcer and the crowd, which is most of why anyone watches them.
+        // Slow-mo drops audio instead: setpts stretches only video, so keeping
+        // the track would desync it, and a half-speed crowd is noise anyway.
+        // A source with no audio stream (test patterns) simply yields no track;
+        // -c:a without a forced -map never fails on silent input.
+        ...(speed === 1 ? ['-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+        outFile,
+      ], 300_000);
 
-    if (code !== 0) {
-      throw new Error(`Clip extraction failed: ${stderr.trim().split('\n').at(-1)}`);
+      if (code !== 0) {
+        throw new Error(`Clip extraction failed: ${stderr.trim().split('\n').at(-1)}`);
+      }
+    } finally {
+      // The list is scaffolding for one ffmpeg invocation. rec/clips is a
+      // served directory on the recorder's own disk, and a text file left
+      // beside every cut added up to hundreds of orphans over a weekend, so
+      // it goes whether the cut worked or not.
+      await rm(listFile, { force: true });
     }
   }
 
@@ -324,22 +332,33 @@ export class ClipStore {
       // share encoder settings, so the join is a stream copy: no re-encode,
       // no generation loss, and the cut lands exactly where we asked.
       const parts: string[] = [];
-      for (const [i, range] of ranges.entries()) {
-        const part = join(this.#outDir, `${base}.part${i}.mp4`);
-        await this.#extractRange(sourceId, range, part, speed);
-        parts.push(part);
-      }
-
       const joinList = join(this.#outDir, `${base}.join.txt`);
-      await writeFile(joinList,
-        parts.map(p => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
+      try {
+        for (const [i, range] of ranges.entries()) {
+          const part = join(this.#outDir, `${base}.part${i}.mp4`);
+          await this.#extractRange(sourceId, range, part, speed);
+          parts.push(part);
+        }
 
-      const { code, stderr } = await run(this.#tools.ffmpeg, [
-        '-hide_banner', '-loglevel', 'error', '-y',
-        '-f', 'concat', '-safe', '0', '-i', joinList,
-        '-c', 'copy', outFile,
-      ], 180_000);
-      if (code !== 0) throw new Error(`Joining clip parts failed: ${stderr.trim().split('\n').at(-1)}`);
+        await writeFile(joinList,
+          parts.map(p => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
+
+        const { code, stderr } = await run(this.#tools.ffmpeg, [
+          '-hide_banner', '-loglevel', 'error', '-y',
+          '-f', 'concat', '-safe', '0', '-i', joinList,
+          '-c', 'copy', outFile,
+        ], 180_000);
+        if (code !== 0) throw new Error(`Joining clip parts failed: ${stderr.trim().split('\n').at(-1)}`);
+      } finally {
+        // The parts and the join list exist only to feed the join. Each part
+        // is a full re-encoded video and a normal match cut makes two of
+        // them, so leaving them behind parked two extra copies of every
+        // auto-queued match in a served directory on the disk vitals is
+        // already watching for recording headroom. Swept on failure too: the
+        // queue retries the same cut under the same base name, and only the
+        // finished clip should ever remain in rec/clips.
+        await Promise.all([joinList, ...parts].map(f => rm(f, { force: true })));
+      }
     }
 
     const wanted = ranges.reduce((n, r) => n + (r.toMs - r.fromMs) / 1000, 0) / speed;

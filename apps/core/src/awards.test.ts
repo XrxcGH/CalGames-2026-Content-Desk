@@ -165,6 +165,52 @@ test('a winner typed at the desk outranks the staged one', async () => {
   }
 });
 
+test('a winner staged after Show is still found at the reveal', async () => {
+  // The timing hole: the desk puts the description up while the GA reads it,
+  // the JA finishes typing DURING that window, and reveal() used to consult
+  // only the snapshot show() took, so it demanded a winner the desk cannot
+  // even see (the locked view hides staging), on stage, mid-suspense.
+  const dir = await scratch();
+  try {
+    const bus = new EventBus();
+    const seen = collect(bus);
+    const awards = new Awards(dir, bus, LIST);
+
+    awards.show({ id: 'directors' });            // the JA is not done typing yet
+    await awards.stage('directors', { winner: 'The Funky Monkeys', team: 846 });
+
+    // The secrecy rule holds through the late staging: nothing on the bus.
+    assert.equal(seen.some(e => JSON.stringify(e.payload).includes('Funky')), false,
+      'the winner must not touch the bus before the reveal');
+
+    awards.reveal();
+    const revealed = seen.find(e => e.type === 'award.presented')!;
+    assert.equal((revealed.payload as { winner: string }).winner, 'The Funky Monkeys');
+    assert.equal((revealed.payload as { team: number }).team, 846);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a winner typed at the reveal outranks one staged after Show', async () => {
+  // The envelope on stage is still the truth: the late-staging fallback must
+  // never outrank what the operator types now.
+  const dir = await scratch();
+  try {
+    const bus = new EventBus();
+    const seen = collect(bus);
+    const awards = new Awards(dir, bus, LIST);
+    awards.show({ id: 'spirit' });
+    await awards.stage('spirit', { winner: 'Wrong Name' });
+    awards.reveal({ winner: 'Space Cookies', team: 1868 });
+    const revealed = seen.find(e => e.type === 'award.presented')!;
+    assert.equal((revealed.payload as { winner: string }).winner, 'Space Cookies');
+    assert.equal((revealed.payload as { team: number }).team, 1868);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('the reveal can carry a winner typed at the last second', async () => {
   const dir = await scratch();
   try {

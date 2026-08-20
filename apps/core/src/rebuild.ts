@@ -45,7 +45,12 @@ export interface Observer {
  * machine keeps its name and loses its mtime.
  */
 export function isFromDay(name: string, day: string): boolean {
-  return name.endsWith('.ndjson') && name.startsWith(day);
+  if (!name.endsWith('.ndjson') || !name.startsWith(day)) return false;
+  // `2026-10-17-09-14-02.rehearsal.ndjson` is a --demo or --replay session:
+  // real-looking events that never happened at the event. Rebuilding from
+  // one put rehearsal cards on the announcer's ledger and phantom matches in
+  // the coverage report, so a tagged name is not part of the day.
+  return !/\.[a-z]+\.ndjson$/i.test(name);
 }
 
 export interface RebuildResult {

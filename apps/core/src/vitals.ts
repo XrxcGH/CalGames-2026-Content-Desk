@@ -19,7 +19,8 @@
  * cannot be read when things are going wrong is worse than none.
  */
 
-import { statfs } from 'node:fs/promises';
+import { readdir, stat, statfs } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { EventBus } from './bus.ts';
 import type { CoverageLedger } from './coverage.ts';
 import type { HouseAudio } from './audio/store.ts';
@@ -165,15 +166,41 @@ export class Vitals {
     }
     const sources = rec.status;
     const dead = sources.filter(s => !s.running);
+
+    // A live ffmpeg process is not a recording. Capture boxes stall without
+    // exiting (dshow blocks on an input that stopped delivering), and this
+    // is exactly the header's "writing nothing since" failure: the process
+    // table says rolling while the disk gains nothing. Segments are named
+    // %Y%m%d-%H%M%S, so the newest is the lexicographic max: one readdir
+    // and one stat per source, no scan of the day's thousands of files.
+    const stallMs = Math.max(30_000, rec.segmentSeconds * 10_000);
+    const stalled: string[] = [];
+    if (process.uptime() * 1000 > stallMs) {
+      for (const src of sources) {
+        if (!src.running) continue;
+        try {
+          const dir = rec.dirFor(src.id);
+          const newest = (await readdir(dir)).filter(f => f.endsWith('.mp4')).sort().pop();
+          if (!newest) { stalled.push(src.id); continue; }
+          const st = await stat(join(dir, newest));
+          if (Date.now() - st.mtimeMs > stallMs) stalled.push(src.id);
+        } catch { stalled.push(src.id); }
+      }
+    }
+
+    const bad = dead.length
+      ? `${dead.length} of ${sources.length} source(s) stopped: ${dead.map(s => s.id).join(', ')}`
+      : stalled.length
+        ? `${stalled.length} of ${sources.length} source(s) stalled (running but writing ` +
+          `nothing): ${stalled.join(', ')}`
+        : '';
     return [{
       id: 'recorder',
       label: 'Recording',
-      level: dead.length ? 'fail' : 'ok',
+      level: bad ? 'fail' : 'ok',
       blocking: true,
-      detail: dead.length
-        ? `${dead.length} of ${sources.length} source(s) stopped: ${dead.map(s => s.id).join(', ')}`
-        : `${sources.length} source(s) rolling`,
-      ...(dead.length ? { fix: 'Check the capture device is still plugged in, then restart the desk.' } : {}),
+      detail: bad || `${sources.length} source(s) rolling`,
+      ...(bad ? { fix: 'Check the capture device is still plugged in, then restart the desk.' } : {}),
     }];
   }
 

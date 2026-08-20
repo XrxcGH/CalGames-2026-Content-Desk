@@ -249,14 +249,26 @@ export class Awards {
   }
 
   /**
-   * The reveal. The winner may have been typed at show time (held here) or is
-   * supplied now; either way this is its first appearance on the bus.
+   * The reveal. The winner may have been typed at show time (held here),
+   * staged by the JA, or supplied now; either way this is its first
+   * appearance on the bus.
    */
   reveal(opts: { winner?: string; team?: number | null } = {}): void {
     if (!this.#live) throw new Error('No award is up. Show one first.');
-    const winner = clean(opts.winner, 120) || this.#live.winner;
+    const typed = clean(opts.winner, 120);
+    // show() copies the staging once, at show time, so a winner the JA staged
+    // AFTER the desk pressed Show used to be invisible here: the desk hit
+    // Reveal mid-suspense and was told to type a name it cannot even see (the
+    // locked snapshot hides staged winners). Re-consult the staged map as the
+    // last resort. The ranking is unchanged, a winner typed at the desk (now
+    // or at show time) still outranks the staged one, and the staged copy
+    // still first touches the bus right here, at the reveal.
+    const staged = this.#staged.get(this.#live.id);
+    const winner = typed || this.#live.winner || staged?.winner || '';
     if (!winner) throw new Error('Type the winner before revealing.');
-    const team = opts.team !== undefined ? teamOf(opts.team) : this.#live.team;
+    const team = opts.team !== undefined ? teamOf(opts.team)
+      : typed || this.#live.winner ? this.#live.team
+        : staged?.team ?? null;
 
     this.#bus.emit({
       type: 'award.presented',

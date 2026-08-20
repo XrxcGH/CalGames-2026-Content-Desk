@@ -126,6 +126,12 @@ export class CheesyAdapter {
   #refreshTimer: NodeJS.Timeout | null = null;
   /** True while a REST round-trip is in flight, to hold the one-request budget. */
   #polling = false;
+  /** Last aggregate bridge state reported, so arena.status fires on edges. */
+  #lastAggUp: boolean | null = null;
+  /** Display name of the loaded match, riding on card.issued for phasing. */
+  #loadedMatchName = '';
+  /** When Nexus last delivered a queue, so the schedule poll can defer to it. */
+  #nexusQueueAt = 0;
 
   constructor(opts: CheesyAdapterOpts) {
     this.#bus = opts.bus;
@@ -133,10 +139,19 @@ export class CheesyAdapter {
       host: opts.host,
       displayId: opts.displayId,
       onEvent: (notifier, data) => this.ingest(notifier, data),
-      onStatus: (up, detail) => {
+      onStatus: (_up, detail) => {
+        // The AGGREGATE, not the single socket: six sockets feed this
+        // callback, and reporting each one's state last-writer-wins made one
+        // missing endpoint (an offseason arena build lacking a display
+        // route) flap the whole bridge "down" once a minute while field data
+        // flowed on the other five. The client already keeps the honest
+        // answer; only its edges are worth an event.
+        const agg = this.#client.connected;
+        if (agg === this.#lastAggUp) return;
+        this.#lastAggUp = agg;
         this.#bus.emit({
           type: 'arena.status', source: 'cheesy', confidence: 'authoritative',
-          payload: { cheesy: up, detail },
+          payload: { cheesy: agg, detail },
         });
       },
     });
@@ -145,6 +160,10 @@ export class CheesyAdapter {
   get client(): CheesyClient { return this.#client; }
 
   start(): void {
+    // Watch for the queuers' source so the schedule poll knows when to yield.
+    this.#bus.subscribe(ev => {
+      if (ev.type === 'queue.updated' && ev.source === 'nexus') this.#nexusQueueAt = ev.ts;
+    });
     this.#client.connect();
     // Schedule and rankings are REST-only. 60s is deliberate: they change on
     // the order of once a match, and the field network is not ours to load up.
@@ -213,7 +232,16 @@ export class CheesyAdapter {
         } catch {
           // No bracket yet. Quals alone is still a correct queue.
         }
-        this.#emit({ type: 'queue.updated', payload: { upcoming: mapUpcoming([...qual, ...playoff]) } });
+        // Nexus arbitration: when the queuers' live estimates are flowing,
+        // this poll stays quiet. Both sources write state.upcoming wholesale,
+        // and alternating them put the printed schedule and the live estimate
+        // on the side screens in turns, disagreeing with themselves once a
+        // minute. Two sources disagreeing on air is worse than one being
+        // absent; Cheesy is the fallback, and 90s (four missed Nexus polls)
+        // is how long it waits before deciding the fallback is needed.
+        if (Date.now() - this.#nexusQueueAt > 90_000) {
+          this.#emit({ type: 'queue.updated', payload: { upcoming: mapUpcoming([...qual, ...playoff]) } });
+        }
       } catch (err) {
         console.warn('[cheesy] schedule poll failed:', (err as Error).message);
       }
@@ -304,6 +332,18 @@ export class CheesyAdapter {
       || this.#matchState === MatchState.TeleopPeriod
       || this.#matchState === MatchState.PostMatch;
     if (inProgress && match.id === this.#loadedMatchId) return;
+    // The OTHER reconnect window: the field sits in PreMatch for minutes
+    // after a score posts, and a socket blip there replays the finished
+    // match's matchLoad. Running the reset wiped the just-posted score off
+    // air, flipped program back to the dead match's overview, and nulled the
+    // timestamps the gap cue and the publish cut key off. Same match id, no
+    // replay flag, score still on the board: that is a reconnect echo, not a
+    // scorekeeper re-run. A GENUINE re-run of the same match arrives with
+    // IsReplay set (or after the score has been cleared) and still resets.
+    if (match.id === this.#loadedMatchId && !msg.IsReplay
+        && this.#bus.state.scorePostedAt !== null) {
+      return;
+    }
 
     this.#last = { red: zero(), blue: zero() };
     this.#started = false;
@@ -312,6 +352,7 @@ export class CheesyAdapter {
     this.#matchLoaded = true;
     this.#armedSent = false;
     this.#loadedMatchId = match.id;
+    this.#loadedMatchName = match.displayName ?? '';
     this.#cardsSeen.clear();
     this.#emit({ type: 'match.loaded', payload: match });
   }
@@ -472,7 +513,13 @@ export class CheesyAdapter {
         const key = `${side}:${team}:${card}`;
         if (this.#cardsSeen.has(key)) continue;
         this.#cardsSeen.add(key);
-        this.#emit({ type: 'card.issued', payload: { alliance: side, team: Number(team), card } });
+        this.#emit({ type: 'card.issued', payload: {
+          alliance: side, team: Number(team), card,
+          // The match name rides along so the reducer can phase the card
+          // without needing a loaded match, which is what makes a boot-time
+          // restore of card.issued events alone reconstruct byTeam.
+          match: this.#loadedMatchName,
+        } });
       }
     }
   }

@@ -193,6 +193,17 @@ export class EventBus {
     }
   }
 
+  /**
+   * Fold one logged event into the state snapshot, and do nothing else: no
+   * log write, no subscribers, no sequence. This exists for the boot-time
+   * rebuild, where the overlay-facing halves of the snapshot (the card
+   * marks) have to come back after a restart, but nothing may reach air and
+   * nothing may re-enter the log. Use it for anything else and cues fire.
+   */
+  restore(ev: DeskEvent): void {
+    this.#state = reduce(this.#state, ev);
+  }
+
   /** Replay a recorded log. speed=0 replays as fast as possible. */
   async replay(path: string, speed = 1): Promise<void> {
     const lines = (await readFile(path, 'utf8')).split('\n').filter(Boolean);
@@ -247,6 +258,15 @@ export class EventBus {
         type: ev.type, payload: ev.payload, source: ev.source,
         confidence: ev.confidence, ts: logicalTs,
       });
+      // At max speed the loop never yields, so the 10Hz ticker that
+      // regenerates clock-derived boundaries (auto_end, endgame,
+      // shift_change; match.end in desk-only logs) never runs until the
+      // replay is over and the axis is gone. Since those events were
+      // filtered above ON THE PROMISE that advance() re-fires them, the
+      // promise has to be kept inline: advance on the replay axis after
+      // every event. At real-time speeds the ticker interleaves anyway and
+      // this is a cheap no-op between boundaries.
+      if (speed === 0) this.advance(logicalTs);
     }
     } finally {
       // Always hand time back to the wall clock, even if the replay threw
@@ -277,5 +297,12 @@ export function localStamp(d: Date): string {
     `-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
 
-export const logPathFor = (dir: string, d = new Date()): string =>
-  join(dir, `${localStamp(d)}.ndjson`);
+/**
+ * `tag` marks a session whose events must never feed the boot-time rebuild:
+ * a --demo tech check or a --replay rehearsal appends to a log too, and an
+ * untagged one landed in the day's real history, where the next boot
+ * resurrected rehearsal cards, phantom coverage rows and inflated sponsor
+ * counts into the live ledgers. isFromDay() refuses tagged names.
+ */
+export const logPathFor = (dir: string, d = new Date(), tag?: string): string =>
+  join(dir, `${localStamp(d)}${tag ? `.${tag}` : ''}.ndjson`);

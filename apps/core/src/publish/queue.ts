@@ -14,6 +14,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Config } from '../config.ts';
 import type { EventBus } from '../bus.ts';
+import type { DeskState } from '../types.ts';
 import { matchCut, type ClipStore, type Range } from '../clips.ts';
 import { TbaClient } from './tba.ts';
 import { description, identify, isPractice, segmentDescription, segmentName, videoTitle } from './naming.ts';
@@ -90,6 +91,24 @@ export function qcHold(kind: ItemKind, cutSeconds: number): string | null {
       + 'Check the clip, then release.';
   }
   return null;
+}
+
+/**
+ * Whether a match is live as far as the reducer can tell, erring on the side
+ * of "yes". `matchStartedAt` alone is not enough: the reducer boots empty on
+ * every restart, and a desk that comes back mid-teleop never sees another
+ * match.start for that match (the adapter emits it only on the auto
+ * transition), so the field stays null while the match plays out on the real
+ * field. What a reconnect DOES replay is match.loaded, and match.loaded
+ * clears matchEndedAt and scorePostedAt with it; a loaded match with neither
+ * an end nor a score is therefore live or about to be, and anything gating on
+ * liveness must fail closed on that state rather than treat the missing
+ * match.start as an all-clear.
+ */
+export function matchUnderway(st: Pick<DeskState,
+  'matchStartedAt' | 'matchLoadedAt' | 'matchEndedAt' | 'scorePostedAt'>): boolean {
+  if (st.matchStartedAt !== null) return true;
+  return st.matchLoadedAt !== null && st.matchEndedAt === null && st.scorePostedAt === null;
 }
 
 export class PublishQueue {
@@ -221,6 +240,15 @@ export class PublishQueue {
   /** Queue the current or just-finished match, framed for broadcast. */
   async queueMatch(opts: { manual?: boolean } = {}): Promise<QueueItem | null> {
     const st = this.#bus.state;
+    // A score posted while the clock is RUNNING is a mistake, whoever sent
+    // it: Post score pressed a hundred seconds early, or a stale replay that
+    // slipped past the adapter's identity gate. Cutting from it would end
+    // the video mid-match with a stretch of mid-match footage standing in
+    // for the reveal, and the dedupe below would then hold that label
+    // against the REAL video when the score finally posts. No manual
+    // override here, unlike the practice gate: a truncated cut is never
+    // what the operator meant to ask for.
+    if (st.matchStartedAt !== null) return null;
     const startedAt = st.lastMatchStartedAt;
     if (!startedAt) return null;
 
@@ -304,6 +332,25 @@ export class PublishQueue {
     }
 
     const name = segmentName(opts.segment);
+
+    // The match dedupe above keys on the label alone; a segment label cannot
+    // carry that weight, because legitimate repeats share one (the day 1 and
+    // day 2 ceremonies, two arcade sets of the same game). What no two real
+    // segments share is the recording window: a same-label request whose
+    // range overlaps one already queued is the same footage marked twice.
+    // In practice that is the venue-wifi retry (the desk's POST timed out
+    // after the server had already processed it) or a second console told to
+    // "make sure the ceremony is queued", and either used to put two copies
+    // of the ceremony on the channel plus two media rows on TBA. Returning
+    // the existing item rather than refusing lets the re-sent request read
+    // as the success it effectively was. Same failed-with-video rule as the
+    // match path: only a failure with no video on the channel may be marked
+    // again, and retry(id) is the path for one that has a video.
+    const dupe = this.#items.find(i => i.kind === 'segment' && i.label === name
+      && (i.state !== 'failed' || i.videoId)
+      && i.ranges.some(r => r.fromMs < opts.toMs && r.toMs > opts.fromMs));
+    if (dupe) return dupe;
+
     const title = videoTitle(name, this.#cfg.event.name, this.#cfg.event.year);
     const ranges: Range[] = [{ fromMs: opts.fromMs, toMs: opts.toMs }];
     const hold = qcHold('segment', (opts.toMs - opts.fromMs) / 1000);
@@ -453,9 +500,14 @@ export class PublishQueue {
         // The master switch outranks everything, including a release.
         if (!this.#cfg.publish.enabled) { item.state = 'held'; return true; }
         if (this.#cfg.publish.mode === 'deferred' && !item.released) { item.state = 'held'; return true; }
-        if (this.#cfg.publish.mode === 'trickle' && this.#bus.state.matchStartedAt !== null) {
+        if (this.#cfg.publish.mode === 'trickle' && matchUnderway(this.#bus.state)) {
           // Trickle's promise is that an upload never starts against a live
-          // match. Stay 'cut', block the loop, and look again shortly.
+          // match. matchUnderway rather than a bare matchStartedAt check: a
+          // desk that restarts mid-teleop boots an empty reducer and never
+          // sees another match.start for that match, and the bare null check
+          // read that as an all-clear, starting a multi-GB backlog upload
+          // against the live stream's uplink 250ms after boot. Stay 'cut',
+          // block the loop, and look again shortly.
           if (!this.#timer) {
             this.#timer = setTimeout(() => { this.#timer = null; void this.#work(); }, 15_000);
           }

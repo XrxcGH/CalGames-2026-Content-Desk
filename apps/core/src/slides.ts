@@ -57,8 +57,8 @@ const KINDS: SlideKind[] = ['recognition', 'info', 'shoutout'];
 const clean = (v: unknown, max: number): string =>
   String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-const linesOf = (v: unknown): string[] =>
-  (Array.isArray(v) ? v : []).map(l => clean(l, 90)).filter(Boolean).slice(0, 6);
+const linesOf = (v: unknown, max = 90): string[] =>
+  (Array.isArray(v) ? v : []).map(l => clean(l, max)).filter(Boolean).slice(0, 6);
 
 /** How many submissions one address gets per window. A gym full of phones is
  *  a gym full of the same three bored people without this. */
@@ -82,11 +82,24 @@ export class Slides {
     this.#bus = bus;
     this.#dir = join(root, 'data');
     this.#file = join(this.#dir, 'slides.json');
+    const seen = new Set<string>();
     this.#config = (Array.isArray(configList) ? configList : []).flatMap(raw => {
       const item = raw as Record<string, unknown> | null;
       const id = clean(item?.['id'], 40);
       const title = clean(item?.['title'], 80);
       if (!id || !title) return [];
+      // A copy-pasted id in hand-edited config.json used to wedge the whole
+      // rotation: show() resolves by id and snaps the cursor to the FIRST
+      // match, so next() from the first duplicate landed right back on it,
+      // forever, and every slide after it never aired while the operator saw
+      // the same card repaint with no error. Keep the first, drop the rest,
+      // and say so at boot while someone can still fix the file.
+      if (seen.has(id)) {
+        console.warn(`[slides] config.json lists the slide id "${id}" more than once; `
+          + 'keeping the first and skipping the rest.');
+        return [];
+      }
+      seen.add(id);
       const kind = KINDS.includes(item?.['kind'] as SlideKind)
         ? item?.['kind'] as SlideKind : 'info';
       return [{ id, kind, title, lines: linesOf(item?.['lines']) }];
@@ -99,9 +112,14 @@ export class Slides {
         { added?: unknown[]; queue?: unknown[] };
       this.#added = (Array.isArray(raw.added) ? raw.added : []).flatMap(item => {
         const s = item as Slide;
+        // The reload cap matches the widest legitimate writer: approve() puts
+        // the whole shout-out message, up to submit()'s 200 characters, on one
+        // line. Re-importing through the 90-character desk cap cut an approved
+        // message mid-word after a restart, so the projector aired something
+        // the moderator never approved. The round-trip must be lossless.
         return s?.id && s?.title
           ? [{ id: String(s.id), kind: KINDS.includes(s.kind) ? s.kind : 'info',
-            title: clean(s.title, 80), lines: linesOf(s.lines) }]
+            title: clean(s.title, 80), lines: linesOf(s.lines, 200) }]
           : [];
       });
       this.#queue = (Array.isArray(raw.queue) ? raw.queue : []).flatMap(item => {
@@ -118,7 +136,27 @@ export class Slides {
     }
   }
 
-  async #save(): Promise<void> {
+  /**
+   * Atomic write, and serialised, the same shape as the publish queue's save.
+   *
+   * They race here too, and worse: submit() is the crowd-writable path, so
+   * two phones posting shout-outs in the same instant reach this together.
+   * Unserialised, both used one shared `.tmp` path, each opening and
+   * truncating it mid-write of the other, and whichever rename landed first
+   * published the interleaved bytes as slides.json (the loser's rename failed
+   * ENOENT and was swallowed). load() then failed to parse the torn file at
+   * the next boot and quietly fell back to config-only: every name typed on
+   * Saturday and the whole pending queue, gone. Chaining is enough; these are
+   * small writes, and correctness is worth more than concurrency.
+   */
+  #saving: Promise<void> = Promise.resolve();
+
+  #save(): Promise<void> {
+    this.#saving = this.#saving.then(() => this.#writeNow(), () => this.#writeNow());
+    return this.#saving;
+  }
+
+  async #writeNow(): Promise<void> {
     try {
       await mkdir(this.#dir, { recursive: true });
       const tmp = `${this.#file}.tmp`;

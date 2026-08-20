@@ -101,6 +101,9 @@ export class CheesyClient {
   #audit: AuditEntry[] = [];
   #stopping = false;
   #connected = new Set<string>();
+  /** Last frame time per socket, for the half-open watchdog. */
+  #lastSeen = new Map<string, number>();
+  #watchdog: NodeJS.Timeout | null = null;
 
   constructor(opts: CheesyClientOpts) { this.#opts = opts; }
 
@@ -118,6 +121,37 @@ export class CheesyClient {
       assertSocketAllowed(path);
       this.#open(path);
     }
+
+    /*
+     * The half-open watchdog. Reconnection used to hang entirely on socket
+     * events, and a half-open connection fires none: the field path drops
+     * for a minute, Cheesy closes its end, the FIN never arrives, and the
+     * desk's sockets sit ESTABLISHED receiving nothing for the rest of the
+     * day while vitals reports the bridge green.
+     *
+     * Silence alone is NOT proof of death (between matches a notifier can
+     * legitimately say nothing for minutes), so silence is answered with a
+     * PING, and only a transport failure kills the socket: a ping written
+     * onto a dead path exhausts TCP retransmission and errors the socket,
+     * which is the reconnect trigger everything already handles. On a live
+     * path the ping is absorbed unread and nothing changes.
+     *
+     * This is the one deliberate exception to "no code path here writes":
+     * a ping is a control frame, not an application frame. The safety story
+     * is unaffected, because HandleNotifiers-only endpoints never call
+     * Read() and cannot process anything, control frames included.
+     */
+    if (!this.#watchdog) {
+      this.#watchdog = setInterval(() => {
+        const now = Date.now();
+        for (const [path, ws] of this.#sockets) {
+          if (ws.readyState !== ws.OPEN) continue;
+          if (now - (this.#lastSeen.get(path) ?? now) > 45_000) {
+            ws.ping(undefined, undefined, () => { /* failure surfaces on 'error' */ });
+          }
+        }
+      }, 20_000);
+    }
   }
 
   #open(path: string): void {
@@ -134,6 +168,7 @@ export class CheesyClient {
     this.#record('WS', url, 'open');
 
     ws.on('open', () => {
+      this.#lastSeen.set(path, Date.now());
       this.#connected.add(path);
       this.#opts.onStatus?.(true, path);
       // The backoff resets only after the socket has stayed up a while. An
@@ -150,14 +185,17 @@ export class CheesyClient {
     });
 
     ws.on('message', raw => {
+      this.#lastSeen.set(path, Date.now());
       // Cheesy frames are {type, data}.
       let msg: { type?: string; data?: unknown };
       try { msg = JSON.parse(String(raw)) as typeof msg; } catch { return; }
       if (msg.type) this.#opts.onEvent(msg.type, msg.data);
     });
 
-    // We never send an application frame. The endpoints cannot read one, but
-    // belt and suspenders: there is no code path here that writes.
+    // We never send an APPLICATION frame. The endpoints cannot read one, but
+    // belt and suspenders: nothing here writes one. (The watchdog in
+    // connect() writes protocol PINGs, a control frame, to make a dead TCP
+    // path prove itself; see the comment there.)
     ws.on('close', () => this.#reopen(path, 'closed'));
     ws.on('error', err => this.#reopen(path, err.message));
   }
@@ -213,6 +251,7 @@ export class CheesyClient {
   /** Kill switch. Everything downstream degrades to manual and keeps running. */
   close(): void {
     this.#stopping = true;
+    if (this.#watchdog) { clearInterval(this.#watchdog); this.#watchdog = null; }
     for (const t of this.#timers) clearTimeout(t);
     this.#timers.clear();
     for (const [, ws] of this.#sockets) ws.close();

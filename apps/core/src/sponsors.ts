@@ -134,7 +134,18 @@ export class Sponsors {
   }
 
   attach(): () => void {
-    return this.#bus.subscribe(ev => this.observe(ev));
+    return this.#bus.subscribe(ev => {
+      // The auto-hide's EMIT lives here, on the live bus only. observe() is
+      // also the rebuild path (index.ts feeds it the day's log directly), so
+      // an emit inside observe() would fire sponsor.hide onto the live bus
+      // during replay, violating rebuild's nothing-reaches-air contract.
+      const autoHide = this.#live
+        && (ev.type === 'match.armed' || ev.type === 'match.start');
+      this.observe(ev);
+      if (autoHide) {
+        this.#bus.emit({ type: 'sponsor.hide', source: 'manual', payload: {} });
+      }
+    });
   }
 
   /**
@@ -150,8 +161,22 @@ export class Sponsors {
    */
   observe(ev: DeskEvent): void {
     // A sponsor card must never be on screen when a match starts. The desk
-    // manager has enough to do; this gets itself out of the way.
-    if (ev.type === 'match.armed' || ev.type === 'match.start') { this.hide(); return; }
+    // manager has enough to do; this gets itself out of the way. Closed with
+    // EV.TS, not Date.now(), and without emitting: this branch also runs
+    // during the boot-time log replay, where hide()'s wall clock recorded an
+    // airing of (restart time - original show time), hours instead of the
+    // true two minutes, in the exact report a sponsor is shown after the
+    // event. The live-path emit that actually takes the card down rides in
+    // attach()'s subscription wrapper instead.
+    if (ev.type === 'match.armed' || ev.type === 'match.start') {
+      const live = this.#live;
+      if (live) {
+        const seconds = Math.max(0, Math.round((ev.ts - live.since) / 1000));
+        if (seconds >= 1) this.#airings.push({ id: live.id, at: live.since, seconds });
+        this.#live = null;
+      }
+      return;
+    }
 
     if (ev.type === 'sponsor.show') {
       const id = String((ev.payload as { id?: unknown }).id ?? '').trim();

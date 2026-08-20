@@ -60,6 +60,8 @@ export class Recorder {
   }
 
   get status(): SourceStatus[] { return [...this.#status.values()]; }
+  /** How long one segment runs, so a health check can judge file freshness. */
+  get segmentSeconds(): number { return this.#cfg.segmentSeconds; }
   get encoder(): string { return this.#encoder.encoder; }
   dirFor(sourceId: string): string { return join(this.#cfg.root, sourceId); }
 

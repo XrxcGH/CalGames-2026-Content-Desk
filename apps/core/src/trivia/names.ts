@@ -136,15 +136,36 @@ export function screenName(raw: string): NameVerdict {
   if (!trimmed) return { ok: false, reason: 'A name is required.' };
 
   const flat = trimmed.toLowerCase();
+  const words = foldWords(trimmed);
+  const rawWords = trimmed.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+
   // Checked on the FOLDED form as well as the raw one. "Admin.", "admin_",
   // "@dmin" and "4dmin" all sailed past a raw equality test and impersonated
   // staff on the leaderboard while plain "admin" was refused.
-  const reservedForms = [flat, normalizeName(trimmed)];
-  if (RESERVED.some(r => reservedForms.some(f => f === r || f.startsWith(`${r} `)))) {
+  //
+  // And matched as whole words ANYWHERE in the name, not merely at its front.
+  // The old test was exact-or-prefix, which caught "Referee Bob" and waved
+  // "Head Referee" straight through: "head referee" does not start with
+  // "head ref " because the character after "head ref" is an e, not a space.
+  // The "head ref" entry exists precisely to stop that impersonation, so the
+  // doorstop was missing its own named target. Whole words only, in both
+  // directions: "Adminah" is still somebody's name, not staff.
+  const collapsedForms = [flat, normalizeName(trimmed)];
+  const reserved = RESERVED.some(r => {
+    // The whole name, spacing and all, or with the spacing taken out:
+    // "head ref", "HeadRef", and "a d m i n" all land here.
+    if (collapsedForms.some(f => f === r || f === r.replace(/ /g, ''))) return true;
+    // The reserved term as a run of consecutive whole words, wherever it
+    // sits in the name: "Head Referee" and "The Announcer" are the same
+    // impersonation as their prefix-shaped cousins.
+    const run = r.split(' ');
+    return [words, rawWords].some(ws =>
+      ws.some((_, i) => run.every((part, j) => ws[i + j] === part)));
+  });
+  if (reserved) {
     return { ok: false, reason: 'That name is reserved for event staff. Pick another one.' };
   }
 
-  const words = foldWords(trimmed);
   if (!words.length) {
     // All punctuation or emoji. It renders as a blank row on the leaderboard,
     // which reads as a rendering fault rather than somebody's choice.
@@ -160,7 +181,6 @@ export function screenName(raw: string): NameVerdict {
   // digit to a letter, giving "fucki", which is no stem plus any real suffix,
   // so it passed, while bare "fuck" was refused. Unfolded, the digit is a
   // separator and the word is plainly there.
-  const rawWords = trimmed.toLowerCase().split(/[^a-z]+/).filter(Boolean);
   if ([...words, ...rawWords].some(isBannedWord)) {
     return { ok: false, reason: 'Pick a different name for the big screen.' };
   }

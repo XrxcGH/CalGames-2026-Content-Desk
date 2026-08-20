@@ -1732,21 +1732,27 @@ export function startServer(opts: ServerOpts) {
          * The file stays on disk: this is a consent decision, not a deletion,
          * and it has to be reversible from the media console.
          */
-        if (prefix === '/media/') {
-          // Match on the DECODED path, because safeJoin below decodes before it
-          // opens the file. url.pathname keeps percent escapes, so a request for
-          // /media/teams/%32%35%34/robot.v1.png read as a non-numeric team, skipped
-          // this check entirely, then resolved to team 254 and served a photo that
-          // team had asked to have taken down.
-          let decodedRel = rel;
-          try { decodedRel = decodeURIComponent(rel); } catch { /* malformed: judge it raw */ }
-          const team = Number(/^teams\/(\d+)\//.exec(decodedRel)?.[1]);
+        const file = safeJoin(base, rel);
+        if (prefix === '/media/' && file) {
+          // The consent decision keys off the RESOLVED path safeJoin is about
+          // to open, never off the URL's surface form. A regex on the raw rel
+          // was defeated four separate ways, each resolving to the same real
+          // bytes: percent-encoded digits (%32%35%34), a doubled slash
+          // (//teams/...), %5C backslashes (a separator to win32 paths), and
+          // case variants (Teams/, real to a case-insensitive filesystem).
+          // Matching what the filesystem will actually see closes the class,
+          // not the instance. Trailing dots and spaces are stripped per
+          // segment because Win32 strips them at open ("teams./254" opens
+          // teams\254).
+          const inside = file.slice(base.length)
+            .replace(/\\/g, '/').replace(/^\/+/, '')
+            .split('/').map(seg => seg.replace(/[. ]+$/, '')).join('/');
+          const team = Number(/^teams\/(\d+)\//i.exec(inside)?.[1]);
           if (Number.isInteger(team) && media.manifest[team]?.consent === 'declined') {
             res.writeHead(404).end('Not found');
             return;
           }
         }
-        const file = safeJoin(base, rel);
         if (file && await sendFile(res, file)) return;
         res.writeHead(404).end('Not found');
         return;
@@ -1843,7 +1849,12 @@ ${sections}</body></html>`;
       // Date.now() is from this machine's. The only thing they had to measure
       // that with was state.updatedAt, which is the timestamp of the last
       // EVENT and can be a minute old between matches.
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'hb', now: Date.now() }));
+      if (ws.readyState !== ws.OPEN) continue;
+      // The stalled-reader check rides the heartbeat too, so a wedged client
+      // gets cut even across a quiet stretch when no events are flowing to
+      // trip the fan-out's own cap.
+      if (ws.bufferedAmount > 16 * 1024 * 1024) { ws.terminate(); continue; }
+      ws.send(JSON.stringify({ t: 'hb', now: Date.now() }));
     }
   }, 10_000);
 
@@ -1956,8 +1967,33 @@ ${sections}</body></html>`;
     ws.on('error', err => console.error(`[ws:${who}]`, err.message));
   });
 
+  /*
+   * Fan-out, with backpressure. Two rules, both learned the expensive way in
+   * other stacks:
+   *
+   * Stringify ONCE. Every frame carries the full state, and serializing it
+   * per client made the cost O(clients x state size) on the show-critical
+   * loop for every score tick.
+   *
+   * Never queue for a stalled reader. A backgrounded phone tab or a wedged
+   * kiosk renderer stops reading while its TCP peer keeps ACKing, so
+   * readyState stays OPEN forever and every frame appends to that socket's
+   * userland buffer: hundreds of MB by mid-afternoon, ending in an OOM that
+   * kills every overlay at once. Skipping is safe BECAUSE frames carry the
+   * complete state: the next frame under the cap catches the client up in
+   * one message. Past the hard cap the client is not coming back; terminate
+   * and let its own reconnect logic try again when it wakes.
+   */
+  const SOFT_BUFFER = 1 * 1024 * 1024;
+  const HARD_BUFFER = 16 * 1024 * 1024;
   const unsubscribe = bus.subscribe((ev, state) => {
-    for (const ws of wss.clients) send(ws, { t: 'event', ev, state });
+    const frame = JSON.stringify({ t: 'event', ev, state });
+    for (const ws of wss.clients) {
+      if (ws.readyState !== ws.OPEN) continue;
+      if (ws.bufferedAmount > HARD_BUFFER) { ws.terminate(); continue; }
+      if (ws.bufferedAmount > SOFT_BUFFER) continue;
+      ws.send(frame);
+    }
   });
 
   // A taken port must read as "close the other desk", not a stack trace.

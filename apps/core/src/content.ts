@@ -95,12 +95,14 @@ const SANITIZERS: Record<string, (v: unknown) => unknown> = {
       const tier = String(r['tier'] ?? '');
       // Logos are served from this process or not at all: an off-origin URL
       // would make the broadcast depend on venue internet mid-ceremony.
+      // "//host/x" is off-origin too (protocol-relative), so one leading
+      // slash exactly.
       const logo = line(r['logo'], 200);
       list.push({
         id, name,
         ...(SPONSOR_TIERS.has(tier) ? { tier: tier as SponsorPlan['tier'] } : {}),
         ...(line(r['line'], 140) ? { line: line(r['line'], 140) } : {}),
-        ...(logo.startsWith('/') ? { logo } : {}),
+        ...(logo.startsWith('/') && !logo.startsWith('//') ? { logo } : {}),
       });
     }
     return { list };

@@ -55,12 +55,12 @@ test('a desk session cannot reach the award family or the field\'s confidence ti
     ws.send(JSON.stringify({
       t: 'emit',
       init: {
-        type: 'match.score', confidence: 'authoritative',
+        type: 'score.delta', confidence: 'authoritative',
         payload: { alliance: 'red', kind: 'fuel', amount: 1 },
       },
     }));
     await new Promise(r => setTimeout(r, 300));
-    const scored = bus.recent.filter(e => e.type === 'match.score').pop();
+    const scored = bus.recent.filter(e => e.type === 'score.delta').pop();
     assert.equal(scored?.confidence, 'estimated',
       'a socket-spoofed authoritative score must land as estimated');
 
@@ -76,6 +76,46 @@ test('a desk session cannot reach the award family or the field\'s confidence ti
       'a control-map Post score must not publish at the field\'s tier');
 
     ws.close();
+  } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a declined team\'s photo is unreachable by every path spelling', async () => {
+  // The consent block used to regex the URL's surface form while safeJoin
+  // opened the RESOLVED path, and the two disagreed four ways on Windows.
+  // The block now derives the team from the same string the filesystem sees.
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'cg-consent-'));
+  const teamDir = join(dir, 'media', 'teams', '254');
+  await mkdir(teamDir, { recursive: true });
+  await writeFile(join(teamDir, 'robot.v1.png'), 'not-really-a-png');
+  await writeFile(join(teamDir, 'meta.json'), JSON.stringify({
+    team: 254, version: 1, w: 1200, h: 800,
+    src: '/media/teams/254/robot.v1.png',
+    uploadedAt: 1, warnings: [], consent: 'declined',
+  }));
+  const media = new MediaLibrary(join(dir, 'media'));
+  await media.scan();
+  assert.equal(media.manifest[254]?.consent, 'declined', 'fixture sanity');
+
+  const bus = new EventBus();
+  const server = startServer({ bus, media, root: dir, port: PORT + 1, host: '127.0.0.1' });
+  try {
+    const spellings = [
+      '/media/teams/254/robot.v1.png',            // the plain path
+      '/media/teams/%32%35%34/robot.v1.png',      // percent-encoded digits
+      '/media//teams/254/robot.v1.png',           // doubled slash
+      '/media/teams%5C254%5Crobot.v1.png',        // backslash separators
+      '/media/Teams/254/robot.v1.png',            // case variant
+      '/media/teams./254/robot.v1.png',           // Win32 trailing-dot open
+      '/media/teams/253/../254/robot.v1.png',     // dot-segment resolution
+    ];
+    for (const p of spellings) {
+      const res = await fetch(`http://127.0.0.1:${PORT + 1}${p}`);
+      assert.equal(res.status, 404, `${p} must not serve a declined team's photo`);
+    }
   } finally {
     server.close();
     await rm(dir, { recursive: true, force: true });

@@ -345,18 +345,36 @@ export interface Emergency {
 
 export type CardColor = 'yellow' | 'red';
 
+export type TournamentPhase = 'practice' | 'qualification' | 'playoff';
+
+/**
+ * Which tournament phase a match name belongs to. Lives here rather than in
+ * cards.ts because BOTH card systems need it (the ledger and the reducer),
+ * and cards.ts imports bus.ts, which imports state.ts: the reducer importing
+ * cards.ts would close a cycle.
+ */
+export function phaseOf(match: string): TournamentPhase {
+  const m = match.trim().toLowerCase();
+  if (m.startsWith('practice') || /^p\d/.test(m)) return 'practice';
+  if (m.startsWith('qual') || /^q\d/.test(m)) return 'qualification';
+  return 'playoff';
+}
+
 /**
  * Cards, as the OVERLAY needs them.
  *
  * Deliberately on the state snapshot rather than read from the ledger in
  * cards.ts: the program overlay is an open surface with no credential, and
- * /api/discipline is gated. Both derive from the same card.issued events and
- * dedupe the same way; this carries what a graphic needs, and the ledger
- * carries the audit trail the announcer reads.
+ * /api/discipline is gated. Both derive from the same card.issued events,
+ * dedupe the same way, and apply the same manual rule: a card carries
+ * forward but does NOT carry past the end of the tournament phase (S6.6).
+ * byTeam therefore holds only the CURRENT phase's counts; loading a match
+ * from a new phase drops the old phase's entries, so a yellow spent in
+ * quals never marks a team's playoff graphic.
  */
 export interface CardState {
-  /** Running totals per team, across the whole event. Yellows carry. */
-  byTeam: Record<number, { yellows: number; reds: number }>;
+  /** Totals per team FOR THE CURRENT PHASE. Yellows carry within it. */
+  byTeam: Record<number, { yellows: number; reds: number; phase: TournamentPhase }>;
   /** Issued in the match currently loaded, for the post-match graphic. */
   thisMatch: { team: number; color: CardColor; alliance: Alliance }[];
 }

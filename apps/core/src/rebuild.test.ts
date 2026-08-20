@@ -158,3 +158,11 @@ test('log names sort chronologically as strings, which is how they are replayed'
   ].map(localStamp);
   assert.deepEqual([...stamps].sort(), stamps);
 });
+
+test('a rehearsal log is not part of the day', () => {
+  // --demo and --replay sessions log under a tagged name so the events they
+  // fabricate never feed the next boot's ledgers.
+  assert.equal(isFromDay('2026-10-17-09-14-02.ndjson', '2026-10-17'), true);
+  assert.equal(isFromDay('2026-10-17-09-14-02.rehearsal.ndjson', '2026-10-17'), false);
+  assert.equal(isFromDay('2026-10-17-09-14-02.REHEARSAL.ndjson', '2026-10-17'), false);
+});
