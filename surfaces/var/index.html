@@ -244,15 +244,30 @@ async function grab() {
 function fail(message) { $('err').textContent = message; }
 
 // ---- markers --------------------------------------------------------------
+let lastMarksSig = null;
+// "0:07" alone is ambiguous: auto and endgame both count down through it.
+const phaseWord = c => PHASE_LABEL[phaseAt(c)] ?? '';
 async function loadMarkers() {
   let res;
   try { res = await fetch('/api/markers'); } catch { return; }
   if (!res.ok) return fail('Signed out. Reload this page and sign in again to see markers.');
   const marks = await res.json().catch(() => []);
-  if (!marks.length) return;
+  // Paint the empty state instead of returning: the early-return held the
+  // PREVIOUS match's flagged moments on screen indefinitely once the feed
+  // emptied at a match change — exactly the list a referee must never review
+  // against the wrong recording. Also skip the rebuild when nothing changed,
+  // so a ref keyboard-stepping the list does not lose focus every 10s.
+  const sig = JSON.stringify(marks.map(m => m.ts ?? m.label));
+  if (sig === lastMarksSig) return;
+  lastMarksSig = sig;
+  if (!marks.length) {
+    $('marks').innerHTML = '<p class="hint">No markers yet. They arrive as the match runs.</p>';
+    return;
+  }
   $('marks').innerHTML = marks.map(m => `
     <button class="mark" data-p="${m.priority}" data-c="${m.matchClock ?? ''}">
       <span class="c">${m.matchClock === null ? '--' : clockLabel(m.matchClock)}</span>
+      <span class="k">${m.matchClock === null ? '' : esc(phaseWord(m.matchClock))}</span>
       <span class="l">${esc(m.label)}</span>
       <span class="k">${esc(m.kind.replace(/_/g, ' '))}</span>
     </button>`).join('');

@@ -665,7 +665,10 @@ before.
 
 ### Crowd trivia
 
-Open `/s/triviadesk`. The job is three buttons: **Open**, **Reveal**, **Next**.
+Open `/s/triviadesk`. The job is one button, and its label always tells you
+what the next press does: **Open question** puts it on the board and starts
+the clock, then it reads **Reveal** (with the seconds left, so you know when
+the window closes), then **Next**. Press it when it says the thing you want.
 
 The crowd joins on their phones from the QR code the trivia screen shows. There
 are more than thirty questions loaded already, in rounds, so you can play a

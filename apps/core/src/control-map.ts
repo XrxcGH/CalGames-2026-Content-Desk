@@ -122,7 +122,7 @@ export const CONTROL_ACTIONS: ControlAction[] = [
   // ---- the gaps ----
   { id: 'sponsor.next', group: 'Gaps', label: 'Sponsor', does: 'Next sponsor in the rotation.',
     method: 'POST', path: '/api/sponsors', body: { action: 'next' } },
-  { id: 'sponsor.hide', group: 'Gaps', label: 'Sponsor off', does: 'Take the sponsor card down.',
+  { id: 'sponsor.hide', group: 'Gaps', label: 'Sponsor hide', does: 'Take the sponsor card down.',
     method: 'POST', path: '/api/sponsors', body: { action: 'hide' } },
   { id: 'trivia.open', group: 'Gaps', label: 'Open Q', does: 'Open the current trivia question.',
     method: 'POST', path: '/api/trivia/open', body: { seconds: 20 } },

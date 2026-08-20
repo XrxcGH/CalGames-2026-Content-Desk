@@ -41,8 +41,8 @@
    ========================================================================== */
 .ov {
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 :root[data-key="luma"] .ov {
   background-color: var(--cg-purple);
@@ -401,8 +401,8 @@
 .final {
   position: absolute; inset: 0;
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 /* Same luma rule as .ov and .gap-card: near-black fills key out on the DSK. */
 :root[data-key="luma"] .final {
@@ -666,8 +666,8 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 20px; text-align: center;
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 /* Near-black fills key out under the luma DSK, same rule as .ov and .bar. */
 :root[data-key="luma"] .gap-card {
@@ -782,8 +782,8 @@
 
 #scr-selection {
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 :root[data-key="luma"] #scr-selection {
   background-color: var(--cg-purple);
@@ -801,8 +801,8 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 22px; text-align: center; padding: 0 var(--safe-x);
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 :root[data-key="luma"] .exp-card {
   background-color: var(--cg-purple);
@@ -930,8 +930,8 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 18px; padding: 0 140px; text-align: center;
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 :root[data-key="luma"] .cc {
   background-color: var(--cg-purple);
@@ -997,8 +997,8 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 22px; padding: 0 140px; text-align: center;
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 :root[data-key="luma"] .sp {
   background-color: var(--cg-purple);
@@ -1048,8 +1048,8 @@
   flex-direction: column; align-items: center; justify-content: center;
   gap: 18px; padding: 0 140px; text-align: center;
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 .screen.aw[data-active], .screen.sl[data-active] { display: flex; }
 :root[data-key="luma"] .aw {
@@ -1114,8 +1114,8 @@
   flex-direction: column; align-items: center; justify-content: center;
   gap: 20px; padding: 0 160px; text-align: center;
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 :root[data-key="luma"] .sl {
   background-color: var(--cg-purple);

@@ -78,7 +78,7 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
     <h1>House audio</h1>
     <span class="hint">the room, not the stream</span>
     <span class="spacer"></span>
-    <span class="dot" id="link"></span>
+    <span class="dot" id="link"></span><span id="linkWord" role="status">connecting</span>
   </header>
 
   <div class="bus">
@@ -100,7 +100,7 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
           <div class="bar"><i id="prog"></i></div>
         </div>
       </div>
-      <div class="warn" id="warn" hidden></div>
+      <div class="warn" id="warn" role="alert" hidden></div>
     </div>
     <p class="hint" id="armHint">A browser will not play a sound until someone has clicked the
       page once. Click the button, leave this window open, and the desk can drive it from
@@ -225,7 +225,10 @@ function beat() { post('/api/audio/player', { id: playerId, armed }); }
 setInterval(beat, 8000);
 beat();
 
-desk.on('link', up => $('link').dataset.up = String(up));
+desk.on('link', up => {
+  $('link').dataset.up = String(up);
+  $('linkWord').textContent = up ? 'linked' : 'reconnecting';
+});
 desk.on('audio.updated', ev => paint(ev.payload));
 
 // The snapshot also rides in on first connect via the REST read, because a

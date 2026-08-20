@@ -11,7 +11,7 @@
    Keyboard-first. The producer must be able to run the whole show from here
    with every integration dead. */
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1760px; margin: 0 auto; padding: 20px 24px 64px; }
+.wrap { max-width: 1920px; margin: 0 auto; padding: 20px 24px 64px; }
 /* The jump strip: the page is twenty-odd sections tall, and mid-show nobody
    scroll-hunts. Sticky, one row, every anchor a section that matters under
    pressure. Safety is styled as what it is. */
@@ -42,6 +42,10 @@ h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
 @media (min-width: 1460px) {
   .grid > div:first-child { columns: 2; column-gap: 20px; }
   .grid > div:first-child > section { break-inside: avoid; }
+}
+/* Ultrawide and 4K: three show columns. The right rail stays a rail. */
+@media (min-width: 2100px) {
+  .grid > div:first-child { columns: 3; }
 }
 @media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
 /* Collapsible groups for the tools that are not the show: field-down kit and
@@ -335,8 +339,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <div class="row">
           <button class="btn btn--go" id="audToggle">Play music</button>
-          <button class="btn" id="audPrev">◀◀</button>
-          <button class="btn" id="audNext">▶▶</button>
+          <button class="btn" id="audPrev">Back</button>
+          <button class="btn" id="audNext">Skip</button>
           <button class="btn" id="audDuck">Duck</button>
           <button class="btn" id="audConsole">Game audio</button>
           <button class="btn" id="audWake">Wake player</button>
@@ -370,7 +374,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <input id="statusMin" type="number" min="0" max="120" placeholder="min" style="width:70px">
           <input id="statusCustom" placeholder="Custom message..." aria-label="Custom status message" style="flex:1;min-width:180px">
           <button class="btn" id="statusShowCustom">Show custom</button>
-          <button class="btn" id="statusClear">Clear card</button>
+          <button class="btn" id="statusClear">Hide card</button>
         </div>
       </section>
 
@@ -420,7 +424,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <div class="row" style="margin-top:12px">
           <button class="btn btn--go" id="panelShow">Put on air</button>
-          <button class="btn" id="panelHide">Clear</button>
+          <button class="btn" id="panelHide">Hide</button>
         </div>
       </section>
 
@@ -483,7 +487,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <div class="row">
           <button class="btn btn--go" id="slNext">Next slide</button>
-          <button class="btn" id="slHide">Take it down</button>
+          <button class="btn" id="slHide">Hide</button>
         </div>
         <label>Shout-out queue</label>
         <p class="hint">From phones in the stands (<b>/s/gp</b>, on the side-screen QR).

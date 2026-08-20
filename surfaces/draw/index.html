@@ -2,7 +2,10 @@
 <html lang="en" data-key="alpha">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- No zoom lock: pinch-during-stroke is already handled by touch-action:
+     none on the canvas, and locking scale breaks low-vision zoom (WCAG
+     1.4.4). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Telestrator pad · CalGames 2026</title>
 <link rel="stylesheet" href="/theme/tokens.css">
 <link rel="stylesheet" href="/shared/fonts.css">
@@ -92,7 +95,11 @@ body {
 /* Link state: a quiet dot in the corner, not a labeled readout. Spectators
    glancing at the pad shouldn't be reading production plumbing. The word only
    appears when something is WRONG. */
-#status { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+/* A normal flex item at the end of the bar, NOT absolutely positioned over
+   it: once team tags wrapped the toolbar to two rows, the absolute version
+   floated mid-bar and painted the signed-out warning across the ink swatches
+   — illegible exactly when it mattered most. */
+#status { margin-left: auto;
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font-mono); font-size: 12px; color: var(--cg-white-dim); opacity: .5; }
 /* Only the healthy state is dimmed. When the link is down the word is the
@@ -119,7 +126,7 @@ body {
   <div id="frameBox">
     <img id="frameImg" alt="" hidden>
     <div id="noFrame"><span>No frozen frame</span><span style="opacity:.6;font-size:14px">
-      Draw anyway, or send a frame from the desk</span></div>
+      Draw anyway, or ask replay to send a frame ("Send frame to analyst" on the Replay console)</span></div>
     <canvas id="ink"></canvas>
   </div>
 </div>
@@ -151,7 +158,11 @@ body {
 
 <script type="module">
 import { mountNav } from '/shared/nav.js';
-mountNav('draw');
+// screens:false — this is a stylus tablet used standing up, and the nav
+// strip's program takes sat exactly where a hand reaches for the Pen tool.
+// One brush of a knuckle took the broadcast to Blank mid-match. The talent
+// and ref pages already mount without takes for the same reason.
+mountNav('draw', { screens: false });
 import { connect, applyDisplayMode, startTicker } from '/shared/desk-client.js';
 import { StrokeBook, render } from '/shared/telestrator.js';
 

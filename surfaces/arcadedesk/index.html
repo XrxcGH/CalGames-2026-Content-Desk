@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1000px; margin: 0 auto; padding: 18px 22px 60px; }
+.wrap { max-width: 1380px; margin: 0 auto; padding: 18px 22px 60px; }
 header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
 h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .hint { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
@@ -113,7 +113,10 @@ input.wide { flex: 1; min-width: 180px; }
       overlay read <b>846 Ana</b> instead of a bare gamertag. Leave it blank for open entrants.</p>
 
     <div class="mid" id="setRound" style="margin:12px 0 8px" aria-live="polite">no set running</div>
-    <div id="scoreRows" aria-live="polite"><p class="hint">Start a set and score buttons appear here,
+    <!-- Not aria-live: it contains BUTTONS and rebuilds on roster changes; a
+         live region here read the whole roster aloud at every press. The
+         status line below the controls announces outcomes instead. -->
+    <div id="scoreRows"><p class="hint">Start a set and score buttons appear here,
       one row per player. Versus sets end on their own at 2 wins (3 for a best-of-5 grand final); free-for-alls end
       when you press End set.</p></div>
     <div class="row" style="margin-top:10px">
@@ -151,7 +154,7 @@ input.wide { flex: 1; min-width: 180px; }
       <button class="btn" id="recordRace">Record race</button>
       <button class="btn" id="undoRace">Undo</button>
     </div>
-    <div id="gpRows" aria-live="polite"></div>
+    <div id="gpRows"></div>
   </section>
 
   <section>
@@ -186,6 +189,8 @@ mountNav('arcadedesk');
 import { connect } from '/shared/desk-client.js';
 
 const $ = id => document.getElementById(id);
+let lastState = null;
+let lastRosterSig = null;
 const desk = connect('arcadedesk');
 
 desk.on('link', up => {
@@ -238,29 +243,43 @@ function paint(s) {
   if (!s) return;
   snap = s;
   paintBoxes(s.boxes);
+  lastState = s;
 
   const set = s.set;
   $('setRound').textContent = set
     ? `${set.round}${set.state === 'complete' ? ' · complete' : ''}`
     : 'no set running';
   if (set) {
-    $('scoreRows').innerHTML = set.players.map((p, i) => `
-      <div class="score" style="grid-template-columns:1fr auto auto;margin-bottom:8px">
-        <div>
-          <div class="who">${escapeHtml(p.name)}${p.team ? ' · ' + p.team : ''}</div>
-          <div class="n num">${set.scores[i] ?? 0}</div>
-        </div>
-        <button class="btn" data-sc="${i}:1" aria-label="${escapeHtml(p.name)} plus one">+1</button>
-        <button class="btn" data-sc="${i}:-1" aria-label="${escapeHtml(p.name)} minus one">−1</button>
-      </div>`).join('');
-    for (const b of document.querySelectorAll('[data-sc]')) {
-      b.onclick = async () => {
-        const [player, delta] = b.dataset.sc.split(':').map(Number);
-        try { await post('score', { player, delta }); say(''); }
-        catch (e) { say(e.message, true); }
-      };
+    // Rebuild only when the ROSTER changes; a score change updates numbers in
+    // place. The full innerHTML rebuild recreated the +1 button after every
+    // press, dropping keyboard focus to the body forty times a set — and
+    // re-announcing the whole roster through the aria-live wrapper.
+    const rosterSig = JSON.stringify(set.players.map(p => p.name + (p.team ?? '')));
+    if (rosterSig !== lastRosterSig) {
+      lastRosterSig = rosterSig;
+      $('scoreRows').innerHTML = set.players.map((p, i) => `
+        <div class="score" style="grid-template-columns:1fr auto auto;margin-bottom:8px">
+          <div>
+            <div class="who">${escapeHtml(p.name)}${p.team ? ' · ' + p.team : ''}</div>
+            <div class="n num" data-score-for="${i}">${set.scores[i] ?? 0}</div>
+          </div>
+          <button class="btn" data-sc="${i}:1" aria-label="${escapeHtml(p.name)} plus one">+1</button>
+          <button class="btn" data-sc="${i}:-1" aria-label="${escapeHtml(p.name)} minus one">−1</button>
+        </div>`).join('');
+      for (const b of document.querySelectorAll('[data-sc]')) {
+        b.onclick = async () => {
+          const [player, delta] = b.dataset.sc.split(':').map(Number);
+          try { await post('score', { player, delta }); say(''); }
+          catch (e) { say(e.message, true); }
+        };
+      }
+    } else {
+      for (const el of document.querySelectorAll('[data-score-for]')) {
+        el.textContent = set.scores[Number(el.dataset.scoreFor)] ?? 0;
+      }
     }
   } else {
+    lastRosterSig = null;
     $('scoreRows').innerHTML = '<p class="hint">Start a set and score buttons appear here, ' +
       'one row per player. Versus sets end on their own at 2 wins (3 for a best-of-5 grand final); free-for-alls end ' +
       'when you press End set.</p>';
@@ -287,7 +306,12 @@ function paint(s) {
   }
 
   paintBracket(s.bracket ?? []);
-  $('upNext').placeholder = s.upNext || 'Grand Final · 1678 vs 254';
+  // The VALUE, not the placeholder: as a placeholder the current chip text
+  // could only be retyped from scratch, never edited. Hands off while the
+  // operator is typing in it.
+  if (document.activeElement !== $('upNext') && s.upNext !== undefined) {
+    if ($('upNext').value !== (s.upNext || '')) $('upNext').value = s.upNext || '';
+  }
 }
 
 // Bracket metadata from start.gg. Load pre-fills the set form, but the operator
@@ -404,8 +428,15 @@ $('recordRace').onclick = async () => {
 $('undoRace').onclick = () => post('undo').then(() => say('Last race removed.')).catch(e => say(e.message, true));
 $('setUpNext').onclick = () => post('upnext', { text: $('upNext').value })
   .then(() => say('Up next set.')).catch(e => say(e.message, true));
-$('clearAll').onclick = () => post('clear')
-  .then(() => say('Cleared.')).catch(e => say(e.message, true));
+$('clearAll').onclick = () => {
+  // Mid-grand-prix this discards every recorded race with no undo, and the
+  // button sits one slot from "Set". A single mis-click was the whole loss.
+  const busy = lastState?.set || lastState?.gp;
+  if (busy && !confirm('Clear the live set, the grand prix, and the up-next chip? '
+    + 'Recorded races cannot be recovered.')) return;
+  post('clear')
+    .then(() => say('Cleared.')).catch(e => say(e.message, true));
+};
 
 load();
 </script>

@@ -1549,7 +1549,14 @@ export function startServer(opts: ServerOpts) {
       }
 
       if (path === '/api/markers') {
+        // Cut at the LOAD of the current match, not a minute before its
+        // start: the old minus-60s window reached back into the previous
+        // match's final minute, and both consumers painted those markers on
+        // the new match's timeline — a head referee reviewing last match's
+        // "red takes the lead" against this match's recording, the wrong
+        // robot presented as evidence.
         const since = Number(url.searchParams.get('since') || 0)
+          || bus.state.matchLoadedAt
           || (bus.lastMatchStartedAt ?? Date.now() - 20 * 60_000) - 60_000;
         return json(res, 200, markersSince(bus, since));
       }

@@ -62,13 +62,14 @@ input.wide { flex: 1; min-width: 160px; }
     <div>
       <section>
         <h2>Preview</h2>
-        <div class="preview"><canvas id="cv" width="1080" height="1080"></canvas></div>
+        <div class="preview"><canvas id="cv" width="1080" height="1080" role="img"
+          aria-label="Post-match card preview"></canvas></div>
         <div class="row" style="margin-top:12px">
           <button class="btn btn--go" id="download">Download PNG</button>
           <button class="btn" id="save">Save to desk</button>
           <button class="btn" id="rebuild">Rebuild from current match</button>
         </div>
-        <p id="status" style="margin:10px 0 0"></p>
+        <p id="status" role="status" style="margin:10px 0 0"></p>
       </section>
 
       <section>

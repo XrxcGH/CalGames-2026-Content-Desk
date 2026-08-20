@@ -247,6 +247,16 @@ export function applyDisplayMode() {
  * strand the element on a stale number. Nobody is watching a hidden source, so
  * the animation is worthless there, but the correct value is not.
  */
+/**
+ * Camera-scene display names, shared by every console that shows a cut
+ * button. This lived as two hand-kept copies (desk and remote) and they had
+ * already drifted ("Field wide" vs "Field") — one table, one vocabulary.
+ */
+export const SCENE_LABEL = {
+  intro: 'Intro', match: 'Field wide', score: 'Score',
+  replay: 'Replay', desk: 'Desk', arcade: 'Arcade',
+};
+
 export function roll(el, to, ms = 600) {
   const from = Number(el.dataset.v ?? 0);
   if (from === to) return;

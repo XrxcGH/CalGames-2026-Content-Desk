@@ -121,13 +121,37 @@ function paintMarkers() {
     track.parentElement.appendChild(el);
   }
 
-  $('markers').innerHTML = markers.length
-    ? [...markers].reverse().map(m =>
-        `<div style="padding:4px 0;border-bottom:1px solid var(--surface-sunken)">
-           <b>${esc(m.label ?? 'Manual mark')}</b>
-           <span class="mono"> ${m.matchClock === null ? '-' : clockDisplay(m.matchClock)}</span>
-         </div>`).join('')
-    : '<i>None yet. They appear as the match runs.</i>';
+  // The LIST seeks. It used to be inert text while the only clickable
+  // targets were the 3-to-5-pixel slivers on the track — the operator read
+  // "red 8 fuel burst 1:36" in comfortable type, clicked it, and nothing
+  // happened; the real target needed aiming under a 20-second replay window.
+  // Each row frames the same window the track sliver does.
+  $('markers').replaceChildren(...(markers.length
+    ? [...markers].reverse().map(m => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'btn';
+      row.style.cssText = 'display:flex;justify-content:space-between;gap:8px;'
+        + 'width:100%;text-align:left;margin-bottom:4px;text-transform:none;'
+        + 'letter-spacing:0;font-family:var(--font-display);font-weight:600;';
+      const label = document.createElement('span');
+      label.textContent = m.label ?? 'Manual mark';
+      const clock = document.createElement('span');
+      clock.className = 'mono';
+      clock.textContent = m.matchClock === null ? '-' : clockDisplay(m.matchClock);
+      row.append(label, clock);
+      if (m.matchClock === null || m.matchClock === undefined) {
+        row.disabled = true;
+      } else {
+        row.onclick = () => setBounds(m.matchClock - 6, m.matchClock + 4);
+      }
+      return row;
+    })
+    : [(() => {
+      const i = document.createElement('i');
+      i.textContent = 'None yet. They appear as the match runs.';
+      return i;
+    })()]));
 }
 
 async function loadMarkers() {

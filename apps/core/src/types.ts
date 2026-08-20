@@ -435,6 +435,13 @@ export interface DeskState {
    * map match clock onto wall clock.
    */
   lastMatchStartedAt: number | null;
+  /**
+   * When the CURRENT match was loaded. The marker feed cuts on this: markers
+   * from before it belong to the previous match, and serving them once put
+   * the last match's "red takes the lead" in front of a head referee
+   * reviewing the current one — the wrong robot, presented as evidence.
+   */
+  matchLoadedAt: number | null;
   /** Wall clock of the buzzer, and of the score actually being posted. The gap
    *  between them is unbounded (referees deliberating fouls and cards can run
    *  minutes), which is why match videos cut rather than run straight through. */
@@ -561,6 +568,7 @@ export const initialState = (): DeskState => ({
   phase: 'pre',
   matchStartedAt: null,
   lastMatchStartedAt: null,
+  matchLoadedAt: null,
   matchEndedAt: null,
   scorePostedAt: null,
   matchClock: null,

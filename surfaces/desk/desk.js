@@ -7,6 +7,7 @@
 
 import {
   connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker,
+  SCENE_LABEL,
 } from '/shared/desk-client.js';
 
 const $ = id => document.getElementById(id);
@@ -990,10 +991,7 @@ setInterval(() => { if (!document.hidden) void loadVitals(); }, 30_000);
 // camera cut lives here rather than in another application. The live scene is
 // read off the desk state, which every console shares, so a dedicated switcher
 // on their own screen and the desk manager see the same thing.
-const SCENE_LABEL = {
-  intro: 'Intro', match: 'Field wide', score: 'Score',
-  replay: 'Replay', desk: 'Desk', arcade: 'Arcade',
-};
+// SCENE_LABEL is shared from desk-client.js: two hand-kept copies drifted.
 let sceneMap = null;
 
 async function loadScenes() {

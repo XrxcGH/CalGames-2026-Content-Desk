@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1000px; margin: 0 auto; padding: 18px 22px 60px; }
+.wrap { max-width: 1380px; margin: 0 auto; padding: 18px 22px 60px; }
 header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
 h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .hint { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
@@ -105,14 +105,19 @@ input:focus { outline: none; border-color: var(--accent); }
     <div class="row">
       <label class="in" for="secs">Seconds</label>
       <input id="secs" type="number" min="5" max="120" value="20" style="width:70px">
-      <button class="btn btn--go" id="open">Open question</button>
-      <button class="btn" id="reveal">Reveal</button>
-      <button class="btn" id="next">Next</button>
+      <!-- One button whose LABEL is the state machine. Three same-looking
+           buttons made the least-trained volunteer in the building memorize
+           an order; this one always says exactly what the next press does,
+           and while the answer window runs it counts down in the label so an
+           early reveal is a read decision, not a reflex. A short post-press
+           disable blunts double-taps; the server's phase guards are the
+           backstop, not the UX. -->
+      <button class="btn btn--go" id="advance" style="font-size:17px; min-width: 240px">Open question</button>
     </div>
-    <p class="hint">Flow: <b>Open question</b> while the overlay is up. Phones answer.
-      <b>Reveal</b> it, and read the right answer out loud. <b>Next</b> drops the overlay
-      to the leaderboard. The correct answer only appears here after Reveal, so nobody
-      can shoulder-surf it.</p>
+    <p class="hint">One button runs the whole flow: <b>Open</b> puts it on the board
+      and starts the clock, <b>Reveal</b> shows the answer (read it out loud),
+      <b>Next</b> drops the overlay to the leaderboard. The correct answer only
+      appears here after Reveal, so nobody can shoulder-surf it.</p>
     <div class="row">
       <button class="btn" id="pick">Queue "pick the winner"</button>
       <span class="hint">Loads a prediction round on the match that is up. Open it before the
@@ -125,7 +130,13 @@ input:focus { outline: none; border-color: var(--accent); }
     <h2>Questions</h2>
     <p class="hint">Edits save to <code>data/trivia.json</code>, so they survive a restart.
       A question that is on the screen cannot be changed until you move on from it.</p>
-    <div id="bank"></div>
+    <!-- Folded away: the always-expanded bank put every answer in green
+         directly under the panel that promises answers only appear after
+         Reveal, and pushed Standings 1,400px down the page mid-show. -->
+    <details id="bankFold">
+      <summary class="btn" style="display:inline-block">Edit the question bank</summary>
+      <div id="bank"></div>
+    </details>
 
     <details id="editor">
       <summary class="btn" style="display:inline-block; margin-top:10px">Add a question</summary>
@@ -149,7 +160,7 @@ input:focus { outline: none; border-color: var(--accent); }
         <div class="row" style="margin-top:12px">
           <button class="btn btn--go" id="qSave">Save question</button>
           <button class="btn" id="qCancel">Cancel</button>
-          <span class="hint" id="qState"></span>
+          <span class="hint" id="qState" role="status"></span>
         </div>
       </div>
     </details>
@@ -160,7 +171,8 @@ input:focus { outline: none; border-color: var(--accent); }
     <p class="hint">Names are screened on join, but that is a doorstop and not a guarantee.
       This removes a player and their score immediately.</p>
     <div class="row">
-      <input id="kickName" placeholder="Name exactly as it appears" style="flex:2 1 200px">
+      <input id="kickName" aria-label="Player name to remove"
+        placeholder="Name exactly as it appears" style="flex:2 1 200px">
       <button class="btn" id="kickGo">Remove</button>
     </div>
   </section>
@@ -204,10 +216,17 @@ let lastLiveKey = '';
  * the host's decision in a gap is "which of these fits in the next four
  * minutes" rather than a scroll through thirty-six questions.
  */
+let lastSessionsSig = null;
 function paintSessions(s) {
   const row = $('sessionRow');
   const sessions = s.sessions ?? [];
   if (!sessions.length) { row.textContent = ''; return; }
+  // Rebuild only when something changed: the 2s poll used to replaceChildren
+  // unconditionally, killing keyboard focus on a round button within two
+  // seconds of landing on it — the picker was unusable by keyboard.
+  const sig = JSON.stringify([sessions, s.session?.name ?? null]);
+  if (sig === lastSessionsSig) return;
+  lastSessionsSig = sig;
 
   row.replaceChildren(...sessions.map(sess => {
     const btn = document.createElement('button');
@@ -230,7 +249,11 @@ function paintSessions(s) {
   }));
 }
 
+let lastSnap = null;
+
 function paint(s) {
+  lastSnap = s;
+  paintAdvance(s);
   if (!s) return;
   $('dot').dataset.up = 'true';
   $('linkText').textContent = 'linked';
@@ -295,19 +318,62 @@ $('kickGo').onclick = async () => {
     !snap.removed);
   } catch (err) { say(err.message, true); }
 };
-$('open').onclick = () => post('open', { seconds: Number($('secs').value) || 20 })
-  .then(() => say('Question is live.')).catch(e => say(e.message, true));
-$('reveal').onclick = () => post('reveal')
-  .then(() => say('Revealed. Read it out.')).catch(e => say(e.message, true));
-$('next').onclick = () => post('next')
-  .then(() => say('On to the next one. Overlay shows standings.')).catch(e => say(e.message, true));
+// The Advance button: one press, the right verb for the phase, always.
+let advanceArmed = true;
+$('advance').onclick = async () => {
+  if (!advanceArmed) return;
+  advanceArmed = false;
+  $('advance').disabled = true;
+  // 700ms is long enough to eat a double-tap and short enough that a host in
+  // a rhythm never feels it.
+  setTimeout(() => { advanceArmed = true; $('advance').disabled = false; }, 700);
+  const phase = lastSnap?.phase ?? 'idle';
+  try {
+    if (phase === 'open') {
+      await post('reveal');
+      say('Revealed. Read it out.');
+    } else if (phase === 'revealed') {
+      await post('next');
+      say('On to the next one. Overlay shows standings.');
+    } else {
+      await post('open', { seconds: Number($('secs').value) || 20 });
+      say('Question is live.');
+    }
+  } catch (e) { say(e.message, true); }
+};
+
+function paintAdvance(s) {
+  const b = $('advance');
+  if (s.phase === 'open') {
+    // The countdown in the label: the host had NO way to know how long the
+    // window had left without watching the audience overlay, and an early
+    // reveal locks scoring while phones are still answering.
+    const left = s.question?.closesAt
+      ? Math.max(0, Math.ceil((s.question.closesAt - Date.now()) / 1000))
+      : null;
+    b.textContent = left !== null ? `Reveal (${left}s left)` : 'Reveal';
+  } else if (s.phase === 'revealed') {
+    b.textContent = 'Next';
+  } else {
+    b.textContent = s.questionIndex >= s.questionCount ? 'Bank done' : 'Open question';
+  }
+}
 $('pick').onclick = () => post('pick')
   .then(() => say('Prediction round queued. Open it before the match starts.'))
   .catch(e => say(e.message, true));
-$('resetSoft').onclick = () => post('reset')
-  .then(() => say('Scores reset.')).catch(e => say(e.message, true));
-$('resetHard').onclick = () => post('reset', { hard: true })
-  .then(() => say('Everything reset.')).catch(e => say(e.message, true));
+// Both resets confirm. Deleting ONE question already asked; wiping every
+// player's all-day score with a single unguarded click was the inconsistency.
+$('resetSoft').onclick = () => {
+  if (!confirm('Reset every score to zero? Players stay joined.')) return;
+  post('reset')
+    .then(() => say('Scores reset.')).catch(e => say(e.message, true));
+};
+$('resetHard').onclick = () => {
+  const n = lastSnap?.players ?? 0;
+  if (!confirm(`Reset EVERYTHING? This removes all ${n} player${n === 1 ? '' : 's'} and every score.`)) return;
+  post('reset', { hard: true })
+    .then(() => say('Everything reset.')).catch(e => say(e.message, true));
+};
 
 const load = async () => {
   try { paint(await fetch('/api/trivia').then(r => r.json())); }
@@ -335,7 +401,15 @@ async function loadBank() {
       <span class="qn">${i + 1}</span>
       <div>
         <div class="qtext">${esc(q.text)}</div>
-        <div class="qans">${esc(q.options[q.answer] ?? '')}${q.category ? ` · <span class="qcat">${esc(q.category)}</span>` : ''}</div>
+        <div class="qans">${
+          // The LIVE question's answer hides while the window is open: the
+          // bank sat right under the panel that promises answers only appear
+          // after Reveal, with the live row highlighted and its answer in
+          // plain sight for anyone shoulder-surfing the host.
+          q.live && lastSnap?.phase === 'open'
+            ? '<i>answer hidden while the question is open</i>'
+            : esc(q.options[q.answer] ?? '')
+        }${q.category ? ` · <span class="qcat">${esc(q.category)}</span>` : ''}</div>
       </div>
       <div class="qacts">
         <button class="btn" data-act="up" data-i="${i}" aria-label="Move question ${i + 1} up"${i === 0 ? ' disabled' : ''}>&uarr;</button>

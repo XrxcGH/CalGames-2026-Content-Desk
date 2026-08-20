@@ -27,8 +27,8 @@
 }
 #stage {
   background-color: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover;
 }
 
 .panel-screen { position: absolute; inset: 0; display: none; padding: var(--safe-y) var(--safe-x); }
@@ -117,7 +117,8 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
   position: absolute; inset: 0; z-index: 40;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; background: var(--cg-purple-void);
-  background-image: var(--tex-perf); background-size: var(--tex-perf-size);
+  background-image: var(--tex-perf), var(--geo);
+  background-size: var(--tex-perf-size), var(--geo-size);
 }
 #timerOver[hidden] { display: none; }
 .t-label {

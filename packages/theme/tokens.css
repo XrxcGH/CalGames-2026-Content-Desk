@@ -45,7 +45,15 @@
   --cg-black:         #000000;
   --cg-white:         #FFFFFF;
   --cg-white-dim:     #C9BCD0;  /* white tinted toward purple, not gray */
-  --cg-white-mute:    #8E7F97;  /* dimmest legible ink on purple-lo: 4.5:1 where purple-hi reads 2:1 */
+  --cg-white-mute:    #8E7F97;
+  /* The chamfer lattice: a symmetric, tessellating octagon-and-diamond line
+     pattern shared by every purple field — consoles, audience pages, and the
+     opaque broadcast plates. One motif per 320px tile with nearly a motif's
+     width of open space between neighbours: present across a full screen
+     without getting busy. Line art at 5% white — invisible to every contrast
+     calculation, mirrored on both axes so the tiling is symmetric. */
+  --geo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.05' stroke-width='1.5'%3E%3Cpath d='M120 72h80l48 48v80l-48 48h-80l-48-48v-80z'/%3E%3Cpath d='M160 96l64 64-64 64-64-64z'/%3E%3C/g%3E%3C/svg%3E");
+  --geo-size: 320px 320px;  /* dimmest legible ink on purple-lo: 4.5:1 where purple-hi reads 2:1 */
 
   /* ---- Alliance: official FIRST red/blue. --------------------------------
      RESERVED: semantic only, never decorative. Fixed by FIRST; the only
@@ -235,19 +243,25 @@
      the broadcast's Gold Sweep skew. Decorative only — at these opacities
      every text/background pair keeps its computed contrast, and every panel
      sits on its own solid fill above this. */
-  background-image:
-    linear-gradient(102deg, transparent 0 38%, rgba(240, 175, 0, .028) 38% 46%, transparent 46% 100%),
-    linear-gradient(102deg, transparent 0 62%, rgba(255, 255, 255, .022) 62% 74%, transparent 74% 100%),
-    radial-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 28px 28px;
+  background-image: var(--geo);
+  background-size: var(--geo-size);
   background-attachment: fixed;
 }
 /* One shared field treatment so every console input matches. */
+/* The fleet-wide type lift: hint and label text was 13px on every console,
+   which reads fine at a desk at home and small on a folding table under gym
+   light. Attribute+class outweighs the pages' own single-class rules. */
+:root[data-surface="console"] .hint { font-size: 14px; line-height: 1.55; }
+:root[data-surface="console"] section > h2,
+:root[data-surface="console"] section h2 { font-size: 15px; }
+:root[data-surface="console"] label { font-size: 14px; }
+
 :root[data-surface="console"] input,
 :root[data-surface="console"] select,
 :root[data-surface="console"] textarea {
   background: var(--surface-sunken);
   color: var(--text);
+  font-size: 16px;
   /* The old #3A1349 border measured 1.30:1 against the field's own fill and
      1.16:1 against the panel behind it: unfocused fields were borderless
      dark-on-dark, findable only by their placeholder. WCAG 1.4.11 wants the

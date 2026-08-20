@@ -106,6 +106,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           match: p,
           matchStartedAt: null,
           lastMatchStartedAt: null,
+          matchLoadedAt: ev.ts,
           matchEndedAt: null,
           scorePostedAt: null,
           autoWinner: null,

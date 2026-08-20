@@ -110,6 +110,10 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
   background: var(--cg-purple-void);
 }
 #gate[data-show] { display: grid; }
+/* The gate covers the page visually; inert makes that true for keyboards and
+   screen readers too, instead of letting focus tab through into invisible
+   Start/Abort buttons. */
+#pin::placeholder { color: var(--cg-white-dim); }
 #gate .box { width: 100%; max-width: 340px; text-align: center; }
 #gate h2 { font-size: 13px; margin-bottom: 14px; }
 #pin {
@@ -129,7 +133,8 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
     <h2>Enter event PIN</h2>
     <!-- type=password masks the PIN from shoulder surfers in a crowded venue;
          inputmode=numeric keeps the digit keypad, same pairing as /signin. -->
-    <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="••••">
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off"
+      aria-label="Event PIN" placeholder="Event PIN">
     <button class="b b--go b--wide" id="unlock" style="width:100%">Unlock</button>
     <p class="hint">Anyone who can reach this page can drive the broadcast.
       The PIN is set with <code>REMOTE_PIN</code> on the desk.</p>
@@ -225,13 +230,26 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
   </section>
 </div>
 
-<div id="toast"></div>
+<div id="toast" role="status"></div>
 
 <script type="module">
-import { connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker } from '/shared/desk-client.js';
+import { connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker, SCENE_LABEL } from '/shared/desk-client.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('remote');
+
+/**
+ * The gate covers the page; `inert` makes the covered page true for keyboards
+ * and screen readers too — without it, focus tabbed straight through the
+ * opaque overlay into invisible Start and Abort buttons. Focus lands on the
+ * PIN field the moment the gate shows, because that is the only thing to do.
+ */
+function setGate(show) {
+  const was = $('gate').hasAttribute('data-show');
+  $('gate').toggleAttribute('data-show', show);
+  document.querySelector('.wrap')?.toggleAttribute('inert', show);
+  if (show && !was) $('pin').focus();
+}
 
 let toastTimer = null;
 function toast(msg, err = false) {
@@ -257,18 +275,18 @@ async function refreshGate() {
     const status = await fetch('/api/auth/status').then(r => r.json());
     sessionAuthed = !status.required || status.authed;
   } catch { /* keep the last known value; the WS-level gate still covers it */ }
-  $('gate').toggleAttribute('data-show', desk.needsPin && !desk.authed && !sessionAuthed);
+  setGate(desk.needsPin && !desk.authed && !sessionAuthed);
 }
 desk.on('ready', refreshGate);
 desk.on('auth', ok => {
   if (ok) sessionAuthed = true;
-  $('gate').toggleAttribute('data-show', !ok && !sessionAuthed);
+  setGate(!ok && !sessionAuthed);
   toast(ok ? 'Unlocked' : 'Wrong PIN', !ok);
   if (ok) { navigator.vibrate?.(30); loadCues(); }
 });
 desk.on('denied', () => {
   sessionAuthed = false;
-  $('gate').setAttribute('data-show', '');
+  setGate(true);
   toast('PIN required', true);
 });
 const unlock = () => {
@@ -312,6 +330,20 @@ startTicker(() => {
 // ---- actions ---------------------------------------------------------------
 const tap = fn => e => {
   e.preventDefault();
+  // The honesty gate. desk.emit() silently drops on a closed socket, and this
+  // page's whole design assumes the producer is watching the FIELD, not the
+  // phone: a success buzz plus a success toast for a press that went nowhere
+  // is the worst possible combination. The replay console has the same guard
+  // ("'Sent' would be a lie").
+  if (!desk.connected) {
+    toast('Not connected. Nothing was sent.', true);
+    navigator.vibrate?.([40, 60, 40]);   // distinctly not the success buzz
+    return;
+  }
+  if (desk.needsPin && !desk.authed) {
+    toast('Locked. Enter the PIN first.', true);
+    return;
+  }
   navigator.vibrate?.(12);   // confirms the press without looking at the screen
   fn();
 };
@@ -329,6 +361,19 @@ for (const b of document.querySelectorAll('[data-screen]')) {
   });
 }
 
+// The Screen grid shows which one is live, the way Cameras always has: five
+// identical buttons told the producer nothing about whether Blank was still
+// up without looking at the program feed.
+desk.on('state', s => {
+  for (const b of document.querySelectorAll('[data-screen]')) {
+    const on = b.dataset.screen === 'auto'
+      ? s.screenHold === false
+      : b.dataset.screen === s.screen;
+    b.toggleAttribute('data-on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+});
+
 $('mark').onclick = tap(() => {
   const at = (desk.matchClock ?? 0) - 2;
   desk.emit({ type: 'replay.marker', payload: { kind: 'manual', matchClock: at } });
@@ -342,10 +387,7 @@ $('teleHide').onclick = tap(() => { desk.emit({ type: 'telestrator.hide' }); toa
 // The same control the desk console has. A dedicated switcher may be standing
 // at a camera rather than sitting down, and at the floor of the crew range the
 // person cutting is the person holding this phone.
-const SCENE_LABEL = {
-  intro: 'Intro', match: 'Field', score: 'Score',
-  replay: 'Replay', desk: 'Desk', arcade: 'Arcade',
-};
+// SCENE_LABEL is shared from desk-client.js: two hand-kept copies drifted.
 
 async function loadScenes() {
   try {
@@ -400,13 +442,15 @@ async function audio(action, body) {
   }
 }
 
-$('audPlay').onclick = tap(() => { void audio('play'); toast('Music on'); });
-$('audPause').onclick = tap(() => { void audio('pause'); toast('Music off'); });
-$('audNext').onclick = tap(() => { void audio('next'); toast('Skipped'); });
-$('audDuck').onclick = tap(() => {
+// Success toasts fire when the request RESOLVES, not when the finger lands:
+// the optimistic version toasted "Music off" and then, on failure, stacked
+// the error under it — two contradictory toasts back to back.
+$('audPlay').onclick = tap(async () => { if (await audio('play')) toast('Music on'); });
+$('audPause').onclick = tap(async () => { if (await audio('pause')) toast('Music off'); });
+$('audNext').onclick = tap(async () => { if (await audio('next')) toast('Skipped'); });
+$('audDuck').onclick = tap(async () => {
   const on = !(audioState?.music?.ducked);
-  void audio('duck', { on });
-  toast(on ? 'Ducked' : 'Back up');
+  if (await audio('duck', { on })) toast(on ? 'Ducked' : 'Back up');
 });
 
 function paintAudio(s) {
@@ -456,7 +500,7 @@ async function loadCues() {
       // back so re-entering the PIN can refresh the cookie via unlock().
       sessionAuthed = false;
       $('cues').innerHTML = '<p class="hint">Signed out. Enter the PIN to reload cues.</p>';
-      $('gate').setAttribute('data-show', '');
+      setGate(true);
       return;
     }
     if (!res.ok) return;
