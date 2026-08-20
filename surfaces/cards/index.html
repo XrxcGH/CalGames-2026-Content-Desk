@@ -8,7 +8,8 @@
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1000px; margin: 0 auto; padding: 18px 22px 60px; }
+.wrap { margin: 0 auto; padding: 18px 22px 60px; }
+@media (max-width: 860px) { .cols { grid-template-columns: 1fr !important; } }
 header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; }
 h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .hint { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
@@ -16,14 +17,17 @@ h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .dot { width: 10px; height: 10px; clip-path: var(--chamfer); --ch: 3px; background: var(--st-bad); display: inline-block; }
 .dot[data-up="true"] { background: var(--st-ok); }
 
-.cols { display: grid; grid-template-columns: 1fr 320px; gap: 18px; align-items: start; }
+.cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 18px; align-items: start; }
 section { background: var(--surface-raised); padding: 16px 18px; margin-bottom: 14px;
   clip-path: var(--chamfer); --ch: 14px; }
 h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 12px; }
 
 /* The card is 1080x1080; show it responsively but download at full size. */
-.preview { width: 100%; aspect-ratio: 1/1; background: var(--cg-black); clip-path: var(--chamfer); --ch: 10px; }
+/* The card is a 1080 square: cap it by the monitor's HEIGHT, not its width,
+   so a wide screen never grows a preview taller than the screen itself. */
+.preview { width: min(100%, 74vh); margin: 0 auto; aspect-ratio: 1/1;
+  background: var(--cg-black); clip-path: var(--chamfer); --ch: 10px; }
 .preview canvas { width: 100%; height: 100%; display: block; }
 
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

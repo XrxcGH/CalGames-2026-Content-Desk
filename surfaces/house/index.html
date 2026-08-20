@@ -8,7 +8,14 @@
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 900px; margin: 0 auto; padding: 18px 22px 60px; }
+.wrap { margin: 0 auto; padding: 18px 22px 60px; }
+/* Two sections, two halves. Not auto-fit: the full-width header and bus
+   plate occupy every repeated track, so empty tracks never collapse and the
+   sections pin to their minimum instead of stretching. */
+@media (min-width: 1150px) {
+  .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; align-items: start; }
+  .wrap > header, .wrap > .bus { grid-column: 1 / -1; }
+}
 header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
 h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .spacer { margin-left: auto; }

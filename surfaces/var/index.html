@@ -20,7 +20,15 @@
  * Frame stepping is a server round trip per frame (ffmpeg seek plus a jpeg),
  * so expect a beat between presses. That is still faster than the argument. */
 body { font-size: 16px; }
-.wrap { max-width: 1180px; margin: 0 auto; padding: 16px 20px 50px; }
+.wrap { margin: 0 auto; padding: 16px 20px 50px; }
+/* A wide monitor puts the flagged-moments list NEXT TO the viewer: the ref
+   looks and picks without scrolling between them. */
+@media (min-width: 1500px) {
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(420px, 1fr);
+    gap: 0 18px; align-items: start; }
+  .wrap > header, .wrap > .readonly { grid-column: 1 / -1; }
+  .marks { max-height: 62vh; }
+}
 header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
 h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .hint { color: var(--text-dim); font-size: 14px; line-height: 1.6; }

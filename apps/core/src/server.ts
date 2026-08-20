@@ -1705,21 +1705,22 @@ export function startServer(opts: ServerOpts) {
   function sendIndex(res: ServerResponse): void {
     const groups = [...new Set(SURFACES.map(s => s.group))];
     const sections = groups.map(g =>
-      `<h2>${g}</h2>` + SURFACES.filter(s => s.group === g).map(s =>
+      `<h2>${g}</h2><div class="rows">` + SURFACES.filter(s => s.group === g).map(s =>
         `<a class="row" href="${surfacePath(s)}"><b>${s.name}</b><code>${surfacePath(s)}</code><i>${s.note}</i></a>`,
-      ).join('')).join('');
+      ).join('') + '</div>').join('');
     const html = `<!doctype html><html lang="en" data-surface="console"><head><meta charset="utf-8">
 <title>CalGames 2026 Content Desk</title>
 <link rel="stylesheet" href="/theme/tokens.css">
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
-body{padding:48px;max-width:860px;margin:0 auto;font-size:var(--font-ui-body)}
+body{padding:44px clamp(28px,4vw,84px) 80px;font-size:var(--font-ui-body)}
 h1{font-size:38px;font-variation-settings:"wdth" 118;margin:0 0 4px}
 p.sub{color:var(--text-dim);margin:0 0 26px}
 h2{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2em;
   text-transform:uppercase;color:var(--accent);margin:30px 0 10px}
+.rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(540px,100%),1fr));gap:10px 14px}
 .row{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:16px 20px;
-  margin-bottom:10px;background:var(--surface-raised);text-decoration:none;color:var(--text);
+  background:var(--surface-raised);text-decoration:none;color:var(--text);
   clip-path:var(--chamfer);--ch:12px;transition:background var(--dur-tap) linear}
 .row:hover{background:var(--btn-hover)}
 .row:focus-visible{outline:3px solid var(--focus-ring)}

@@ -8,7 +8,14 @@
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
 body { font-size: var(--font-ui-body); }
-.wrap { max-width: 1720px; margin: 0 auto; padding: 18px 22px 60px; }
+.wrap { margin: 0 auto; padding: 18px 22px 60px; }
+/* Column WIDTH, not page width: sections flow into as many 460px columns as
+   the monitor actually has — the same rule as the desk console. */
+@media (min-width: 1150px) {
+  .wrap { columns: 460px; column-gap: 18px; }
+  .wrap > section { break-inside: avoid; }
+  .wrap > header { column-span: all; }
+}
 header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
 h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
 .hint { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
