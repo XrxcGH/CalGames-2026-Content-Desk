@@ -769,6 +769,11 @@ export function startServer(opts: ServerOpts) {
           bus.emit({
             type: mapped?.type as DeskEventType,
             source: 'manual',
+            // Same clamp as the socket path: a button press is an operator's
+            // hand, and bus.emit's default of 'authoritative' is reserved for
+            // the field. Only the score-family reducers read confidence, and
+            // for those the hand-pressed answer must render outlined.
+            confidence: 'estimated',
             payload: (mapped?.payload ?? {}) as Record<string, unknown>,
           });
           return json(res, 200, { ok: true, id: action.id, type: mapped?.type });
@@ -1924,7 +1929,13 @@ ${sections}</body></html>`;
           send(ws, { t: 'denied', reason: 'Awards run through /api/awards and the JA code.' });
           return;
         }
-        bus.emit({ ...msg.init, source: 'manual' });
+        // Confidence is clamped, not trusted: bus.emit defaults it to
+        // 'authoritative', which is the tier reserved for the field itself.
+        // The desk's shadow scoring already sends 'estimated' (typed scores
+        // render OUTLINED on air, never solid); without the clamp, any
+        // surface holding the desk PIN could omit the field and publish a
+        // fabricated score the graphics would present as official.
+        bus.emit({ ...msg.init, source: 'manual', confidence: 'estimated' });
         return;
       }
 

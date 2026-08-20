@@ -1251,12 +1251,20 @@ setInterval(loadRundown, 30_000);
 // ride the open state feed while the GA is still building the moment.
 let awardSnap = null;
 let awardPicked = null;
+let lastAwardsSig = '';
 
 async function loadAwards() {
   try {
     const res = await fetch('/api/awards');
     if (!res.ok) return;
     awardSnap = await res.json();
+    // Diff-guarded, because this now polls: the JA adds and edits awards from
+    // their own page all day, and the ceremony list here should follow
+    // without a reload. Repainting only on a real change keeps the radio the
+    // operator has picked from being wiped mid-ceremony by an idle poll.
+    const sig = JSON.stringify(awardSnap);
+    if (sig === lastAwardsSig) return;
+    lastAwardsSig = sig;
     // The lock only exists when a separate Judge Advisor code is configured;
     // a small event with one code never sees a door it cannot open.
     const locked = !!(awardSnap?.locked && awardSnap?.separate);
@@ -1290,8 +1298,8 @@ function paintAwards() {
   const box = $('awList');
   const list = awardSnap?.list ?? [];
   if (!list.length) {
-    box.innerHTML = '<p class="hint" style="padding:8px">No awards in config.json. ' +
-      'Type a custom title below and it works the same.</p>';
+    box.innerHTML = '<p class="hint" style="padding:8px">No awards on the list yet: ' +
+      'the Judge Advisor builds it at /s/awards. Typing a custom title below works the same.</p>';
     return;
   }
   box.replaceChildren(...list.map(a => {
@@ -1386,6 +1394,9 @@ $('awClear').onclick = async () => {
 };
 
 void loadAwards();
+// Slow poll, same rhythm as the slide deck: award edits are a between-matches
+// event, and 30s is faster than anyone walks from judging to the desk.
+setInterval(loadAwards, 30_000);
 
 // ---- slides & shout-outs ----------------------------------------------------
 async function slideAction(body, okText) {
@@ -1418,8 +1429,8 @@ async function loadSlideDeck() {
 function paintSlideDeck({ deck = [], live = null }) {
   const box = $('slList');
   if (!deck.length) {
-    box.innerHTML = '<p class="hint" style="padding:8px">No slides yet. Add one below, ' +
-      'or put them in config.json before the event.</p>';
+    box.innerHTML = '<p class="hint" style="padding:8px">No slides yet. Add one below: ' +
+      'it saves immediately and survives a restart.</p>';
     return;
   }
   box.replaceChildren(...deck.map(sl => {
@@ -1575,6 +1586,13 @@ async function loadSetup() {
     $('setFieldUrl').value = s.kiosk.fieldStreamUrl ?? '';
     $('setWebcast').value = s.stream.webcastUrl ?? '';
     $('setAxAsk').value = s.accessibility.ask ?? '';
+    const NAMES = { event: 'event', game: 'thresholds', kiosk: 'field feed',
+      stream: 'webcast', sponsors: 'sponsors', rundown: 'run of show',
+      accessibility: 'accessibility', awards: 'awards' };
+    $('setOverrides').textContent = s.overridden?.length
+      ? 'Edited on this desk (overriding config.json): '
+        + s.overridden.map(k => NAMES[k] ?? k).join(', ') + '.'
+      : 'Nothing edited yet: everything below still comes from config.json.';
     paintSetupRows();
   } catch (err) {
     $('setEvMsg').textContent = `Setup could not load: ${err.message}`;
