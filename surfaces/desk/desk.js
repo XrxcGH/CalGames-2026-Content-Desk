@@ -995,7 +995,12 @@ async function loadVitals() {
 }
 
 $('vitalsCheck').onclick = loadVitals;
-$('vitalsPrint').onclick = () => window.print();
+$('vitalsPrint').onclick = () => {
+  // A closed <details> is display:none inside, and display:none beats the
+  // print stylesheet's visibility trick; open it or the sheet comes out blank.
+  $('setupGroup').open = true;
+  window.print();
+};
 void loadVitals();
 setInterval(() => { if (!document.hidden) void loadVitals(); }, 30_000);
 
@@ -1661,12 +1666,21 @@ function paintRowEditor(box, items, fields, noun) {
       [items[i - 1], items[i]] = [items[i], items[i - 1]];
       paintSetupRows();
     };
+    const down = document.createElement('button');
+    down.className = 'btn';
+    down.append(iconEl('chevron-down'), ' Down');
+    down.disabled = i === items.length - 1;
+    down.setAttribute('aria-label', `Move ${noun} ${i + 1} down`);
+    down.onclick = () => {
+      [items[i], items[i + 1]] = [items[i + 1], items[i]];
+      paintSetupRows();
+    };
     const kill = document.createElement('button');
     kill.className = 'btn kill';
     kill.textContent = 'Remove';
     kill.setAttribute('aria-label', `Remove ${noun} ${i + 1}`);
     kill.onclick = () => { items.splice(i, 1); paintSetupRows(); };
-    line.append(up, kill);
+    line.append(up, down, kill);
     chip.append(line);
     return chip;
   }));

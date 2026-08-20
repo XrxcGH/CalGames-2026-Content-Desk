@@ -15,6 +15,20 @@ body { font-size: var(--font-ui-body); }
 /* The jump strip: the page is twenty-odd sections tall, and mid-show nobody
    scroll-hunts. Sticky, one row, every anchor a section that matters under
    pressure. Safety is styled as what it is. */
+/* The Print button prints the DOORS CHECK, not the whole console: the point
+   of printing it is a sheet to walk the venue with, and sixty unrelated
+   controls in gym-dark purple were 40 pages of toner. Black on white, one
+   section. */
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  #vitalsSection, #vitalsSection * { visibility: visible;
+    color: #000 !important; background: #fff !important;
+    box-shadow: none !important; clip-path: none !important; text-shadow: none !important; }
+  #vitalsSection { position: absolute; top: 0; left: 0; width: 100%; }
+  #vitalsSection .btn { display: none; }
+}
+
 /* Under the injected nav strip, not underneath it: nav.js publishes its
    measured height as --opnav-h (it wraps to two rows on narrow windows). */
 .jump { position: sticky; top: var(--opnav-h, 0px); z-index: 30; display: flex; flex-wrap: wrap;
@@ -693,7 +707,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 
       <details class="group" id="setupGroup">
         <summary>Setup &amp; end of day</summary>
-<section>
+<section id="vitalsSection">
         <h2>Doors check <span class="vdot" id="vitalsDot"></span></h2>
         <p class="hint">Everything the desk can check about itself. The point is the
           failures nothing else complains about: a muted announcer mic, a disk that
