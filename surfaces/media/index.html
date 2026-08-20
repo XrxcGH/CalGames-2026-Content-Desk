@@ -33,10 +33,10 @@ p.sub { color: var(--text-dim); margin: 0 0 22px; line-height: 1.6; }
   overflow-wrap: anywhere; }
 .meta div { color: var(--text-dim); font-size: 14px; margin-top: 2px; }
 .warn { color: var(--st-warn); font-size: 14px; margin-top: 4px; line-height: 1.5; }
-/* --st-bad (#C13030) is only 3.17:1 on the raised card. A failed upload is
+/* --st-bad (var(--st-bad)) is only 3.17:1 on the raised card. A failed upload is
    the one thing the photographer must notice, so this uses the lightened
    console red the other dark surfaces use. */
-.err { color: #FF6B6B; font-size: 14px; margin-top: 4px; line-height: 1.5; }
+.err { color: var(--st-bad-text); font-size: 14px; margin-top: 4px; line-height: 1.5; }
 input[type=number] { width: 92px; padding: 8px 10px; font-family: var(--font-num);
   font-size: 15px; background: var(--page-bg); color: var(--text);
   border: 2px solid var(--surface-sunken); }

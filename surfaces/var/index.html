@@ -86,10 +86,10 @@ select { padding: 9px 12px; font-family: var(--font-cond); font-size: 14px; }
   text-transform: uppercase; color: var(--text-dim); }
 .mark[data-p="3"] { border-left: 3px solid var(--accent); }
 
-/* --st-bad (#C13030) is only 3.17:1 on this panel. Errors are the one
+/* --st-bad (var(--st-bad)) is only 3.17:1 on this panel. Errors are the one
    thing an operator must be able to read at a glance, so this uses the
    lightened console red the rest of the dark surfaces use. */
-.err { color: #FF6B6B; font-size: 14px; min-height: 20px; margin-top: 8px; }
+.err { color: var(--st-bad-text); font-size: 14px; min-height: 20px; margin-top: 8px; }
 kbd { font-family: var(--font-num); background: var(--surface-sunken); padding: 1px 6px;
   clip-path: var(--chamfer); --ch: 4px; font-size: 13px; }
 </style>

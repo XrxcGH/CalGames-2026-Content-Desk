@@ -93,10 +93,10 @@ video { width: 100%; background: var(--cg-black); clip-path: var(--chamfer); --c
 #clips a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .mono { font-family: var(--font-mono); font-size: 13px; color: var(--text-dim); }
 #status { font-size: 14px; min-height: 18px; }
-/* --st-bad (#C13030) is only 3.17:1 on this panel. Errors are the one thing
+/* --st-bad (var(--st-bad)) is only 3.17:1 on this panel. Errors are the one thing
    the operator must read at a glance, so this uses the lightened console red
    the other dark surfaces use. */
-#status[data-err] { color: #FF6B6B; }
+#status[data-err] { color: var(--st-bad-text); }
 </style>
 </head>
 <body>

@@ -57,10 +57,10 @@ input:focus { outline: none; border-color: var(--accent); }
 #standings div { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px;
   padding: 6px 0; border-bottom: 1px solid var(--surface-sunken); font-size: 13px; }
 #status { font-size: 14px; min-height: 18px; }
-/* --st-bad (#C13030) is only 3.17:1 on this panel. Errors are the one thing
+/* --st-bad (var(--st-bad)) is only 3.17:1 on this panel. Errors are the one thing
    the host must read at a glance, so this uses the lightened console red the
    other dark surfaces use. */
-#status[data-err] { color: #FF6B6B; }
+#status[data-err] { color: var(--st-bad-text); }
 /* ---- question bank editor ---- */
 #bank { display: flex; flex-direction: column; gap: 8px; }
 .qrow { display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; align-items: center;

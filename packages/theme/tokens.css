@@ -236,6 +236,11 @@
      because #ED1C24 reads 4.1:1 on --surface-raised (and only 2.9:1 on brand
      purple); this reads 6.4:1. */
   --st-bad-text:    #FF6B6B;
+  /* Alliance colors AS TEXT on dark panels: the official red and blue clear
+     3:1 only as large fills, so small text uses these lightened voices. Same
+     mechanism as --st-bad-text, different meaning. */
+  --alliance-red-text:  #FF6B6B;
+  --alliance-blue-text: #6FB6FF;
 }
 /* The lattice paints the ROOT, not the body. The base reset gives html its
    own background, which blocks body-to-canvas propagation, so a body-level
@@ -255,6 +260,22 @@
 /* The fleet-wide type lift: hint and label text was 13px on every console,
    which reads fine at a desk at home and small on a folding table under gym
    light. Attribute+class outweighs the pages' own single-class rules. */
+/* Lucide icons (surfaces/_shared/icons.js) ride the text: 1em, currentColor,
+   nudged onto the baseline. */
+.ic { width: 1em; height: 1em; vertical-align: -0.14em; flex: none; }
+
+/* The console rhythm: one spacing scale across every operator page, so the
+   fleet reads as one product instead of nine hand-made pages. The pages keep
+   stating their LAYOUT (columns, grids, widths); this states the rhythm, and
+   attribute+class outweighs their single-selector rules. The phone remote is
+   not in the fleet on purpose: thumbs want tighter metrics than desks. */
+:root[data-surface="console"] .wrap { padding: 20px 26px 64px; }
+:root[data-surface="console"] .wrap > header { gap: 16px; margin-bottom: 18px; }
+:root[data-surface="console"] h1 { font-size: 26px; }
+:root[data-surface="console"] section { padding: 18px 20px; margin-bottom: 16px; }
+:root[data-surface="console"] section h2 { margin: 0 0 12px; }
+:root[data-surface="console"] .row { gap: 10px; }
+
 :root[data-surface="console"] .hint { font-size: 14px; line-height: 1.55; }
 :root[data-surface="console"] section > h2,
 :root[data-surface="console"] section h2 { font-size: 15px; }

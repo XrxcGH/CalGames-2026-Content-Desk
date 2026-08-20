@@ -9,6 +9,7 @@ import {
   connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker,
   SCENE_LABEL,
 } from '/shared/desk-client.js';
+import { iconEl } from '/shared/icons.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('desk');
@@ -319,7 +320,7 @@ function mark() {
   const at = (desk.matchClock ?? 0) - 2;
   desk.emit({ type: 'replay.marker', payload: { kind: 'manual', matchClock: at } });
   const line = document.createElement('div');
-  line.textContent = `▲ manual · ${clockDisplay(at)} (${at.toFixed(1)}s)`;
+  line.append(iconEl('flag'), ` manual · ${clockDisplay(at)} (${at.toFixed(1)}s)`);
   $('markers').prepend(line);
   while ($('markers').children.length > 12) $('markers').lastChild.remove();
 }
@@ -678,7 +679,7 @@ function paintOnAir() {
 
     const left = document.createElement('button');
     left.className = 'btn';
-    left.textContent = '◀';
+    left.append(iconEl('chevron-left'));
     left.title = 'Move one seat left';
     left.setAttribute('aria-label', `Move ${p ? p.name : 'this person'} one seat left`);
     left.disabled = i === 0;
@@ -686,7 +687,7 @@ function paintOnAir() {
 
     const right = document.createElement('button');
     right.className = 'btn';
-    right.textContent = '▶';
+    right.append(iconEl('chevron-right'));
     right.title = 'Move one seat right';
     right.setAttribute('aria-label', `Move ${p ? p.name : 'this person'} one seat right`);
     right.disabled = i === onAir.length - 1;
@@ -694,7 +695,7 @@ function paintOnAir() {
 
     const off = document.createElement('button');
     off.className = 'btn';
-    off.textContent = '✕';
+    off.append(iconEl('x'));
     off.title = 'Take off air';
     off.setAttribute('aria-label', `Take ${p ? p.name : 'this person'} off air`);
     off.onclick = () => toggle(id, false);
@@ -1301,8 +1302,9 @@ function paintAwards() {
       ? ' · ON SCREEN'
       : a.presented
         ? ` · presented: ${a.presented.winner}`
-        : (a.staged ? ' · winner loaded ✓' : '');
+        : (a.staged ? ' · winner loaded ' : '');
     who.append(sub);
+    if (!a.presented && a.staged && awardSnap.live !== a.id) sub.append(iconEl('check'));
     label.append(tick, who);
     return label;
   }));
@@ -1619,7 +1621,7 @@ function paintRowEditor(box, items, fields, noun) {
 
     const up = document.createElement('button');
     up.className = 'btn';
-    up.textContent = 'Up';
+    up.append(iconEl('chevron-up'), ' Up');
     up.disabled = i === 0;
     up.setAttribute('aria-label', `Move ${noun} ${i + 1} up`);
     up.onclick = () => {
