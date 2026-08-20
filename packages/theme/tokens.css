@@ -230,7 +230,14 @@
   --rule:           3px solid var(--cg-gold);
   --atmo:           none;
   --tex-perf:       radial-gradient(circle at center, rgba(255,255,255,.03) 1.4px, transparent 1.5px);
-  --btn-hover:      #3A1349;
+  /* Buttons rest CALM and light up on approach. The old face was raw
+     purple-hi (#7B2394): every secondary control shouted at parity with the
+     gold primaries, and hover went DARKER, which reads as already-pressed.
+     Resting face sits one step above the panel; hover lifts toward the
+     light; gold stays reserved for primaries and pressed state, which is
+     what makes it legible as "the one that matters". */
+  --btn-face:       #331040;
+  --btn-hover:      #4B1A5E;
   --focus-ring:     var(--cg-gold-hi);
   /* Error text on console purples. Lightened past the official alliance red
      because #ED1C24 reads 4.1:1 on --surface-raised (and only 2.9:1 on brand
@@ -272,9 +279,27 @@
 :root[data-surface="console"] .wrap { padding: 20px 26px 64px; }
 :root[data-surface="console"] .wrap > header { gap: 16px; margin-bottom: 18px; }
 :root[data-surface="console"] h1 { font-size: 26px; }
-:root[data-surface="console"] section { padding: 18px 20px; margin-bottom: 16px; }
+:root[data-surface="console"] section { padding: 18px 22px; margin-bottom: 16px;
+  /* A one-pixel light hairline instead of relying on fill contrast alone:
+     panel edges stay defined even where two purples sit close, and the line
+     is the cheapest kind of precision a dark UI can buy. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
 :root[data-surface="console"] section h2 { margin: 0 0 12px; }
 :root[data-surface="console"] .row { gap: 10px; }
+
+/* Operators who ask their OS for less motion get it: transitions and the
+   console's decorative pulses collapse to instant. Scoped to the consoles
+   because the broadcast pages are program output, where entrance motion is
+   editorial and the viewer's OS preference cannot reach a Browser Source
+   anyway. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-surface="console"] *,
+  :root[data-surface="console"] *::before,
+  :root[data-surface="console"] *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
+}
 
 :root[data-surface="console"] .hint { font-size: 14px; line-height: 1.55; }
 :root[data-surface="console"] section > h2,
