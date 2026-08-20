@@ -33,6 +33,8 @@ import type { CoverageLedger } from './coverage.ts';
 import type { CardLedger } from './cards.ts';
 import type { Rundown } from './rundown.ts';
 import type { Sponsors } from './sponsors.ts';
+import type { Awards } from './awards.ts';
+import type { Slides } from './slides.ts';
 import { CONTROL_ACTIONS, controlGroups } from './control-map.ts';
 import type { Vitals } from './vitals.ts';
 
@@ -121,6 +123,10 @@ export interface ServerOpts {
   rundown?: Rundown | null;
   /** Sponsor rotation, and the count behind the post-event report. */
   sponsors?: Sponsors | null;
+  /** The awards ceremony: titles, definitions, and the spoiler-safe reveal. */
+  awards?: Awards | null;
+  /** Recognition and info slides, plus the moderated shout-out queue. */
+  slides?: Slides | null;
   /** LAN-reachable base URL, e.g. "http://10.0.100.23:8720", for QR codes. */
   lanBase?: string | null;
 }
@@ -130,7 +136,8 @@ export function startServer(opts: ServerOpts) {
           publish = null, config = null, cheesy = null, cues = null, obs = null,
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
-          rundown = null, sponsors = null, lanBase = null } = opts;
+          rundown = null, sponsors = null, awards = null, slides = null,
+          lanBase = null } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -754,6 +761,120 @@ export function startServer(opts: ServerOpts) {
             case 'hide': return json(res, 200, sponsors.hide());
             default: return json(res, 404, { error: 'Unknown sponsor action.' });
           }
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // ---- awards -----------------------------------------------------------
+      // The ceremony: title and definition up while the GA reads it, winner
+      // revealed on a button. The winner is held OUT of the bus until the
+      // reveal — every open surface reads the fan-out, and a spoiler in a
+      // JSON field would beat the GA to the moment. See awards.ts.
+      if (path === '/api/awards' && req.method !== 'POST') {
+        return json(res, 200, awards?.snapshot ?? null);
+      }
+
+      if (path === '/api/awards' && req.method === 'POST') {
+        if (!awards) return json(res, 503, { error: 'Awards are not available.' });
+        try {
+          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
+            { action?: string; id?: string; title?: string; description?: string;
+              winner?: string; team?: number };
+          switch (body.action) {
+            case 'show':
+              awards.show(body);
+              return json(res, 200, { ok: true });
+            case 'reveal':
+              awards.reveal(body);
+              return json(res, 200, { ok: true });
+            case 'clear':
+              awards.clear();
+              return json(res, 200, { ok: true });
+            default: return json(res, 404, { error: 'Unknown award action.' });
+          }
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // ---- slides -----------------------------------------------------------
+      // The deck is OPEN because the side screens rotate it and cannot type a
+      // PIN. It never contains the moderation queue: nothing in that queue has
+      // been approved, and this response goes to every phone in the gym.
+      if (path === '/api/slides' && req.method !== 'POST') {
+        return json(res, 200, slides
+          ? { deck: slides.deck, live: slides.liveId }
+          : { deck: [], live: null });
+      }
+
+      if (path === '/api/slides/queue') {
+        return json(res, 200, { queue: slides?.queue ?? [] });
+      }
+
+      if (path === '/api/slides' && req.method === 'POST') {
+        if (!slides) return json(res, 503, { error: 'Slides are not available.' });
+        try {
+          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
+            { action?: string; id?: string; kind?: string; title?: string; lines?: string[] };
+          switch (body.action) {
+            case 'show': return json(res, 200, slides.show(String(body.id ?? '')));
+            case 'next': return json(res, 200, slides.next());
+            case 'hide': slides.hide(); return json(res, 200, { ok: true });
+            case 'add': return json(res, 200, await slides.add(body));
+            case 'remove':
+              return json(res, 200, { removed: await slides.remove(String(body.id ?? '')) });
+            case 'approve': return json(res, 200, await slides.approve(String(body.id ?? '')));
+            case 'reject':
+              return json(res, 200, { rejected: await slides.reject(String(body.id ?? '')) });
+            default: return json(res, 404, { error: 'Unknown slide action.' });
+          }
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // A Gracious Professionalism shout-out from a phone in the stands. Open
+      // on purpose — the whole point is that anyone can send one — and safe on
+      // purpose: screened, rate-limited per address, capped, and above all
+      // MODERATED. Nothing from here reaches a screen until a human at the
+      // desk approves it into the deck.
+      if (path === '/api/gp' && req.method === 'POST') {
+        if (!slides) return json(res, 503, { error: 'Shout-outs are not on right now.' });
+        try {
+          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
+            { name?: string; team?: number; message?: string };
+          const sub = await slides.submit(body, req.socket.remoteAddress ?? 'unknown');
+          return json(res, 200, { ok: true, id: sub.id });
+        } catch (err) {
+          return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      // ---- the event timer --------------------------------------------------
+      // "Provide a viewable (from the field) timer during robot field setup"
+      // is on the planning committee's list with the content desk named as the
+      // remediation. The timer renders huge on the side screens; turn one to
+      // face the field. It clears itself when a match starts.
+      if (path === '/api/timer' && req.method === 'POST') {
+        try {
+          const body = JSON.parse((await readBody(req, 2 * 1024)).toString('utf8')) as
+            { label?: string; seconds?: number; clear?: boolean };
+          if (body.clear) {
+            bus.emit({ type: 'timer.cleared', source: 'manual', payload: {} });
+            return json(res, 200, { ok: true });
+          }
+          const seconds = Number(body.seconds);
+          if (!Number.isFinite(seconds) || seconds < 10 || seconds > 7200) {
+            return json(res, 400, { error: 'Seconds must be between 10 and 7200.' });
+          }
+          const endsAt = Date.now() + seconds * 1000;
+          bus.emit({
+            type: 'timer.started',
+            source: 'manual',
+            payload: { label: String(body.label ?? '').trim().slice(0, 60), endsAt },
+          });
+          return json(res, 200, { ok: true, endsAt });
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }

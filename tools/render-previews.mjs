@@ -189,6 +189,56 @@ const SHOTS = [
     },
   },
   {
+    name: 'program-award-reveal',
+    url: '/s/program',
+    note: 'The awards ceremony at the reveal: title, definition, winner. ' +
+      'Until the reveal button, the winner exists nowhere the audience can read.',
+    setup: async () => {
+      await post('/api/awards', {
+        action: 'show',
+        title: "Directors' Award",
+        description: 'For the team that best embodies the spirit of CalGames: ' +
+          'competitive on the field, generous everywhere else.',
+        winner: 'The Funky Monkeys', team: 846,
+      });
+      await post('/api/awards', { action: 'reveal' });
+    },
+  },
+  {
+    name: 'program-recognition-slide',
+    url: '/s/program',
+    note: 'A recognition slide on the program. The side screens rotate the ' +
+      'same deck ambiently; this is the desk deliberately taking one to air.',
+    setup: async () => {
+      await post('/api/awards', { action: 'clear' });
+      const slide = await post('/api/slides', {
+        action: 'add', kind: 'recognition', title: 'Thank you, setup crew',
+        lines: ['Friday load-in and field build', 'Ana · Ben · Cy · Dee · the WRRF interns'],
+      });
+      await post('/api/slides', { action: 'show', id: slide.id });
+    },
+  },
+  {
+    name: 'side-screen-timer',
+    url: '/s/side',
+    note: 'The event timer taking over a side screen: field setup, meetings, ' +
+      'doors. Turn one TV to face the field and that is the committee ask met.',
+    setup: async () => {
+      await post('/api/slides', { action: 'hide' });
+      await post('/api/timer', { label: 'Field setup', seconds: 96 });
+    },
+  },
+  {
+    name: 'phone-gp-shoutout',
+    url: '/s/gp',
+    width: 430, height: 932,
+    note: 'The Gracious Professionalism shout-out form. Everything submitted ' +
+      'goes through a human moderator at the desk before any screen sees it.',
+    setup: async () => {
+      await post('/api/timer', { clear: true });
+    },
+  },
+  {
     name: 'program-alliance-selection',
     url: '/s/program',
     note: 'Alliance selection, mirrored from the field, with the pick clock.',
@@ -351,6 +401,8 @@ async function main() {
     // morning, exactly as the README tells them to, would lose that match's
     // video with nothing anywhere reporting it.
     join(ROOT, 'data', 'publish-queue.json'),
+    // The slide deck and shout-out queue: the render adds fixtures to both.
+    join(ROOT, 'data', 'slides.json'),
   ]);
   // The event log too, and snapshot() cannot cover it: the desk opens a NEW
   // file per boot, named for the moment it started, so there is nothing to
@@ -505,6 +557,8 @@ async function post(path, body) {
     body: JSON.stringify(body ?? {}),
   });
   if (!res.ok) console.warn(`[previews] ${path} -> ${res.status}`);
+  // The slide shot needs the id the add returned; everyone else ignores it.
+  return res.json().catch(() => null);
 }
 
 function openSocket() {
@@ -541,7 +595,13 @@ async function capture(chrome, shot, cookie) {
     const args = [
       '--headless=new', '--disable-gpu', '--hide-scrollbars',
       `--window-size=${width},${height}`,
-      '--virtual-time-budget=6000',
+      // 12000, empirically. At 6000 a capture LOSES the websocket race often
+      // enough to ship blank backdrops: virtual time pauses for document
+      // resources but not for the socket handshake, so whether the snapshot
+      // lands before the screenshot is a coin toss the desk machine mostly
+      // won and this one mostly lost. The REST first-paint in desk-client
+      // narrows the window; the bigger budget covers the rest.
+      '--virtual-time-budget=12000',
       `--screenshot=${out}`,
       BASE + shot.url,
     ];

@@ -253,11 +253,18 @@ startTicker(() => {
   const behind = s.pace?.behindMin;
   const behindText = behind != null && Math.abs(behind) >= 2
     ? ` · running <b>${Math.abs(behind)} min ${behind > 0 ? 'behind' : 'ahead'}</b>` : '';
-  const html = s.status
+  // A live event timer leads the line: "field setup, forty seconds" is a
+  // thing the announcer says out loud, and it beats whatever else is here.
+  const t = s.timer && desk.serverNow < s.timer.endsAt + 5000 ? s.timer : null;
+  const tLeft = t ? Math.max(0, Math.ceil((t.endsAt - desk.serverNow) / 1000)) : 0;
+  const timerText = t
+    ? `<b>${esc(t.label)} ${Math.floor(tLeft / 60)}:${String(tLeft % 60).padStart(2, '0')}</b> · `
+    : '';
+  const html = timerText + (s.status
     ? `<b>${esc(s.status.message)}</b>`
     : `${esc(s.match?.displayName ?? 'No match loaded')} · ` +
       `${PHASE_LABEL[phaseFor(s, c)] ?? ''} <b>${clockDisplayFor(s, c)}</b> · ` +
-      `red <b>${s.score.red.total}</b> · blue <b>${s.score.blue.total}</b>${behindText}`;
+      `red <b>${s.score.red.total}</b> · blue <b>${s.score.blue.total}</b>${behindText}`);
   // Only when it actually changed. This runs on rAF, so it was destroying and
   // re-parsing this line sixty times a second, all day, on a battery-powered
   // tablet sitting on the podium.

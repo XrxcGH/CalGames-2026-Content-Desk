@@ -408,6 +408,68 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 
     <div>
       <section>
+        <h2>Awards</h2>
+        <p class="hint">Show puts the title and definition up for the GA to read.
+          Type the winner here first: it stays OFF every feed until you press
+          <b>Reveal</b>, so nothing spoils the moment. Presented awards tick off.</p>
+        <div id="awList" class="pbook" style="max-height:180px"></div>
+        <div class="row" style="margin-top:8px">
+          <input id="awCustomTitle" placeholder="Or a custom award title" style="flex:2 1 180px">
+          <input id="awCustomDesc" placeholder="One-line definition" style="flex:3 1 220px">
+        </div>
+        <div class="row">
+          <input id="awWinnerIn" placeholder="Winner (person or team name)" style="flex:3 1 200px">
+          <input id="awTeamIn" placeholder="Team #" inputmode="numeric" style="flex:0 1 90px">
+        </div>
+        <div class="row">
+          <button class="btn btn--go" id="awShow">Show the award</button>
+          <button class="btn btn--go" id="awReveal">Reveal the winner</button>
+          <button class="btn" id="awClear">Clear</button>
+        </div>
+        <p class="hint" id="awHint" aria-live="polite"></p>
+      </section>
+
+      <section>
+        <h2>Slides &amp; shout-outs</h2>
+        <p class="hint">Recognition and info slides. <b>Next</b> steps through the deck
+          on program; the side screens also rotate the whole deck on their own.</p>
+        <div id="slList" class="pbook" style="max-height:180px"></div>
+        <div class="row" style="margin-top:8px">
+          <select id="slKindSel" style="flex:0 1 150px">
+            <option value="recognition">Recognition</option>
+            <option value="info">Info</option>
+          </select>
+          <input id="slTitleIn" placeholder="Title" style="flex:2 1 160px">
+          <input id="slLinesIn" placeholder="Lines, separated by |" style="flex:3 1 220px">
+          <button class="btn" id="slAdd">Add</button>
+        </div>
+        <div class="row">
+          <button class="btn btn--go" id="slNext">Next slide</button>
+          <button class="btn" id="slHide">Take it down</button>
+        </div>
+        <label>Shout-out queue</label>
+        <p class="hint">From phones in the stands (<b>/s/gp</b>, on the side-screen QR).
+          Nothing goes up without your press. Approving adds it to the deck.</p>
+        <div id="gpQueue" class="pbook" style="max-height:180px"></div>
+        <p class="hint" id="slHint" aria-live="polite"></p>
+      </section>
+
+      <section>
+        <h2>Event timer</h2>
+        <p class="hint">Counts down huge on the side screens: turn one to face the
+          field for robot setup. It clears itself the moment a match starts.</p>
+        <div class="row">
+          <button class="btn" id="tmSetup">Field setup 2:00</button>
+          <button class="btn" id="tmFive">5:00</button>
+          <input id="tmLabelIn" placeholder="Label" style="flex:2 1 140px">
+          <input id="tmMinIn" placeholder="Min" inputmode="numeric" style="flex:0 1 70px">
+          <button class="btn" id="tmStart">Start</button>
+          <button class="btn" id="tmClear">Clear</button>
+        </div>
+        <p class="hint" id="tmHint" aria-live="polite"></p>
+      </section>
+
+      <section>
         <h2>Replay markers</h2>
         <div class="row">
           <button class="btn" id="mark" aria-label="Mark replay moment (keyboard shortcut space bar)" style="width:100%">Mark<kbd aria-hidden="true">SPACE</kbd></button>

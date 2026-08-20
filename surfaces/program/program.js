@@ -26,7 +26,7 @@ fitStage($('stage'));
 // ---- screens --------------------------------------------------------------
 const SCREENS = [
   'overview', 'match', 'score', 'analysis', 'arcade', 'selection', 'explain',
-  'cardcall', 'sponsor', 'blank',
+  'cardcall', 'sponsor', 'award', 'slide', 'blank',
 ];
 let currentScreen = null;
 
@@ -569,6 +569,8 @@ desk.on('state', state => {
   paintEmergency(state.emergency);
   paintCardCall(state.cardCall);
   paintSponsor(state.sponsor);
+  paintAward(state.award);
+  paintSlide(state.slide);
   showScreen(CLEAN ? 'match' : state.screen);
 });
 
@@ -732,6 +734,47 @@ function paintSponsor(sponsor) {
   // A logo path that 404s would otherwise leave the browser's broken-image
   // glyph 340px tall on a projector.
   logo.onerror = () => { logo.hidden = true; };
+}
+
+/**
+ * The awards plate.
+ *
+ * Keyed on winner + title so the reveal block's entrance animation runs
+ * exactly once, at the moment `award.presented` lands, rather than restarting
+ * on every state frame while the applause is still going.
+ */
+let awardKey = '';
+function paintAward(award) {
+  if (!award) { awardKey = ''; return; }
+  const key = `${award.id}|${award.winner ?? ''}`;
+  if (key === awardKey) return;
+  awardKey = key;
+
+  $('awTitle').textContent = award.title;
+  $('awDesc').textContent = award.description;
+  const reveal = $('awReveal');
+  reveal.hidden = !award.revealed;
+  if (award.revealed) {
+    $('awWinner').textContent = award.winner ?? '';
+    const team = $('awTeam');
+    team.hidden = !award.team;
+    if (award.team) team.textContent = `Team ${award.team}`;
+  }
+}
+
+const SLIDE_KICKER = {
+  recognition: 'Thank you', info: 'Event info', shoutout: 'Shout-out',
+};
+
+function paintSlide(slide) {
+  if (!slide) return;
+  $('slKicker').textContent = SLIDE_KICKER[slide.kind] ?? 'Event info';
+  $('slTitle').textContent = slide.title;
+  $('slLines').replaceChildren(...(slide.lines ?? []).map(line => {
+    const div = document.createElement('div');
+    div.textContent = line;
+    return div;
+  }));
 }
 
 function paintCardCall(call) {

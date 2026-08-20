@@ -135,6 +135,18 @@ export const CONTROL_ACTIONS: ControlAction[] = [
   { id: 'rundown.advance', group: 'Day', label: 'Next segment',
     does: 'Finish the live segment and start the next.',
     method: 'POST', path: '/api/rundown', body: { action: 'advance' } },
+  { id: 'timer.setup', group: 'Day', label: 'Setup 2:00',
+    does: 'Two-minute field setup countdown, huge on the side screens.',
+    method: 'POST', path: '/api/timer', body: { label: 'Field setup', seconds: 120 } },
+  { id: 'timer.clear', group: 'Day', label: 'Timer off',
+    does: 'Take the countdown down.',
+    method: 'POST', path: '/api/timer', body: { clear: true } },
+  { id: 'slide.next', group: 'Gaps', label: 'Slide',
+    does: 'Next recognition or info slide on the program.',
+    method: 'POST', path: '/api/slides', body: { action: 'next' } },
+  { id: 'slide.hide', group: 'Gaps', label: 'Slide off',
+    does: 'Take the slide down.',
+    method: 'POST', path: '/api/slides', body: { action: 'hide' } },
 
   // ---- the ones worth a lid you have to lift ----
   { id: 'emergency.clear', group: 'Safety', label: 'Clear safety',

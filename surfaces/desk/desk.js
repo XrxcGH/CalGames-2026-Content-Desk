@@ -1014,3 +1014,266 @@ $('ccClear').onclick = async () => {
 };
 
 desk.on('state', paintCardTeams);
+
+// ---- awards -----------------------------------------------------------------
+// The winner is typed HERE and held by the server until Reveal: it must never
+// ride the open state feed while the GA is still building the moment.
+let awardSnap = null;
+let awardPicked = null;
+
+async function loadAwards() {
+  try {
+    const res = await fetch('/api/awards');
+    if (!res.ok) return;
+    awardSnap = await res.json();
+    paintAwards();
+  } catch { /* transient */ }
+}
+
+function paintAwards() {
+  const box = $('awList');
+  const list = awardSnap?.list ?? [];
+  if (!list.length) {
+    box.innerHTML = '<p class="hint" style="padding:8px">No awards in config.json. ' +
+      'Type a custom title below and it works the same.</p>';
+    return;
+  }
+  box.replaceChildren(...list.map(a => {
+    const label = document.createElement('label');
+    const tick = document.createElement('input');
+    tick.type = 'radio';
+    tick.name = 'awardPick';
+    tick.checked = awardPicked === a.id;
+    tick.onchange = () => { awardPicked = a.id; };
+    const who = document.createElement('span');
+    who.className = 'who';
+    const name = document.createElement('b');
+    name.textContent = a.title;
+    who.append(name);
+    const sub = document.createElement('span');
+    sub.textContent = a.presented
+      ? ` · presented: ${a.presented.winner}`
+      : (awardSnap.live === a.id ? ' · ON SCREEN' : '');
+    who.append(sub);
+    label.append(tick, who);
+    return label;
+  }));
+}
+
+$('awShow').onclick = async () => {
+  const custom = $('awCustomTitle').value.trim();
+  const body = {
+    action: 'show',
+    ...(custom ? { title: custom, description: $('awCustomDesc').value.trim() }
+      : { id: awardPicked }),
+    winner: $('awWinnerIn').value.trim(),
+    team: Number($('awTeamIn').value) || undefined,
+  };
+  if (!custom && !awardPicked) {
+    $('awHint').textContent = 'Pick an award from the list, or type a custom title.';
+    return;
+  }
+  try {
+    const res = await fetch('/api/awards', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $('awHint').textContent = $('awWinnerIn').value.trim()
+      ? 'On screen. The winner is loaded and hidden: press Reveal on the GA\'s cue.'
+      : 'On screen. Type the winner, then press Reveal.';
+    await loadAwards();
+  } catch (err) {
+    $('awHint').textContent = err.message;
+  }
+};
+
+$('awReveal').onclick = async () => {
+  try {
+    const res = await fetch('/api/awards', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'reveal',
+        winner: $('awWinnerIn').value.trim() || undefined,
+        team: Number($('awTeamIn').value) || undefined,
+      }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $('awHint').textContent = 'Revealed.';
+    $('awWinnerIn').value = ''; $('awTeamIn').value = '';
+    await loadAwards();
+  } catch (err) {
+    $('awHint').textContent = err.message;
+  }
+};
+
+$('awClear').onclick = async () => {
+  try {
+    const res = await fetch('/api/awards', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'clear' }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    $('awHint').textContent = 'Cleared.';
+    await loadAwards();
+  } catch (err) {
+    $('awHint').textContent = `Still up: ${err.message}. Press Clear again.`;
+  }
+};
+
+void loadAwards();
+
+// ---- slides & shout-outs ----------------------------------------------------
+async function slideAction(body, okText) {
+  try {
+    const res = await fetch('/api/slides', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    if (okText) $('slHint').textContent = okText;
+    await loadSlideDeck();
+    return out;
+  } catch (err) {
+    $('slHint').textContent = err.message;
+    return null;
+  }
+}
+
+async function loadSlideDeck() {
+  try {
+    const [deckRes, queueRes] = await Promise.all([
+      fetch('/api/slides'), fetch('/api/slides/queue'),
+    ]);
+    if (deckRes.ok) paintSlideDeck(await deckRes.json());
+    if (queueRes.ok) paintGpQueue((await queueRes.json()).queue ?? []);
+  } catch { /* transient */ }
+}
+
+function paintSlideDeck({ deck = [], live = null }) {
+  const box = $('slList');
+  if (!deck.length) {
+    box.innerHTML = '<p class="hint" style="padding:8px">No slides yet. Add one below, ' +
+      'or put them in config.json before the event.</p>';
+    return;
+  }
+  box.replaceChildren(...deck.map(sl => {
+    const row = document.createElement('label');
+    const who = document.createElement('span');
+    who.className = 'who';
+    const name = document.createElement('b');
+    name.textContent = sl.title;
+    who.append(name);
+    const sub = document.createElement('span');
+    sub.textContent = ` · ${sl.kind}${sl.id === live ? ' · ON SCREEN' : ''}`;
+    who.append(sub);
+    const show = document.createElement('button');
+    show.className = 'btn';
+    show.textContent = 'Show';
+    show.onclick = e => {
+      e.preventDefault();
+      void slideAction({ action: 'show', id: sl.id }, 'On program.');
+    };
+    const kill = document.createElement('button');
+    kill.className = 'btn kill';
+    kill.textContent = 'Remove';
+    kill.onclick = e => {
+      e.preventDefault();
+      void slideAction({ action: 'remove', id: sl.id }, 'Removed.');
+    };
+    row.append(who, show, kill);
+    return row;
+  }));
+}
+
+function paintGpQueue(queue) {
+  const box = $('gpQueue');
+  if (!queue.length) {
+    box.innerHTML = '<p class="hint" style="padding:8px">Nothing waiting.</p>';
+    return;
+  }
+  box.replaceChildren(...queue.map(q => {
+    const row = document.createElement('label');
+    const who = document.createElement('span');
+    who.className = 'who';
+    const msg = document.createElement('span');
+    msg.textContent = `"${q.message}" `;
+    const from = document.createElement('b');
+    from.textContent = `— ${q.name}${q.team ? `, ${q.team}` : ''}`;
+    who.append(msg, from);
+    const ok = document.createElement('button');
+    ok.className = 'btn';
+    ok.textContent = 'Approve';
+    ok.onclick = e => {
+      e.preventDefault();
+      void slideAction({ action: 'approve', id: q.id }, 'Approved into the deck.');
+    };
+    const no = document.createElement('button');
+    no.className = 'btn kill';
+    no.textContent = 'Reject';
+    no.onclick = e => {
+      e.preventDefault();
+      void slideAction({ action: 'reject', id: q.id }, 'Rejected.');
+    };
+    row.append(who, ok, no);
+    return row;
+  }));
+}
+
+$('slAdd').onclick = async () => {
+  const title = $('slTitleIn').value.trim();
+  if (!title) { $('slHint').textContent = 'A slide needs a title.'; return; }
+  const out = await slideAction({
+    action: 'add',
+    kind: $('slKindSel').value,
+    title,
+    lines: $('slLinesIn').value.split('|').map(l => l.trim()).filter(Boolean),
+  }, 'Added to the deck.');
+  if (out) { $('slTitleIn').value = ''; $('slLinesIn').value = ''; }
+};
+
+$('slNext').onclick = () => void slideAction({ action: 'next' }, 'Next slide on program.');
+$('slHide').onclick = () => void slideAction({ action: 'hide' }, 'Taken down.');
+
+void loadSlideDeck();
+// The queue fills from the stands all day; the console should not need a
+// reload to notice. Slow poll: moderation is a between-matches job.
+setInterval(loadSlideDeck, 30_000);
+
+// ---- the event timer --------------------------------------------------------
+async function startTimer(label, seconds) {
+  try {
+    const res = await fetch('/api/timer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, seconds }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $('tmHint').textContent = `${label || 'Countdown'} running on the side screens.`;
+  } catch (err) {
+    $('tmHint').textContent = err.message;
+  }
+}
+
+$('tmSetup').onclick = () => void startTimer('Field setup', 120);
+$('tmFive').onclick = () => void startTimer($('tmLabelIn').value.trim() || 'Countdown', 300);
+$('tmStart').onclick = () => {
+  const min = Number($('tmMinIn').value);
+  if (!min || min <= 0) { $('tmHint').textContent = 'How many minutes?'; return; }
+  void startTimer($('tmLabelIn').value.trim() || 'Countdown', Math.round(min * 60));
+};
+$('tmClear').onclick = async () => {
+  try {
+    const res = await fetch('/api/timer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    $('tmHint').textContent = 'Cleared.';
+  } catch (err) {
+    $('tmHint').textContent = `Still running: ${err.message}. Press Clear again.`;
+  }
+};

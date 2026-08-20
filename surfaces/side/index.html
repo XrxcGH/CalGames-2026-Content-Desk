@@ -101,6 +101,36 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
   font-size: 76px; line-height: 1.15;
 }
 .note-body[data-fit="1"] { font-size: 60px; }
+/* Slides ride the note's layout: one idea, readable across a room. */
+.slide-body {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 18px; text-align: center; padding: 0 60px;
+  font-family: var(--font-display); font-weight: 700; font-size: 52px;
+  line-height: 1.2;
+}
+.slide-body .sl-line { max-width: 100%; overflow-wrap: anywhere; }
+/* The attribution line on a shout-out reads quieter than the message. */
+.slide-body .sl-line:last-child:not(:only-child) {
+  font-size: 38px; font-weight: 500; color: var(--cg-white-dim);
+}
+#timerOver {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; background: var(--cg-purple-void);
+  background-image: var(--tex-perf); background-size: var(--tex-perf-size);
+}
+#timerOver[hidden] { display: none; }
+.t-label {
+  font-family: var(--font-cond); font-weight: 700; font-size: 64px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--cg-gold);
+}
+.t-clock {
+  font-family: var(--font-num); font-weight: 900; font-size: 380px;
+  line-height: 1; color: var(--cg-white); letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+/* The last ten seconds get the endgame treatment: urgency is information. */
+#timerOver[data-late] .t-clock { color: var(--cg-gold); }
 .note-body[data-fit="2"] { font-size: 46px; }
 /* min-height:0 is load-bearing: a flex item defaults to min-height:auto, which
    pins this to its content height and pushes the last row off the screen
@@ -271,6 +301,22 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
     <div class="rank-grid" id="rank"></div>
   </section>
 
+  <section class="panel-screen" id="scr-slide">
+    <h1 id="slideKick">Event info</h1>
+    <div class="sub" id="slideTitle">&nbsp;</div>
+    <div class="tick"></div>
+    <div class="slide-body" id="slideBody"></div>
+  </section>
+
+  <!-- The event timer: field setup, a meeting, doors. A TAKEOVER, not a pane
+       in the rotation, because a countdown that rotates away is not a
+       countdown. This is the screen a team on the field can see, which is the
+       committee's ask; turn one TV to face the field. -->
+  <div id="timerOver" hidden>
+    <div class="t-label" id="timerLabel"></div>
+    <div class="t-clock" id="timerClock">0:00</div>
+  </div>
+
   <div id="qrBox" hidden>
     <div id="qrLabel">Your team's<br>schedule</div>
     <div id="qrImg"></div>
@@ -307,6 +353,7 @@ function show(deck) {
   $('scr-deck').toggleAttribute('data-active', deck);
   $('scr-rank').toggleAttribute('data-active', !deck);
   $('scr-note').removeAttribute('data-active');
+  $('scr-slide').removeAttribute('data-active');
   // The fit passes need layout: inside display:none both scrollWidth and
   // clientWidth read 0, every overflow check passes vacuously, and a panel
   // painted during the other panel's dwell came up unfitted (worse, the
@@ -332,9 +379,63 @@ function showNote() {
   onDeck = false;
   $('scr-deck').removeAttribute('data-active');
   $('scr-rank').removeAttribute('data-active');
+  $('scr-slide').removeAttribute('data-active');
   $('scr-note').setAttribute('data-active', '');
   fitNote();
 }
+
+// ---- slides ----------------------------------------------------------------
+// The deck rotates one slide per full rotation: deck, rankings, one slide,
+// round again. Ambient recognition, not a takeover. Refetched on a slow poll
+// because slides get added at the desk all day.
+let slideDeck = [];
+let slideCursor = 0;
+async function loadSlides() {
+  try {
+    const res = await fetch('/api/slides');
+    if (res.ok) slideDeck = (await res.json()).deck ?? [];
+  } catch { /* the rotation just skips the slide slot */ }
+}
+void loadSlides();
+setInterval(loadSlides, 60_000);
+
+const SLIDE_KICKER = {
+  recognition: 'Thank you', info: 'Event info', shoutout: 'Shout-out',
+};
+
+function showSlide() {
+  const slide = slideDeck[slideCursor % slideDeck.length];
+  slideCursor++;
+  panel = 'slide';
+  onDeck = false;
+  for (const id of ['scr-deck', 'scr-rank', 'scr-note']) $(id).removeAttribute('data-active');
+  $('scr-slide').setAttribute('data-active', '');
+  $('slideKick').textContent = SLIDE_KICKER[slide.kind] ?? 'Event info';
+  $('slideTitle').textContent = slide.title;
+  $('slideBody').replaceChildren(...slide.lines.map(line => {
+    const div = document.createElement('div');
+    div.className = 'sl-line';
+    div.textContent = line;
+    return div;
+  }));
+}
+
+// ---- the event timer --------------------------------------------------------
+// Ticks locally off the skew-corrected server clock: a countdown that is four
+// seconds out against the desk teaches the room not to trust the screen.
+setInterval(() => {
+  const t = lastState?.timer ?? null;
+  const over = $('timerOver');
+  const left = t ? Math.ceil((t.endsAt - desk.serverNow) / 1000) : -1;
+  // Holds at 0:00 for a few beats so the room sees it finish, then goes.
+  if (!t || left < -5) { over.hidden = true; return; }
+  const shown = Math.max(0, left);
+  over.hidden = false;
+  over.toggleAttribute('data-late', shown <= 10);
+  $('timerLabel').textContent = t.label;
+  $('timerClock').textContent =
+    `${Math.floor(shown / 60)}:${String(shown % 60).padStart(2, '0')}`;
+}, 250);
 
 function advance() {
   const pages = Math.max(1, Math.ceil((lastState?.rankings?.length ?? 0) / PAGE_SIZE));
@@ -348,6 +449,9 @@ function advance() {
   } else if (rankPage + 1 < pages) {
     rankPage++;
     renderRank();
+  } else if (panel !== 'slide' && slideDeck.length) {
+    // The slide slot: one per rotation, after the rankings finish.
+    showSlide();
   } else {
     show(true);
   }

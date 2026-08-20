@@ -1022,3 +1022,123 @@
   letter-spacing: .06em; color: var(--cg-white-dim); max-width: 26em;
 }
 .sp-tick { width: 420px; height: 4px; background: var(--tick); }
+
+/* ==========================================================================
+   Awards.
+
+   Two beats on one plate. The title and definition are up while the GA reads
+   the definition aloud — the committee's "clear award titles/definitions",
+   said to the room, not only mailed in advance. The winner block enters on
+   `award.presented`, which is also the first moment the winner exists
+   anywhere the audience can read: the reveal belongs to the stage, and the
+   open state feed carries null until it has happened.
+   ========================================================================== */
+.aw {
+  position: absolute; inset: 0;
+  /* NO display here, and that absence is load-bearing. These sections are
+     appended after `.screen { display:none }`, so a bare `display:flex` at
+     equal specificity would win on source order and leave both plates
+     PERMANENTLY visible — full-frame opaque backdrops sitting over every
+     other screen. That is precisely what happened: every preview whose live
+     screen was not one of these two rendered as an empty purple backdrop,
+     byte-identical across shots, while the interactive DOM looked correct in
+     every inspector because the bug was paint order, not state. Display comes
+     only from the [data-active] rule below; .screen's own none hides the rest
+     of the time. */
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; padding: 0 140px; text-align: center;
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--atmo);
+  background-size: var(--tex-perf-size), cover;
+}
+.screen.aw[data-active], .screen.sl[data-active] { display: flex; }
+:root[data-key="luma"] .aw {
+  background-color: var(--cg-purple);
+  background-image: var(--tex-perf);
+}
+.aw-kicker {
+  font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
+  letter-spacing: .24em; text-indent: .24em; text-transform: uppercase;
+  color: var(--cg-gold);
+}
+.aw-title {
+  font-family: var(--font-display); font-weight: 800;
+  font-variation-settings: "wdth" var(--wdth-display);
+  font-size: 96px; line-height: 1.02; color: var(--cg-white);
+  text-transform: uppercase; letter-spacing: .01em; max-width: 1500px;
+}
+.aw-desc {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: 32px; line-height: 1.45; color: var(--cg-white-dim);
+  max-width: 1180px; margin: 0;
+}
+.aw-reveal {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin-top: 26px; padding: 30px 70px 26px;
+  background-color: var(--cg-purple);
+  background-image: var(--tex-perf); background-size: var(--tex-perf-size);
+  clip-path: var(--chamfer); --ch: 18px; position: relative;
+  animation: cg-card-in var(--dur-in) var(--ease-pop) both;
+}
+.aw-reveal[hidden] { display: none; }
+.aw-reveal::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 6px;
+  background: var(--cg-gold);
+}
+.aw-to {
+  font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
+  letter-spacing: .2em; text-indent: .2em; text-transform: uppercase;
+  color: var(--cg-gold);
+}
+.aw-winner {
+  font-family: var(--font-display); font-weight: 800;
+  font-variation-settings: "wdth" var(--wdth-display);
+  font-size: 84px; line-height: 1.04; color: var(--cg-white);
+  text-transform: uppercase; max-width: 1400px; overflow-wrap: anywhere;
+}
+.aw-team {
+  font-family: var(--font-num); font-weight: 900; font-size: 44px;
+  color: var(--cg-gold);
+}
+@media (prefers-reduced-motion: reduce) {
+  .aw-reveal { animation: none; }
+}
+
+/* ==========================================================================
+   Slides: recognition, info, shout-outs. The sponsor plate's shape without
+   the sponsor ledger — see slides.ts for why they must not share a system.
+   ========================================================================== */
+.sl {
+  position: absolute; inset: 0;
+  /* No display, same reason as .aw above. */
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px; padding: 0 160px; text-align: center;
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--atmo);
+  background-size: var(--tex-perf-size), cover;
+}
+:root[data-key="luma"] .sl {
+  background-color: var(--cg-purple);
+  background-image: var(--tex-perf);
+}
+.sl-kicker {
+  font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
+  letter-spacing: .24em; text-indent: .24em; text-transform: uppercase;
+  color: var(--cg-gold);
+}
+.sl-title {
+  font-family: var(--font-display); font-weight: 800;
+  font-variation-settings: "wdth" var(--wdth-display);
+  font-size: 84px; line-height: 1.05; color: var(--cg-white);
+  text-transform: uppercase; max-width: 1500px;
+}
+.sl-lines {
+  display: flex; flex-direction: column; gap: 14px; max-width: 1300px;
+  font-family: var(--font-display); font-weight: 500;
+  font-size: 38px; line-height: 1.35; color: var(--cg-white);
+}
+.sl-lines div { overflow-wrap: anywhere; }
+/* A shout-out's attribution line reads quieter than the message above it. */
+.sl-lines div:last-child:not(:only-child) {
+  font-size: 30px; color: var(--cg-white-dim);
+}

@@ -84,6 +84,19 @@
     "list": []
   },
 
+  "awards": {
+    "//": "The judged awards, with the definition the GA reads on air while the plate is up. The desk shows title+definition first and reveals the winner on a second press; the winner never enters any feed until that press.",
+    "//example": "{ \"id\": \"directors\", \"title\": \"Directors' Award\", \"description\": \"For the team that best embodies the spirit of CalGames.\" }",
+    "list": []
+  },
+
+  "slides": {
+    "//": "Recognition and info slides: volunteer thank-yous, SystemCore session times, meeting calls, food-truck hours. The side screens rotate the deck on their own; the desk can take any slide to the program. More get typed at the event and persist to data/slides.json.",
+    "//kinds": "recognition (thank-you card) or info (announcement card). Shout-outs approved from /s/gp join the deck as a third kind.",
+    "//example": "{ \"id\": \"syscore\", \"kind\": \"info\", \"title\": \"SystemCore session\", \"lines\": [\"Saturday 12:30, Room 201\", \"Limelight walks through the 2027 controller\"] }",
+    "list": []
+  },
+
   "rundown": {
     "//": "The day as a list. The desk manager advances it; nothing advances itself, because a rundown that advances on its own will do it during the one delay nobody predicted.",
     "//matches": "A matches block gives a COUNT, not a duration: the length comes from the pace model measuring real cycle time. A printed 7 minutes against a measured 9 is an hour by the end of the day.",

@@ -32,6 +32,7 @@ export const OPEN_SURFACES: ReadonlySet<string> = new Set([
   'quiz',      // the audience plays on their own phones
   'next',      // "when do we play?", the whole point is that anyone can open it
   'watch',     // kiosk wrapper: composites the open screens for a pit monitor
+  'gp',        // the shout-out form; its one write is moderated before air
 ]);
 
 /**
@@ -55,6 +56,9 @@ const OPEN_GET = new Set([
   // when the next thing starts. The venue screens and the phone page both
   // render it and neither can type a PIN. Changing it is a POST, and closed.
   '/api/rundown',
+  // The slide deck the side screens rotate. Approved content only, by
+  // construction: the moderation queue lives at /api/slides/queue, gated.
+  '/api/slides',
 ]);
 
 /**
@@ -79,6 +83,9 @@ const OPEN_GET_PREFIXES = [
 const OPEN_POST = new Set([
   '/api/trivia/join',
   '/api/trivia/answer',
+  // A Gracious Professionalism shout-out from the stands. Screened,
+  // rate-limited, capped, and never on a screen until a human approves it.
+  '/api/gp',
 ]);
 
 /**

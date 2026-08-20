@@ -147,7 +147,13 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         return { ...state, screen: auto(state, 'match') };
 
       case 'match.start':
-        return { ...state, matchStartedAt: ev.ts, lastMatchStartedAt: ev.ts, screen: auto(state, 'match') };
+        return {
+          ...state, matchStartedAt: ev.ts, lastMatchStartedAt: ev.ts,
+          // A running field-setup countdown is over by definition: the match
+          // it was counting down to just started, whoever forgot to clear it.
+          timer: null,
+          screen: auto(state, 'match'),
+        };
 
       case 'match.auto_end': {
         // HEURISTIC, and only used when running desk-only. Cheesy Arena decides
@@ -456,6 +462,111 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
 
       case 'card.call_clear':
         return { ...state, cardCall: null };
+
+      // The awards ceremony, two stages. Show carries no winner — the state is
+      // served openly, and the reveal is the GA's moment, not a JSON field's.
+      case 'award.show': {
+        const p = ev.payload as { id?: unknown; title?: unknown; description?: unknown };
+        const title = String(p.title ?? '').trim();
+        if (!title) return state;
+        return {
+          ...state,
+          award: {
+            id: String(p.id ?? ''), title,
+            description: String(p.description ?? '').trim(),
+            winner: null, team: null, revealed: false, at: ev.ts,
+          },
+          // A manual TAKE, not an auto() suggestion. The operator pressing
+          // "Show the award" is the same intent as taking a screen by hand,
+          // and during a ceremony they have usually just held one — an award
+          // that silently loses to that hold is a button that does nothing.
+          // The hold also keeps a gap-filler cue from stomping the ceremony.
+          screen: 'award',
+          screenHold: true,
+        };
+      }
+
+      case 'award.presented': {
+        const p = ev.payload as { id?: unknown; award?: unknown; winner?: unknown; team?: unknown };
+        const winner = String(p.winner ?? '').trim();
+        if (!winner) return state;
+        const team = Number(p.team);
+        // The reveal can arrive with no show before it (a replayed log that
+        // started mid-ceremony), so it builds the card it needs either way.
+        const base = state.award ?? {
+          id: String(p.id ?? ''), title: String(p.award ?? 'Award').trim(),
+          description: '', winner: null, team: null, revealed: false, at: ev.ts,
+        };
+        return {
+          ...state,
+          award: {
+            ...base,
+            winner,
+            team: Number.isInteger(team) && team > 0 ? team : null,
+            revealed: true,
+          },
+          screen: 'award',
+          screenHold: true,
+        };
+      }
+
+      case 'award.clear':
+        // The plate comes down and the screen goes with it: leaving 'award'
+        // active with no award paints a stale plate, and leaving the hold set
+        // makes the next lifecycle event mysteriously not work.
+        return {
+          ...state, award: null,
+          ...(state.screen === 'award' ? { screen: 'blank', screenHold: false } : {}),
+        };
+
+      // A slide takes the screen the way a sponsor card does, and leaves the
+      // same way. What rotates on the SIDE screens is the deck, not this: this
+      // is only ever the one slide the desk deliberately put on program.
+      case 'slide.show': {
+        const p = ev.payload as {
+          id?: unknown; kind?: unknown; title?: unknown; lines?: unknown;
+        };
+        const title = String(p.title ?? '').trim();
+        if (!title) return state;
+        return {
+          ...state,
+          slide: {
+            id: String(p.id ?? ''),
+            kind: String(p.kind ?? 'info'),
+            title,
+            lines: (Array.isArray(p.lines) ? p.lines : [])
+              .map(l => String(l ?? '').trim()).filter(Boolean).slice(0, 6),
+          },
+          // Same manual-take semantics as the award, for the same reason.
+          screen: 'slide',
+          screenHold: true,
+        };
+      }
+
+      case 'slide.hide':
+        return {
+          ...state, slide: null,
+          ...(state.screen === 'slide' ? { screen: 'blank', screenHold: false } : {}),
+        };
+
+      // The event countdown. It does not touch the program screen: it lives on
+      // the side screens, which are the ones a team on the field can see.
+      case 'timer.started': {
+        const p = ev.payload as { label?: unknown; endsAt?: unknown };
+        const endsAt = Number(p.endsAt);
+        if (!Number.isFinite(endsAt) || endsAt <= ev.ts) return state;
+        return {
+          ...state,
+          timer: {
+            label: String(p.label ?? '').trim().slice(0, 60) || 'Countdown',
+            endsAt,
+            startedAt: ev.ts,
+          },
+        };
+      }
+
+      case 'timer.cleared':
+        return { ...state, timer: null };
 
       case 'event.accessibility': {
         const p = ev.payload as {

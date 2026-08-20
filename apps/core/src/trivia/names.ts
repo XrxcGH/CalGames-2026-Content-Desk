@@ -105,6 +105,19 @@ const isBannedWord = (word: string): boolean => {
     BANNED_STEMS.some(stem => SUFFIXES.some(suf => form === stem + suf)));
 };
 
+/**
+ * A coarse screen for arbitrary text: a shout-out message, a typed slide line.
+ *
+ * Word-level only — pass one of screenName, over both the raw and the folded
+ * split — because the whole-name collapse pass is meaningless on a sentence.
+ * This is NOT a moderation gate and must never be treated as one: it exists to
+ * spare the human moderator the worst of the queue, and the human is the gate.
+ */
+export function screenText(raw: string): boolean {
+  const rawWords = raw.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  return ![...foldWords(raw), ...rawWords].some(isBannedWord);
+}
+
 export interface NameVerdict {
   ok: boolean;
   /** Shown to the person who typed it. Never names the matched word. */

@@ -90,7 +90,16 @@ export type DeskEventType =
   // The card call screen: what the card was for, and who it went to.
   | 'card.call' | 'card.call_clear'
   // event flow
-  | 'rankings.updated' | 'alliance_selection.update' | 'award.presented'
+  | 'rankings.updated' | 'alliance_selection.update'
+  // The awards ceremony. `award.show` carries title and description ONLY: the
+  // bus fans out to every open surface, so the winner first appears in
+  // `award.presented`, at the moment it stops being a secret.
+  | 'award.show' | 'award.presented' | 'award.clear'
+  // A full-screen slide: volunteer recognition, a session announcement, a
+  // moderated shout-out. See slides.ts.
+  | 'slide.show' | 'slide.hide'
+  // The visible-from-the-field countdown: robot setup, meeting starts.
+  | 'timer.started' | 'timer.cleared'
   | 'break.started' | 'queue.updated'
   // Queuers called a match: the four minutes before the field knows anything.
   | 'queue.called'
@@ -515,6 +524,22 @@ export interface DeskState {
   cards: CardState;
   /** The card call currently on air, or null. */
   cardCall: CardCall | null;
+  /**
+   * The award on the program screen. `winner` stays null until the reveal —
+   * this state is served openly, and a spoiler in it would be readable on any
+   * phone in the gym while the GA is still building suspense.
+   */
+  award: {
+    id: string; title: string; description: string;
+    winner: string | null; team: number | null; revealed: boolean; at: number;
+  } | null;
+  /** The slide on the program screen, when the screen is 'slide'. */
+  slide: { id: string; kind: string; title: string; lines: string[] } | null;
+  /**
+   * The event countdown: field setup, a meeting, doors. Rendered big on the
+   * side screens, which face the hall — and the field, when one is turned.
+   */
+  timer: { label: string; endsAt: number; startedAt: number } | null;
   /** The sponsor on air, or null. */
   sponsor: { id: string; name: string; line: string; logo: string | null } | null;
   /** Teams playing this match as a surrogate: it does not count for them. */
@@ -563,6 +588,9 @@ export const initialState = (): DeskState => ({
   emergency: null,
   cards: { byTeam: {}, thisMatch: [] },
   cardCall: null,
+  award: null,
+  slide: null,
+  timer: null,
   sponsor: null,
   surrogates: [],
   accessibility: { services: [], ask: '' },

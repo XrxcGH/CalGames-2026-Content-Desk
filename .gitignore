@@ -14,6 +14,11 @@ data/publish-queue.json.tmp
 data/trivia.json
 data/trivia.json.tmp
 
+# Slides typed at the event and the pending shout-out queue: event-specific,
+# and the queue is unmoderated crowd text that must never be committed.
+data/slides.json
+data/slides.json.tmp
+
 # The on-camera profile book. Real people's names, filled in at the event and
 # specific to it; a fresh clone starts empty and fills itself again.
 data/profiles.json

@@ -99,6 +99,14 @@ class DeskClient extends EventTarget {
     super();
     this.#name = name;
     this.#connect();
+    // One REST read for the first frame. The websocket snapshot is the source
+    // of truth, but it loses a race the venue actually runs: a headless
+    // capture screenshots, and a cold pit monitor paints, before the socket
+    // finishes its handshake. The guard keeps the order honest — if the
+    // socket won, the fetch result is stale and goes nowhere.
+    fetch('/api/state').then(r => (r.ok ? r.json() : null))
+      .then(state => { if (state && !this.state) this.#apply(state); })
+      .catch(() => { /* the socket is the real path; this was a head start */ });
   }
 
   #connect() {
@@ -169,6 +177,14 @@ class DeskClient extends EventTarget {
     this.state = state;
     this.dispatchEvent(new CustomEvent('state', { detail: state }));
   }
+
+  /**
+   * The server's clock, as near as this surface can know it. For anything
+   * that counts down to a server-stamped instant (the event timer): venue
+   * machines are not NTP-disciplined, and a countdown that is four seconds
+   * out against the desk teaches the room not to trust the screen.
+   */
+  get serverNow() { return Date.now() + this.#skew; }
 
   /** Live match clock, computed here rather than pushed. */
   get matchClock() {

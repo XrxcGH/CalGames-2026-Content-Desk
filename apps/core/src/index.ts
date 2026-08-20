@@ -39,6 +39,8 @@ import { CardLedger } from './cards.ts';
 import { Rundown } from './rundown.ts';
 import { Sponsors } from './sponsors.ts';
 import { rebuildFromLog } from './rebuild.ts';
+import { Awards } from './awards.ts';
+import { Slides } from './slides.ts';
 import { Vitals } from './vitals.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -524,6 +526,17 @@ if (config.rundown.segments.length) {
   console.log('[rundown] no run of show planned, set rundown.segments in config.json');
 }
 
+// The awards ceremony: titles and definitions from config, the reveal from a
+// button, and the winner held out of the bus until the moment it happens on
+// stage. See awards.ts for why that last part is load-bearing.
+const awards = new Awards(bus, config.awards.list);
+awards.attach();
+
+// Recognition and info slides, plus the moderated shout-out queue. Additions
+// typed at the event persist to data/slides.json.
+const slides = new Slides(ROOT, bus, config.slides.list);
+await slides.load();
+
 // Cards are a STATE a team carries, not a one-shot event: a yellow follows a
 // team all weekend and a second one is a red. Nothing remembered them before.
 const cardLedger = new CardLedger();
@@ -551,7 +564,7 @@ coverage.attach(bus);
  */
 {
   const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'),
-    [cardLedger, coverage, rundown, sponsors]);
+    [cardLedger, coverage, rundown, sponsors, awards]);
   if (rebuilt.events) {
     console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log(s) today: ` +
       'cards, coverage, run of show and sponsor counts carried over'
@@ -631,7 +644,7 @@ if (config.publish.autoQueueArcade && !has('demo') && !has('replay')) {
 const server = startServer({
   bus, media, root: ROOT, port, host, recorder, clips, publish, config, cheesy, cues, obs,
   arcade, trivia, audio, audioClips, profiles, coverage, vitals, cardLedger,
-  rundown, sponsors, lanBase,
+  rundown, sponsors, awards, slides, lanBase,
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).

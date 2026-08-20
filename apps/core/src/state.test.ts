@@ -374,3 +374,73 @@ test('a partial snapshot cannot restore authority', () => {
   assert.equal(s.confidence, 'authoritative');
   assert.equal(s.totalConfidence, 'authoritative');
 });
+
+test('an award shows without its winner and reveals with it', () => {
+  // The state is served openly, so award.show carries no winner and the state
+  // must hold null until award.presented lands: the reveal belongs to the
+  // stage, not to whoever thought to open /api/state on their phone.
+  let s = reduce(initialState(), ev('award.show', 1000, {
+    id: 'directors', title: "Directors' Award", description: 'The one that matters.',
+  }));
+  assert.equal(s.screen, 'award', 'the plate takes the screen like a card call');
+  assert.equal(s.award?.winner, null);
+  assert.equal(s.award?.revealed, false);
+
+  s = reduce(s, ev('award.presented', 2000, {
+    id: 'directors', award: "Directors' Award", winner: 'The Funky Monkeys', team: 846,
+  }));
+  assert.equal(s.award?.winner, 'The Funky Monkeys');
+  assert.equal(s.award?.team, 846);
+  assert.equal(s.award?.revealed, true);
+
+  s = reduce(s, ev('award.clear', 3000, {}));
+  assert.equal(s.award, null);
+});
+
+test('the event timer runs on the side screens and dies with the match start', () => {
+  let s = reduce(initialState(), ev('timer.started', 1000, {
+    label: 'Field setup', endsAt: 121_000,
+  }));
+  assert.equal(s.timer?.label, 'Field setup');
+  assert.equal(s.screen, 'blank', 'a timer never touches the program screen');
+
+  // The countdown was TO this moment: the match starting is the timer ending,
+  // whoever forgot to press clear.
+  s = reduce(s, ev('match.start', 60_000, {}));
+  assert.equal(s.timer, null);
+});
+
+test('a timer that would end in the past is refused by the reducer', () => {
+  const s = reduce(initialState(), ev('timer.started', 5000, {
+    label: 'Oops', endsAt: 4000,
+  }));
+  assert.equal(s.timer, null);
+});
+
+test('a slide takes the screen and leaves it clean', () => {
+  let s = reduce(initialState(), ev('slide.show', 1000, {
+    id: 's1', kind: 'recognition', title: 'Thank you, setup crew',
+    lines: ['Ana, Ben, Cy'],
+  }));
+  assert.equal(s.screen, 'slide');
+  assert.deepEqual(s.slide?.lines, ['Ana, Ben, Cy']);
+  s = reduce(s, ev('slide.hide', 2000, {}));
+  assert.equal(s.slide, null);
+});
+
+test('an award beats a manual screen hold, and clearing hands the screen back', () => {
+  // The operator pressing "Show the award" IS a manual take. During a
+  // ceremony they have usually just held a screen by hand, and an award that
+  // silently lost to that hold was a button that did nothing — found by the
+  // preview renderer, whose shots hold screens exactly the way an operator
+  // does between awards.
+  let s = reduce(initialState(), ev('screen.change', 500, { screen: 'blank' }));
+  assert.equal(s.screenHold, true, 'the manual take holds');
+
+  s = reduce(s, ev('award.show', 1000, { id: 'x', title: 'Directors', description: 'D' }));
+  assert.equal(s.screen, 'award', 'the ceremony outranks the hold');
+
+  s = reduce(s, ev('award.clear', 2000, {}));
+  assert.equal(s.screen, 'blank', 'no stale plate');
+  assert.equal(s.screenHold, false, 'and the lifecycle can take over again');
+});

@@ -97,6 +97,22 @@ export interface Config {
     list: { id: string; name: string; tier?: 'title' | 'major' | 'supporting'; line?: string; logo?: string }[];
   };
   /**
+   * The judged awards, with the definitions the committee wants "delivered to
+   * teams in advance" also read on air. Empty is fine: the desk can still put
+   * up a custom award typed on the day.
+   */
+  awards: {
+    list: { id: string; title: string; description?: string }[];
+  };
+  /**
+   * Recognition and info slides: volunteer thank-yous, session announcements,
+   * SystemCore info, food-truck hours. More get typed at the event and those
+   * persist to data/slides.json, so this list is the ones known in advance.
+   */
+  slides: {
+    list: { id: string; kind?: 'recognition' | 'info'; title: string; lines?: string[] }[];
+  };
+  /**
    * The day as a list. Empty is fine and means the desk shows no rundown.
    *
    * A matches block gives a COUNT rather than a duration: the length comes
@@ -220,6 +236,8 @@ export const DEFAULTS: Config = {
     spotify: { clientId: '', refreshToken: '', deviceName: '', playlistUri: '' },
   },
   sponsors: { list: [] },
+  awards: { list: [] },
+  slides: { list: [] },
   rundown: { segments: [] },
   accessibility: { services: [], ask: '' },
   nexus: { apiKey: '', eventKey: '' },
