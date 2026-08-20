@@ -220,6 +220,16 @@ function row(file) {
 async function loadConsent() {
   try {
     const res = await fetch('/api/media/all');
+    // Signed out (the desk restarted): the rows already on screen are frozen
+    // at whatever the list said before, and every button on them will be
+    // refused. Say so instead of silently presenting stale rows as live.
+    if (res.status === 401) {
+      const box = $('consentErr');
+      box.hidden = false;
+      box.textContent = 'The desk restarted and signed this page out. This list '
+        + 'is out of date. Reload this page to sign back in.';
+      return;
+    }
     if (!res.ok) return;
     const manifest = await res.json();
     const teams = Object.values(manifest).sort((a, b) => a.team - b.team);
@@ -256,6 +266,19 @@ async function loadConsent() {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ team: m.team, consent: value }),
             });
+            // A 401 is not a "try again": the desk restarted and rotated
+            // this page's session, so retrying loops the identical refusal
+            // while the team stands at the desk waiting. The actual fix is
+            // a reload, which walks back through /signin; nav.js gives
+            // refused takes the same instruction.
+            if (res.status === 401) {
+              const box = $('consentErr');
+              box.hidden = false;
+              box.textContent = `Team ${m.team} was NOT changed: the desk restarted `
+                + 'and signed this page out. Reload this page to sign back in, '
+                + 'then set it again.';
+              return;
+            }
             if (!res.ok) {
               const body = await res.json().catch(() => ({}));
               throw new Error(body.error ?? `HTTP ${res.status}`);

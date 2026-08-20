@@ -209,26 +209,44 @@ desk.on('link', up => {
 });
 
 const say = (m, err = false) => {
-  $('status').textContent = m;
+  // Diff-guarded like the desk's setText: textContent mutates the node even
+  // when the string is identical, #status is aria-live, and the slow
+  // reconciliation poll below repeats its message while signed out. A screen
+  // reader must not re-hear it every pass.
+  if ($('status').textContent !== m) $('status').textContent = m;
   $('status').toggleAttribute('data-err', err);
 };
 
+// Every response and WS event repaints the console last-write-wins, so
+// arrival order IS display order. Two rapid +1 presses ride separate pooled
+// connections, and one Wi-Fi retransmit can land the FIRST press's response
+// after the second's: the console painted score N-1 over the true N, nothing
+// ever corrected it, and the operator's natural fix (+1 again) over-counted
+// the real score on the audience overlay. The snapshot carries no server
+// stamp, so order is enforced here: every request is numbered on the way
+// out and only the newest one may paint. The WS stream orders itself, and
+// the slow poll at the bottom reconciles anything that still slips through.
+let reqSeq = 0;
+
 async function post(action, body) {
+  const mine = ++reqSeq;
   const res = await fetch(`/api/arcade/${action}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? 'Request failed');
-  paint(json);
+  if (mine === reqSeq) paint(json);
   return json;
 }
 
 const load = async () => {
+  const mine = ++reqSeq;
   try {
     const res = await fetch('/api/arcade');
     if (!res.ok) return say('Signed out. Reload this page and sign in again.', true);
-    paint(await res.json());
+    const json = await res.json();
+    if (mine === reqSeq) paint(json);
   } catch { /* transient */ }
 };
 
@@ -448,6 +466,11 @@ $('clearAll').onclick = () => {
 };
 
 load();
+// Reconciliation, the same rhythm as the desk console's slow polls. Between
+// sets the bus can go quiet for minutes, so a stale snapshot that did land
+// would otherwise stand until the next arcade event; this repaints the truth
+// on its own instead. Slow on purpose: arcade state changes at operator speed.
+setInterval(() => { if (!document.hidden) load(); }, 30_000);
 </script>
 </body>
 </html>

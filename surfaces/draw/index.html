@@ -243,6 +243,16 @@ let active = null;
 canvas.addEventListener('pointerdown', e => {
   if (e.button !== undefined && e.button !== 0) return;
 
+  // One stroke at a time, owned by the pointer that started it. A palm or
+  // second finger landing mid-stroke (touch-action: none invites both) used
+  // to run this handler again and overwrite the slot: the first stroke never
+  // got its 'end', so it sat at full alpha on the pad AND on air until Clear
+  // (prune keeps unfinished strokes and undo skips them), while both contacts
+  // scribbled into the new stroke until the first lift ended it early. Not
+  // isPrimary: a palm is the primary TOUCH while the pen draws, so ownership
+  // has to be by pointerId.
+  if (active) return;
+
   // Capture keeps events flowing if the stylus leaves the canvas mid-stroke.
   // It is an optimization, not a requirement, and it throws NotFoundError if
   // the pointer is no longer active by the time we get here. Letting that
@@ -266,7 +276,7 @@ canvas.addEventListener('pointerdown', e => {
     relay({ k: 'meta', id, meta: { team: tagTeam } });
   }
 
-  active = { id };
+  active = { id, pointerId: e.pointerId };
   pending = { id, pts: [] };
   addPoint(e);
 });
@@ -282,7 +292,11 @@ function addPoint(e) {
   }
 }
 
-canvas.addEventListener('pointermove', e => { if (active) addPoint(e); });
+// Only the owning pointer feeds the stroke: a second contact's moves used to
+// splice into it, relaying a zigzag jumping between the two touch points.
+canvas.addEventListener('pointermove', e => {
+  if (active && e.pointerId === active.pointerId) addPoint(e);
+});
 
 function finish() {
   if (!active) return;
@@ -306,7 +320,11 @@ function finish() {
   pending = null;
 }
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
-  canvas.addEventListener(ev, finish);
+  // And only the owning pointer ends it: a palm lifting off the glass must
+  // not cut the stylus stroke off mid-draw.
+  canvas.addEventListener(ev, e => {
+    if (active && e.pointerId === active.pointerId) finish();
+  });
 }
 
 // ---- toolbar --------------------------------------------------------------

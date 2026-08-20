@@ -378,7 +378,11 @@ function show(deck) {
 const NOTE_LIFE_MS = 20 * 60_000;
 const noteLive = () => {
   const n = lastState?.announcement;
-  return !!n && Date.now() - n.postedAt < NOTE_LIFE_MS;
+  // Age against desk.serverNow, the same skew-corrected clock the event
+  // timer below ticks on: postedAt is stamped by the DESK, and a pit TV
+  // twenty minutes fast judged every note already stale and never rotated
+  // it in, while one running slow kept notes up past their shelf life.
+  return !!n && desk.serverNow - n.postedAt < NOTE_LIFE_MS;
 };
 
 function showNote() {
@@ -453,7 +457,12 @@ function advance() {
     rankPage = 0;
     renderRank();
     show(false);
-  } else if (rankPage + 1 < pages) {
+  } else if (panel === 'rank' && rankPage + 1 < pages) {
+    // Gated on the rankings actually being the panel that is up: `pages` is
+    // recomputed every tick, so a team ranked past a page boundary DURING the
+    // slide's dwell used to take this branch from the slide, render the new
+    // page into the hidden rank panel without switching to it, and hold the
+    // slide for a second full dwell while that rankings page never showed.
     rankPage++;
     renderRank();
   } else if (panel !== 'slide' && slideDeck.length) {

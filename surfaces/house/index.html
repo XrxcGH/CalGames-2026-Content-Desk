@@ -217,13 +217,32 @@ audio.addEventListener('error', () => {
   clipFailed(lastToken);
 });
 
+// Shared with paint(), which keeps it in the warn list so a later snapshot
+// cannot quietly wipe it: this warning must outlive every repaint until the
+// page is actually reloaded.
+const SIGNED_OUT = 'The desk restarted and signed this page out. Reload this page to sign '
+  + 'back in, then click the button to arm it again.';
+let signedOut = false;
+
 async function post(path, body) {
   try {
-    await fetch(path, {
+    const res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
     });
+    // A 401 RESOLVES, so the catch below never sees it. It means the desk
+    // restarted and rotated the session this page signed in with: from here
+    // every beat and clip-ended report is refused while the ungated socket
+    // keeps the link dot green and clips still play, so the page looks
+    // healthy while the desk counts zero armed players and stays latched on
+    // every finished walk-up. Say so on the page, or nobody finds out until
+    // the room goes near-silent during introductions.
+    if (res.status === 401 && !signedOut) {
+      signedOut = true;
+      $('warn').hidden = false;
+      $('warn').textContent = SIGNED_OUT;
+    }
   } catch { /* the desk will re-publish; a dropped beat is not worth a dialog */ }
 }
 
@@ -256,7 +275,13 @@ function paint(s) {
   // announced a minute ago.
   const clip = s.clip;
   if (clip && clip.token !== lastToken && armed && !inOBS) {
-    const age = Date.now() - clip.startedAt;
+    // Age against the desk's clock, not this machine's: startedAt is stamped
+    // by the server, and the music machine is exactly the kind of un-synced
+    // venue laptop desk-client exists to correct for. With raw Date.now() a
+    // clock fifteen seconds fast made every fresh walk-up look like old
+    // news: nothing played, nothing reported ended, and the desk sat latched
+    // on a ducked bed in a near-silent room.
+    const age = desk.serverNow - clip.startedAt;
     if (age < 15000) {
       lastToken = clip.token;
       audio.src = clip.src;
@@ -271,7 +296,14 @@ function paint(s) {
         clipFailed(clip.token);
       });
     } else {
-      lastToken = clip.token;   // old news; adopt it so it never fires late
+      // Old news: adopt the token so it never fires late, and report it
+      // ended so the desk cannot stay latched on a clip nothing is playing.
+      // A page opened mid-introduction lands here too, and that is right:
+      // whatever was playing died with the previous page load. clipEnded()
+      // on the desk is token-guarded, so a genuinely superseded clip's
+      // report is a no-op.
+      lastToken = clip.token;
+      post('/api/audio/clip-ended', { token: clip.token });
     }
   }
   if (!clip && lastToken) { lastToken = null; audio.pause(); }
@@ -291,6 +323,9 @@ function paint(s) {
   $('prog').style.width = pct + '%';
 
   const warn = [];
+  // First, because nothing else on this list matters while the desk is
+  // refusing everything this page reports.
+  if (signedOut) warn.push(SIGNED_OUT);
   if (s.players?.armed > 1) {
     warn.push(`${s.players.armed} house players are armed. If one of them is the machine ` +
       'OBS captures, the music is going to the stream. Close every one but this.');

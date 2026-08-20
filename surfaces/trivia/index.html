@@ -194,9 +194,11 @@ function showPane(id) {
     for (const p of document.querySelectorAll('.pane')) {
       p.toggleAttribute('data-active', p.id === id);
     }
-    // The paint-time fit ran while this pane was display:none, where every
-    // measurement reads 0, so re-fit now that it has layout.
-    if (id === 'pane-q') fitQuestion();
+    // The paint-time fits ran while this pane was display:none, where every
+    // measurement reads 0, so re-fit now that it has layout. Both of them:
+    // a long host-typed OPTION was rendering unfitted at full size for the
+    // opening seconds of a question, until the first answer's repaint.
+    if (id === 'pane-q') { fitQuestion(); fitOptions(); }
   }, half);
 }
 
@@ -272,11 +274,16 @@ function paint(s) {
 }
 
 // The fuse burns locally between snapshots. No server ticks needed.
+// Burns against desk.serverNow, not this machine's clock: opensAt/closesAt
+// are stamped by the DESK, this overlay also runs on venue TVs that are not
+// NTP-disciplined, and the phones score against the server clock. On a TV a
+// minute fast the raw-Date.now() fuse read empty the moment a question
+// opened, while everyone's phone still showed the full window.
 startTicker(() => {
   const q = snap?.question;
   if (!q || snap.phase !== 'open') return;
   const total = q.closesAt - q.opensAt;
-  const left = Math.max(0, Math.min(1, (q.closesAt - Date.now()) / total));
+  const left = Math.max(0, Math.min(1, (q.closesAt - desk.serverNow) / total));
   $('fuseFill').style.width = `${left * 100}%`;
 });
 

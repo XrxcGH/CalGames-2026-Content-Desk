@@ -116,6 +116,20 @@ async function api(body) {
     body: JSON.stringify(body),
   });
   const out = await res.json();
+  if (res.status === 401) {
+    // The JA session died mid-judging: a desk restart rotates it. Every
+    // card's catch can only print the bare server message next to its own
+    // button, and retrying loops the same 401 forever, because the unlock
+    // form is the ONLY way back to a session and nothing on the failure
+    // path re-showed it. Bring the gate back and say what happened; staged
+    // winners live on the desk's disk, so nothing typed so far is lost.
+    show(false);
+    const gateErr = $('gateErr');
+    gateErr.hidden = false;
+    gateErr.textContent = 'The desk restarted and this page got signed out. '
+      + 'Enter the code again. Winners already loaded are saved on the desk.';
+    throw new Error(out.error ?? 'Signed out. Enter the code again.');
+  }
   if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
   return out;
 }

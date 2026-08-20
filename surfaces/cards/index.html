@@ -198,7 +198,20 @@ desk.on('link', up => {
   $('dot').dataset.up = String(up);
   $('linkText').textContent = up ? 'linked' : 'reconnecting...';
 });
-desk.on('ready', () => { if (desk.state?.match) buildFromState(); });
+// The connect-time build, ONCE. desk-client fires 'ready' for every snapshot
+// frame, and the server re-sends snapshots to every socket on any media
+// consent change and on every reconnect: rebuilding on each one silently
+// replaced a finished match's card with the NEXT match's zeroed scores in the
+// window between the desk loading it and the operator pressing Save, and the
+// old card could not be regenerated because the state had moved on. Every
+// later rebuild belongs to the explicit paths: match.score_posted above, and
+// the Rebuild button.
+let booted = false;
+desk.on('ready', () => {
+  if (booted) return;
+  booted = true;
+  if (desk.state?.match) buildFromState();
+});
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>

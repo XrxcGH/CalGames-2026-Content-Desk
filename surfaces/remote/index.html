@@ -340,7 +340,14 @@ const tap = fn => e => {
     navigator.vibrate?.([40, 60, 40]);   // distinctly not the success buzz
     return;
   }
-  if (desk.needsPin && !desk.authed) {
+  // Same condition as setGate() in refreshGate(), sessionAuthed included. The
+  // normal way onto this page is through /signin, which sets the session
+  // cookie; the server grants that socket write access silently and never
+  // sends an auth frame, so desk.authed stays false for a cookie-authed
+  // operator. Checking only desk.authed here locked every button behind a
+  // gate that (correctly) never showed: no PIN field anywhere, every tap
+  // toasting "Locked".
+  if (desk.needsPin && !desk.authed && !sessionAuthed) {
     toast('Locked. Enter the PIN first.', true);
     return;
   }

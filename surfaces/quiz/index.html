@@ -164,14 +164,34 @@ function swap() {
 
 async function answer(i) {
   if (!view || view.phase !== 'open') return;
+  const opened = view.question?.opensAt ?? null;
   pendingChoice = i;          // paint immediately; the server confirms next poll
   paint(view);
-  try {
-    await fetch('/api/trivia/answer', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerId, choice: i }),
-    });
-  } catch { /* poll will reconcile */ }
+  // One send plus one retry, then honesty. "The poll will reconcile" was a
+  // lie in the failed direction: the server keeps answering me.choice: null,
+  // which coalesces straight back to pendingChoice, so the phone sat locked
+  // on a highlighted pick the server never received until the reveal said
+  // "No answer in time". A venue wifi blip outlives a tap, not a second, so
+  // retry once while the window is still open; if that also fails, clear
+  // the optimistic pick so the buttons come back and the player can tap
+  // again instead of watching a pick that does not exist.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch('/api/trivia/answer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId, choice: i }),
+      });
+      if (res.ok) return;
+    } catch { /* treated the same as a refusal: fall through */ }
+    // The world moved on mid-flight (question changed or closed): the stale
+    // failure must not touch a newer question's pick.
+    if (view?.phase !== 'open' || (view.question?.opensAt ?? null) !== opened) return;
+    if (attempt === 0) await new Promise(r => setTimeout(r, 600));
+  }
+  if (pendingChoice === i) {
+    pendingChoice = null;
+    paint(view);
+  }
 }
 
 function paint(v) {
@@ -236,7 +256,16 @@ setInterval(() => {
   $('fuseFill').style.width = `${left * 100}%`;
 }, 200);
 
+// One poll in flight at a time. On congested venue wifi a stalled poll can
+// resolve AFTER newer ones, and paint() adopts whatever arrives last: the
+// page walked a phase backwards for a cycle (the fuse back up over a revealed
+// answer, buttons briefly re-enabled), and a snapshot from before the current
+// question wiped pendingChoice through the opensAt check. Skipping the tick
+// while one is outstanding keeps responses in order by construction.
+let pollInFlight = false;
 async function poll() {
+  if (pollInFlight) return;
+  pollInFlight = true;
   try {
     const v = await fetch(`/api/trivia/play${playerId ? `?player=${encodeURIComponent(playerId)}` : ''}`)
       .then(r => r.json());
@@ -246,6 +275,7 @@ async function poll() {
     }
     if (playerId) paint(v);
   } catch { /* venue wifi blip, next poll wins */ }
+  finally { pollInFlight = false; }
 }
 setInterval(poll, 1500);
 swap();

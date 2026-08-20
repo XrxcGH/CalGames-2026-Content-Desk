@@ -198,11 +198,23 @@ async function post(url, body) {
   return json;
 }
 
+// Cuts can overlap: Enter and the button both fire cut(), a slow-mo encode
+// takes many seconds, and an operator who re-aims the timeline and cuts again
+// has two responses in flight on separate connections. Whichever ARRIVED last
+// used to win showClip(), so the earlier cut's late response silently
+// replaced the fresh clip, the preview reverted, and T / Take then sent the
+// wrong clip to program under a status line still reading "Ready". Stamp
+// every request on the way out; only the newest one may paint, and a
+// superseded response (or its error) goes nowhere. cutMatch shares the stamp,
+// because its response races cut()'s the same way.
+let cutSeq = 0;
+
 async function cut() {
   if (inClock === null) return say('Pick an in-point on the timeline first.', true);
   const fromMs = wallAt(inClock), toMs = wallAt(outClock);
   if (!fromMs) return say('No match start recorded yet: nothing to map the clock onto.', true);
 
+  const mine = ++cutSeq;
   say('Cutting...');
   try {
     const clip = await post('/api/clips', {
@@ -211,19 +223,22 @@ async function cut() {
       speed: Number($('speed').value),
       label: `${desk.state?.match?.displayName ?? 'clip'}-${clockDisplay(inClock).replace(':', '')}`,
     });
+    if (mine !== cutSeq) return;
     showClip(clip);
     say(`Ready · ${clip.seconds.toFixed(1)}s`);
-  } catch (err) { say(err.message, true); }
+  } catch (err) { if (mine === cutSeq) say(err.message, true); }
 }
 
 async function cutMatch() {
+  const mine = ++cutSeq;
   say('Cutting full match video...');
   try {
     const clip = await post('/api/clips/match', { sourceId: $('src').value });
+    if (mine !== cutSeq) return;
     showClip(clip);
     say(`Match video ready · ${clip.seconds.toFixed(1)}s · ${clip.parts} part(s)` +
       (clip.parts > 1 ? ' (referee delay cut out)' : ''));
-  } catch (err) { say(err.message, true); }
+  } catch (err) { if (mine === cutSeq) say(err.message, true); }
 }
 
 function showClip(clip) {
