@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Judge Advisor · Awards · CalGames 2026</title>
+<link rel="stylesheet" href="/theme/tokens.css">
+<link rel="stylesheet" href="/shared/fonts.css">
+<style>
+/* The Judge Advisor's own page: load each award's winner as judging wraps up.
+   Deliberately NOT part of the desk console, and deliberately not gated by
+   the desk PIN — the JA gets one URL and one code and never has to learn the
+   desk. Everything typed here stays server-side until the desk presses
+   Reveal during the ceremony; the audience feeds never see it, and the desk
+   crew cannot see it either until the JA hands this code over. */
+html, body { min-height: 100%; }
+body {
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--atmo);
+  background-size: var(--tex-perf-size), cover;
+  color: var(--cg-white);
+  margin: 0 auto; max-width: 680px;
+  padding: 22px 16px calc(24px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  font-family: var(--font-display); font-size: 16px;
+}
+h1 { margin: 0 0 4px; text-align: center;
+  font-family: var(--font-cond); font-weight: 700; font-size: 22px;
+  letter-spacing: .22em; text-indent: .22em; text-transform: uppercase; color: var(--cg-gold); }
+.tick { width: 180px; height: 3px; margin: 6px auto 14px; background: var(--tick); }
+.sub { text-align: center; font-size: 15px; line-height: 1.55; color: var(--cg-white-dim);
+  margin: 0 0 18px; }
+
+.card { background-color: var(--cg-purple); background-image: var(--tex-perf);
+  background-size: var(--tex-perf-size); clip-path: var(--chamfer); --ch: 14px;
+  padding: 18px; margin-bottom: 14px; }
+
+label { display: block; font-family: var(--font-cond); font-weight: 600; font-size: 14px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--cg-white-dim); margin: 10px 0 6px; }
+input { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px;
+  font-family: var(--font-display); background: var(--cg-purple-lo); color: var(--cg-white);
+  border: 2px solid var(--cg-purple-hi); }
+input::placeholder { color: var(--cg-white-dim); }
+input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
+  border-color: var(--cg-gold); }
+
+.btn-go { padding: 13px 22px; border: 0; cursor: pointer;
+  background: var(--cg-gold); color: var(--cg-black);
+  clip-path: var(--chamfer); --ch: 11px;
+  font-family: var(--font-cond); font-weight: 700; font-size: 16px;
+  letter-spacing: .1em; text-transform: uppercase;
+  transition: transform 90ms var(--ease-pop); }
+.btn-go:active { transform: scale(.97); }
+/* Inset, because the chamfer clips an outset ring into nothing. */
+.btn-go:focus-visible { outline: 3px solid var(--cg-black); outline-offset: -6px; }
+.btn-quiet { background: none; border: 2px solid var(--cg-purple-hi); color: var(--cg-white);
+  padding: 11px 18px; cursor: pointer; clip-path: var(--chamfer); --ch: 10px;
+  font-family: var(--font-cond); font-weight: 700; font-size: 14px;
+  letter-spacing: .1em; text-transform: uppercase; }
+.btn-quiet:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
+
+.err { color: #FF6B6B; font-size: 15px; line-height: 1.5; margin: 10px 0 0; }
+.ok-line { color: var(--st-ok); font-size: 15px; margin: 10px 0 0; }
+
+/* One card per award. */
+.aw-row h2 { margin: 0; font-size: 20px; font-weight: 800;
+  font-variation-settings: "wdth" var(--wdth-display); text-transform: uppercase; }
+.aw-desc { margin: 4px 0 10px; font-size: 14px; line-height: 1.5; color: var(--cg-white-dim); }
+.aw-state { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
+  letter-spacing: .12em; text-transform: uppercase; margin-bottom: 8px; }
+.aw-state[data-v="staged"] { color: var(--st-ok); }
+.aw-state[data-v="presented"] { color: var(--cg-gold); }
+.aw-state[data-v="empty"] { color: var(--cg-white-dim); }
+.row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.row .grow { flex: 3 1 220px; }
+.row .team { flex: 0 1 110px; }
+.row .act { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+  <h1>Awards · Judge Advisor<div class="tick"></div></h1>
+
+  <div class="card" id="gate">
+    <p class="sub" style="margin-bottom:10px">This page is for the Judge Advisor.
+      Load each award's winner here as judging wraps up. Winners stay locked
+      away from every screen, every feed, and the desk crew until the ceremony —
+      hand the code to the desk right before playoffs, and they run the reveal.</p>
+    <label for="code">Awards code</label>
+    <form id="unlockForm">
+      <div class="row">
+        <input id="code" class="grow" type="password" autocomplete="off"
+          placeholder="The code only the JA has">
+        <button class="btn-go act" id="unlock" type="submit">Unlock</button>
+      </div>
+    </form>
+    <p class="err" id="gateErr" hidden role="status"></p>
+  </div>
+
+  <div id="list" hidden></div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+
+async function api(body) {
+  const res = await fetch('/api/awards', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const out = await res.json();
+  if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+  return out;
+}
+
+async function load() {
+  const res = await fetch('/api/awards');
+  if (res.status === 401) { show(false); return; }
+  const snap = await res.json();
+  if (!snap || snap.locked) { show(false); return; }
+  show(true);
+  paint(snap);
+}
+
+function show(unlocked) {
+  $('gate').hidden = unlocked;
+  $('list').hidden = !unlocked;
+}
+
+function paint(snap) {
+  const box = $('list');
+  if (!snap.list.length) {
+    box.innerHTML = '<div class="card"><p class="sub" style="margin:0">No awards are ' +
+      'configured yet. The content desk lead adds them to config.json; custom awards ' +
+      'typed at the desk during the ceremony work regardless.</p></div>';
+    return;
+  }
+  box.replaceChildren(...snap.list.map(a => {
+    const card = document.createElement('div');
+    card.className = 'card aw-row';
+
+    const h = document.createElement('h2');
+    h.textContent = a.title;
+    const desc = document.createElement('p');
+    desc.className = 'aw-desc';
+    desc.textContent = a.description || '';
+
+    const state = document.createElement('div');
+    state.className = 'aw-state';
+    if (a.presented) {
+      state.dataset.v = 'presented';
+      state.textContent = `Presented · ${a.presented.winner}`;
+    } else if (a.staged) {
+      state.dataset.v = 'staged';
+      state.textContent = `Winner loaded: ${a.staged.winner}`
+        + (a.staged.team ? ` · Team ${a.staged.team}` : '');
+    } else {
+      state.dataset.v = 'empty';
+      state.textContent = 'No winner loaded yet';
+    }
+    card.append(h, desc, state);
+
+    if (!a.presented) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const winner = document.createElement('input');
+      winner.className = 'grow';
+      winner.value = a.staged?.winner ?? '';
+      winner.placeholder = 'Winner (team or person, exactly as announced)';
+      winner.setAttribute('aria-label', `Winner of ${a.title}`);
+      const team = document.createElement('input');
+      team.className = 'team';
+      team.inputMode = 'numeric';
+      team.value = a.staged?.team ?? '';
+      team.placeholder = 'Team #';
+      team.setAttribute('aria-label', `Winning team number for ${a.title}`);
+      const save = document.createElement('button');
+      save.className = 'btn-go act';
+      save.type = 'button';
+      save.textContent = a.staged ? 'Replace' : 'Load winner';
+      save.onclick = async () => {
+        try {
+          await api({ action: 'stage', id: a.id, winner: winner.value.trim(),
+            team: Number(team.value) || undefined });
+          note.className = 'ok-line';
+          note.textContent = 'Loaded. Re-read it above: what is loaded is what gets revealed.';
+          await load();
+        } catch (err) {
+          note.className = 'err';
+          note.textContent = err.message;
+        }
+      };
+      row.append(winner, team, save);
+      const note = document.createElement('p');
+      note.setAttribute('role', 'status');
+      card.append(row, note);
+
+      if (a.staged) {
+        const drop = document.createElement('button');
+        drop.className = 'btn-quiet';
+        drop.type = 'button';
+        drop.style.marginTop = '10px';
+        drop.textContent = 'Remove the loaded winner';
+        drop.onclick = async () => {
+          try { await api({ action: 'unstage', id: a.id }); await load(); }
+          catch (err) { note.className = 'err'; note.textContent = err.message; }
+        };
+        card.append(drop);
+      }
+    }
+    return card;
+  }));
+}
+
+$('unlockForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = $('gateErr');
+  err.hidden = true;
+  try {
+    const res = await fetch('/api/awards/auth', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: $('code').value.trim() }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $('code').value = '';
+    await load();
+  } catch (e2) {
+    err.hidden = false;
+    err.textContent = e2.message;
+  }
+});
+
+void load();
+</script>
+</body>
+</html>

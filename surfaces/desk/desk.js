@@ -1026,9 +1026,30 @@ async function loadAwards() {
     const res = await fetch('/api/awards');
     if (!res.ok) return;
     awardSnap = await res.json();
-    paintAwards();
+    // The lock only exists when a separate Judge Advisor code is configured;
+    // a small event with one code never sees a door it cannot open.
+    const locked = !!(awardSnap?.locked && awardSnap?.separate);
+    $('awLock').hidden = !locked;
+    $('awPanel').hidden = locked;
+    if (!locked) paintAwards();
   } catch { /* transient */ }
 }
+
+$('awUnlock').onclick = async () => {
+  try {
+    const res = await fetch('/api/awards/auth', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: $('awCode').value.trim() }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $('awCode').value = '';
+    $('awLockHint').textContent = 'Unlocked. Run the ceremony from the list below.';
+    await loadAwards();
+  } catch (err) {
+    $('awLockHint').textContent = err.message;
+  }
+};
 
 function paintAwards() {
   const box = $('awList');
@@ -1051,9 +1072,14 @@ function paintAwards() {
     name.textContent = a.title;
     who.append(name);
     const sub = document.createElement('span');
-    sub.textContent = a.presented
-      ? ` · presented: ${a.presented.winner}`
-      : (awardSnap.live === a.id ? ' · ON SCREEN' : '');
+    // Priority: what is on screen beats everything; presented is history;
+    // "winner loaded" is the JA's staging, shown only once this session holds
+    // the JA code (the locked view never carries the flag at all).
+    sub.textContent = awardSnap.live === a.id
+      ? ' · ON SCREEN'
+      : a.presented
+        ? ` · presented: ${a.presented.winner}`
+        : (a.staged ? ' · winner loaded ✓' : '');
     who.append(sub);
     label.append(tick, who);
     return label;

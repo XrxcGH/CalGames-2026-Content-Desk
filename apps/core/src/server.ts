@@ -69,6 +69,8 @@ export const SURFACES = [
   { id: 'var',     group: 'Run the show', name: 'Head referee review', note: 'Frame-step the recording. Read-only: no cut, no air, no publish, no route to the field.' },
   { id: 'media',   group: 'Before the event', name: 'Team media', note: 'Upload robot photos for the pre-match overview. Missing photos fall back gracefully.' },
   { id: 'cards',   group: 'Before the event', name: 'Post-match cards', note: 'Square result graphics for social. They build themselves when a score posts.' },
+  { id: 'awards', group: 'Run the show', name: 'Judge Advisor: awards', note: 'For the JA only. Unlocks with the awards code, not the desk PIN: load each award\u2019s winner as judging wraps up, and hand the code to the desk right before the ceremony. Winners stay off every feed until the reveal.' },
+  { id: 'testcard', group: 'Before the event', name: 'Screen test card', note: 'Full-screen this on any display being installed: the LED wall, a projector, a pit TV. Crop marks, the broadcast safe areas, a stretch circle, color and gray ramps, and a live clock so a frozen signal shows itself.' },
   { id: 'quiz',    group: 'For the audience', name: 'Trivia play', note: 'The phone page the crowd joins from. The trivia overlay shows this URL.' },
   { id: 'watch',   group: 'On a pit monitor', name: 'Pick a screen', note: 'Every screen below, in one place, with the desk\'s address on this network. Hand this to whoever is setting up a monitor.' },
   // One row per screen a pit TV can show, so the exact URL can be copied
@@ -372,6 +374,36 @@ export function startServer(opts: ServerOpts) {
    */
   const PIN_HEADER = 'x-desk-pin';
 
+  /**
+   * The Judge Advisor tier.
+   *
+   * A second code, held by the JA and nobody on the desk crew, gating the
+   * spoiler-bearing half of the awards system: winner entry, the award
+   * editor, and the reveal itself. The committee's worry is premature
+   * reveals; the mechanic is that the desk PIN alone cannot reach a winner —
+   * not to type one, not to read one, not to put one on screen. The JA
+   * stages winners from their own page (/s/awards) as judging concludes, and
+   * hands the code to the desk right before the ceremony, which is the
+   * moment the desk becomes able to run Show and Reveal.
+   *
+   * Unset (the default) collapses the tier: awards run on the desk PIN as
+   * before, which is right for a small event where the producer IS the JA.
+   * An explicitly empty JA_PIN env var also disables it, which is what the
+   * preview renderer uses.
+   */
+  const JA_PIN = (process.env['JA_PIN'] ?? config?.awards?.pin ?? '').trim();
+  const JA_SESSION = randomUUID();
+  const JA_COOKIE = 'ja_auth';
+
+  /** A real JA session: only ever true when a JA code is configured. */
+  const hasJaSession = (req: IncomingMessage): boolean =>
+    !!JA_PIN && cookie(req.headers.cookie, JA_COOKIE) === JA_SESSION;
+
+  /** May this request do award WRITES? Falls back to the desk session when no
+   *  separate JA code exists, which is the single-code small-event mode. */
+  const isJa = (req: IncomingMessage): boolean =>
+    JA_PIN ? hasJaSession(req) : isAuthed(req);
+
   const isAuthed = (req: IncomingMessage): boolean => {
     if (!REMOTE_PIN) return true;
     if (cookie(req.headers.cookie, AUTH_COOKIE) === SESSION) return true;
@@ -440,7 +472,10 @@ export function startServer(opts: ServerOpts) {
         return json(res, 200, { required: !!REMOTE_PIN, authed: isAuthed(req) });
       }
 
-      if (needsAuth({ method: req.method ?? 'GET', path }) && !isAuthed(req)) {
+      // A Judge Advisor session opens the awards routes and NOTHING else:
+      // the JA code is award-scoped, not a second desk PIN.
+      const jaException = path.startsWith('/api/awards') && hasJaSession(req);
+      if (needsAuth({ method: req.method ?? 'GET', path }) && !isAuthed(req) && !jaException) {
         // A page gets the sign-in screen, so an operator opening a bookmark
         // lands somewhere useful. An API call gets a plain 401, because a
         // fetch can do nothing with a login page.
@@ -767,16 +802,65 @@ export function startServer(opts: ServerOpts) {
       }
 
       // ---- awards -----------------------------------------------------------
+      // The Judge Advisor's door. Mirrors /api/auth exactly: POST body only,
+      // same lockout counters (shared with the desk door on purpose — an
+      // attacker does not get a fresh budget per door), same failure delay.
+      if (path === '/api/awards/auth' && req.method === 'POST') {
+        const addr = req.socket.remoteAddress ?? 'unknown';
+        if (authBlocked(addr)) {
+          return json(res, 429, { error: 'Too many wrong codes. Wait a minute, then try again.' });
+        }
+        if (!JA_PIN) {
+          return json(res, 404, {
+            error: 'No separate awards code is set on this desk. The ordinary PIN covers awards.',
+          });
+        }
+        let body: { pin?: string };
+        try {
+          body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as { pin?: string };
+        } catch {
+          return json(res, 400, { error: 'Body must be JSON, like {"pin":"1234"}.' });
+        }
+        if (!safeEqual(String(body.pin ?? ''), JA_PIN)) {
+          noteAuthFail(addr);
+          console.warn(`[awards] rejected JA code attempt from ${addr}`);
+          await new Promise<void>(r => setTimeout(r, FAIL_DELAY_MS));
+          return json(res, 401, { error: 'That code was not accepted.' });
+        }
+        authFails.delete(addr);
+        res.setHeader('Set-Cookie',
+          `${JA_COOKIE}=${JA_SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
+        return json(res, 200, { ok: true });
+      }
+
       // The ceremony: title and definition up while the GA reads it, winner
       // revealed on a button. The winner is held OUT of the bus until the
       // reveal — every open surface reads the fan-out, and a spoiler in a
       // JSON field would beat the GA to the moment. See awards.ts.
       if (path === '/api/awards' && req.method !== 'POST') {
-        return json(res, 200, awards?.snapshot ?? null);
+        if (!awards) return json(res, 200, null);
+        const unlocked = isJa(req);
+        return json(res, 200, {
+          ...awards.snapshot(unlocked),
+          // What the panel should render: locked shows the unlock form, and
+          // `separate` says whether a JA code exists at all, so a small event
+          // with no code never sees a lock it cannot open.
+          locked: !unlocked,
+          separate: !!JA_PIN,
+        });
       }
 
       if (path === '/api/awards' && req.method === 'POST') {
         if (!awards) return json(res, 503, { error: 'Awards are not available.' });
+        // Every write — staging, the editor, show, reveal, clear — sits
+        // behind the JA tier. The desk session alone gets a plain sentence
+        // about who to find, not a mystery 403.
+        if (!isJa(req)) {
+          return json(res, 403, {
+            error: 'Awards are locked behind the Judge Advisor code. '
+              + 'The JA unlocks this panel before the ceremony.',
+          });
+        }
         try {
           const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
             { action?: string; id?: string; title?: string; description?: string;
@@ -791,6 +875,11 @@ export function startServer(opts: ServerOpts) {
             case 'clear':
               awards.clear();
               return json(res, 200, { ok: true });
+            case 'stage':
+              await awards.stage(String(body.id ?? ''), body);
+              return json(res, 200, { ok: true });
+            case 'unstage':
+              return json(res, 200, { removed: await awards.unstage(String(body.id ?? '')) });
             default: return json(res, 404, { error: 'Unknown award action.' });
           }
         } catch (err) {

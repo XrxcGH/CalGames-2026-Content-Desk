@@ -33,6 +33,15 @@ until it has happened. Presented awards tick off a checklist that survives a
 desk restart, so the ceremony can be run down the list without skipping
 anything. A custom award typed on the day works with no config at all.
 
+Since the first write-up, the spoiler boundary has been moved OUTSIDE the
+desk crew entirely: with `awards.pin` set in config, the **Judge Advisor**
+holds a separate code, loads winners from their own page (`/s/awards`) as
+judging concludes, and the desk's award panel stays locked — titles visible,
+nothing else — until the JA hands the code over before the ceremony. The
+desk crew cannot see, type, or reveal a winner before that moment, which
+closes the last premature-reveal path: the one through the people running
+the show.
+
 The **Team Choice Award** (*Low*) and **Safety Award** (*Medium*) rows need
 definitions and rubrics from the JA side; once they exist they are two more
 entries in `awards.list` and present identically. If the Team Choice Award
@@ -113,7 +122,17 @@ problems.
 
 ### LED display board instead of projection — *Very High*
 
-**Desk-adjacent, one paragraph of guidance.** Every desk screen is a
+**Desk-adjacent, with one real tool built for it.** [/s/testcard](../surfaces/testcard/index.html)
+is a full-screen test pattern for installing ANY display — the wall, a
+projector, a pit TV. Corner crop marks reveal edge cropping (LED processors
+love to), a circle reveals stretching, the dashed rectangles are the exact
+safe areas the broadcast graphics keep to, an 11-step gray ramp shows whether
+the wall's gamma will crush the broadcast purple, the resolution readout says
+what the display is really being fed, and a live clock catches a frozen
+signal chain at a glance. It is on the index under "Before the event" and in
+the Friday checklist.
+
+Beyond that, guidance: Every desk screen is a
 1920×1080 web page, and an LED wall's processor takes the same HDMI a
 projector did — point a browser at `/s/watch?screen=side` (or the program
 mix) in full screen and the wall is fed. Two checks when the board is chosen:

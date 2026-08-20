@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test card · CalGames 2026</title>
+<link rel="stylesheet" href="/theme/tokens.css">
+<link rel="stylesheet" href="/shared/fonts.css">
+<style>
+/* The screen test card, for the AV crew installing ANY display: the LED wall
+   the committee wants, a projector, a pit TV. Full-screen it on the device and
+   every question answers itself by looking:
+
+     - Is the picture cropped?         The border and corner wedges vanish.
+     - Is it stretched?                The circle reads as an ellipse.
+     - Is the graphics area safe?      The safe rectangles are the ones the
+                                       broadcast actually uses.
+     - Is the wall's color sane?       Brand swatches and an 11-step ramp;
+                                       adjacent gray steps must be separable.
+     - Is the signal live or frozen?   The clock ticks and the block sweeps.
+     - What is it actually showing?    The resolution readout says, in pixels.
+
+   Deliberately not 1920-fixed: the card draws at whatever the display really
+   is, because revealing the real shape is its whole job. */
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--cg-black, #101014);
+  color: var(--cg-white);
+  font-family: var(--font-cond);
+  overflow: hidden;
+  position: relative;
+  cursor: none;
+}
+
+/* The crop border: a 4px frame plus corner wedges. If any edge of this is not
+   visible, the display is cropping (LED processors and projector overscan both
+   do it) and the broadcast's outermost pixels are gone. */
+#frame {
+  position: absolute; inset: 0;
+  border: 4px solid var(--cg-gold);
+  pointer-events: none;
+}
+.wedge {
+  position: absolute; width: 56px; height: 56px;
+  border: 4px solid var(--cg-white);
+}
+.wedge.tl { top: 12px; left: 12px; border-right: 0; border-bottom: 0; }
+.wedge.tr { top: 12px; right: 12px; border-left: 0; border-bottom: 0; }
+.wedge.bl { bottom: 12px; left: 12px; border-right: 0; border-top: 0; }
+.wedge.br { bottom: 12px; right: 12px; border-left: 0; border-top: 0; }
+
+/* The safe areas the broadcast graphics actually keep to: action safe at
+   3.5%, title safe at 5% (the program's --safe-x/--safe-y at 1920). Anything
+   the display does to these rectangles it also does to the score bar. */
+#action { position: absolute; inset: 3.5%; border: 2px dashed var(--cg-white-dim); }
+#title  { position: absolute; inset: 5%;   border: 2px dashed var(--cg-gold); }
+.safelabel {
+  position: absolute; top: -1.4em; left: 0;
+  font-size: 14px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+}
+#action .safelabel { color: var(--cg-white-dim); }
+#title .safelabel { color: var(--cg-gold); }
+
+/* Center geometry: the crosshair finds the middle, the circle finds a
+   stretch. A circle is the one shape no one can argue about. */
+#cross-v { position: absolute; left: 50%; top: 42%; bottom: 42%; width: 2px;
+  background: var(--cg-white-dim); transform: translateX(-50%); }
+#cross-h { position: absolute; top: 50%; left: 44%; right: 44%; height: 2px;
+  background: var(--cg-white-dim); transform: translateY(-50%); }
+#circle {
+  position: absolute; left: 50%; top: 50%; width: 17vmin; height: 17vmin;
+  transform: translate(-50%, -50%);
+  border: 3px solid var(--cg-white); border-radius: 50%;
+}
+
+/* The readout: what the display is really being fed. */
+#head {
+  position: absolute; top: 7.5%; left: 0; right: 0; text-align: center;
+}
+#head h1 {
+  margin: 0; font-size: 34px; font-weight: 700;
+  letter-spacing: .22em; text-indent: .22em; text-transform: uppercase;
+  color: var(--cg-gold);
+}
+#res {
+  font-family: var(--font-num); font-weight: 900; font-size: 58px;
+  color: var(--cg-white); font-variant-numeric: tabular-nums;
+}
+#detail { font-size: 17px; color: var(--cg-white-dim); letter-spacing: .1em; }
+
+/* The clock and the sweep: a frozen frame is the failure a glance must catch. */
+#clock {
+  position: absolute; bottom: 18%; left: 0; right: 0; text-align: center;
+  font-family: var(--font-num); font-weight: 900; font-size: 64px;
+  font-variant-numeric: tabular-nums;
+}
+#sweeptrack {
+  position: absolute; bottom: 14.5%; left: 20%; right: 20%; height: 10px;
+  background: var(--cg-purple-lo, #241333);
+}
+#sweep { position: absolute; top: 0; bottom: 0; width: 8%; background: var(--cg-gold); }
+
+/* Color: brand swatches on top, an 11-step gray ramp underneath. On a healthy
+   display every adjacent pair of gray steps is separable; on a mis-gamma'd
+   LED wall the dark end merges, which is exactly what murders the broadcast's
+   purple backdrop. */
+#bars {
+  position: absolute; top: 22%; left: 10%; right: 10%; height: 12%;
+  display: flex;
+}
+#bars div { flex: 1; }
+#ramp {
+  position: absolute; top: 34.5%; left: 10%; right: 10%; height: 6%;
+  display: flex;
+}
+#ramp div { flex: 1; }
+
+/* The type floor. Readable from the back of the hall or the wall fails the
+   same test the broadcast would. */
+#floor {
+  position: absolute; bottom: 8.5%; left: 0; right: 0; text-align: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 28px;
+}
+#floor small { display: block; font-family: var(--font-cond); font-weight: 600;
+  font-size: 14px; color: var(--cg-white-dim); letter-spacing: .12em;
+  text-transform: uppercase; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <div id="frame"></div>
+  <div class="wedge tl"></div><div class="wedge tr"></div>
+  <div class="wedge bl"></div><div class="wedge br"></div>
+
+  <div id="action"><span class="safelabel">Action safe 3.5%</span></div>
+  <div id="title"><span class="safelabel">Title safe 5% · graphics live here</span></div>
+
+  <div id="head">
+    <h1>CalGames test card</h1>
+    <div id="res">…</div>
+    <div id="detail"></div>
+  </div>
+
+  <div id="bars">
+    <div style="background:#4B1D8C"></div>
+    <div style="background:#F0AF00"></div>
+    <div style="background:#FFFFFF"></div>
+    <div style="background:#ED1C24"></div>
+    <div style="background:#0066B3"></div>
+    <div style="background:#0D9B74"></div>
+    <div style="background:#101014"></div>
+  </div>
+  <div id="ramp"></div>
+
+  <div id="cross-v"></div>
+  <div id="cross-h"></div>
+  <div id="circle"></div>
+
+  <div id="clock">0:00:00</div>
+  <div id="sweeptrack"><div id="sweep"></div></div>
+
+  <div id="floor">
+    If you can read this from the back of the hall, the wall passes.
+    <small>28px at 1080p, the broadcast type floor · press F11 for full screen</small>
+  </div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+
+// The gray ramp: 11 steps, black to white. Adjacent steps must be separable.
+$('ramp').replaceChildren(...Array.from({ length: 11 }, (_, i) => {
+  const v = Math.round((i / 10) * 255);
+  const d = document.createElement('div');
+  d.style.background = `rgb(${v},${v},${v})`;
+  return d;
+}));
+
+// The resolution readout, live: it re-reads on resize so dragging the window
+// onto the wall answers immediately.
+function readout() {
+  const w = innerWidth, h = innerHeight;
+  const dpr = devicePixelRatio || 1;
+  $('res').textContent = `${Math.round(w * dpr)} × ${Math.round(h * dpr)}`;
+  const ratio = (w / h).toFixed(3);
+  const near = Math.abs(w / h - 16 / 9) < 0.01 ? ' (16:9)' : ` (not 16:9 — expected 1.778)`;
+  $('detail').textContent =
+    `viewport ${w} × ${h} css px · scale ${dpr} · aspect ${ratio}${near}`;
+}
+readout();
+addEventListener('resize', readout);
+
+// The liveness pair: a wall clock and a block that sweeps once per second.
+// Driven by rAF so a frozen or stuttering signal chain shows itself; the
+// reduced-motion case gets the ticking clock and a parked block, because the
+// clock alone still answers "is this frozen".
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function tick() {
+  const now = new Date();
+  $('clock').textContent = now.toLocaleTimeString([], {
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+  });
+  if (!reduced) {
+    const p = (now.getMilliseconds() / 1000);
+    $('sweep').style.left = `${p * 92}%`;
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

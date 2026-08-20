@@ -348,6 +348,21 @@ If a side screen goes blank or shows "reconnecting", the desk laptop went away.
 The screen recovers by itself when the desk comes back; you do not need to
 touch the monitor.
 
+### Checking a display with the test card
+
+Before trusting any TV, projector, or LED wall, open `ADDRESS/s/testcard` on
+it, full screen. Four looks and you are done:
+
+- **All four corner marks visible?** If not, the display is cropping the
+  edges, and it will crop the scoreboard the same way.
+- **Is the circle round?** An ellipse means the picture is stretched.
+- **Can you tell the dark gray steps apart?** If the left end of the gray
+  ramp merges into black, the display will crush the broadcast's purple too.
+- **Is the clock ticking?** A frozen clock means a frozen signal.
+
+The dashed rectangles are the exact safe areas the graphics keep to, so
+whatever the display does to them, it does to the score bar.
+
 ### The field feed behind the program screen
 
 `/s/watch?screen=program` shows the overlay on top of a live picture of the
@@ -467,19 +482,33 @@ is live.
 
 ### Awards
 
-The Awards section runs the ceremony. The award list is loaded in advance;
-for each one:
+Awards involve a second code, and it is not yours.
 
-1. Pick the award (or type a custom title and definition).
-2. **Type the winner into the winner box now**, while the GA is walking up.
-   It stays hidden — nothing shows it, not even on this console's preview.
-3. Press **Show the award**. The title and definition go up; the GA reads it.
-4. On the GA's cue ("...and the winner is"), press **Reveal the winner**.
-5. Press **Clear** before the next one. Presented awards tick off the list.
+The **Judge Advisor holds the awards code**. All day, as judging wraps up, the
+JA loads each award's winner from their own page (`ADDRESS/s/awards`, which
+takes only their code, not the desk PIN). While that is happening, your
+Awards section shows a lock: you can see the award titles and nothing else.
+That is deliberate. Nobody at the desk can see, type, or reveal a winner, so
+nobody at the desk can leak one, even by accident, even with a camera pointed
+at the console.
 
-The winner genuinely does not exist anywhere the audience can reach until you
-press Reveal, so there is nothing to leak. Do not read the winner aloud to
-anyone standing behind the desk; that is now the only way it can escape early.
+**Right before the ceremony, the JA gives you the code.** Type it into the
+Awards section's unlock box. Then, for each award:
+
+1. Pick the award from the list. Ones marked **winner loaded** are ready:
+   the JA's answer rides along invisibly.
+2. Press **Show the award**. The title and definition go up; the GA reads it.
+3. On the GA's cue ("...and the winner is"), press **Reveal the winner**.
+4. Press **Clear** before the next one. Presented awards tick off the list.
+
+The winner box on the desk is only for last-second corrections (the envelope
+on stage disagrees with what was loaded); leave it blank otherwise. The
+winner genuinely does not exist anywhere the audience can reach until Reveal,
+so there is nothing to leak. The lock means that now includes this console.
+
+If no awards code was set up, there is no lock and the panel simply works on
+the desk PIN: type the winner yourself before Show, and do not read it aloud
+to anyone standing behind the desk.
 
 ### Slides and shout-outs
 
@@ -739,6 +768,7 @@ Replace `ADDRESS` with what the desk window printed.
 | Arcade console | `ADDRESS/s/arcadedesk` | Arcade scorer |
 | Trivia host | `ADDRESS/s/triviadesk` | Trivia host |
 | House audio player | `ADDRESS/s/house` | **On the music machine only** |
+| Judge Advisor: awards | `ADDRESS/s/awards` | JA only. Takes the awards code, not the desk PIN |
 | Head referee review | `ADDRESS/s/var` | Head referee. Read-only |
 | Phone remote | `ADDRESS/s/remote` | Anyone away from the desk |
 
@@ -782,6 +812,7 @@ Print this. Tick it off.
 
 **Screens**
 
+- [ ] Test card checked on every display: corners visible, circle round, clock ticking
 - [ ] Side screens up, full screen, rotating
 - [ ] Pit monitors up
 - [ ] Trivia monitor up, QR readable from where the crowd stands
@@ -806,6 +837,8 @@ Print this. Tick it off.
 - [ ] Run of show entered
 - [ ] Walk-up songs in place for playoff introductions
 - [ ] Award titles and definitions entered, in ceremony order
+- [ ] Awards code set and given to the Judge Advisor (and to nobody else);
+      JA shown their page (`/s/awards`)
 - [ ] Recognition and info slides entered (setup crew names, session times)
 
 ---

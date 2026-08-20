@@ -102,6 +102,14 @@ export interface Config {
    * up a custom award typed on the day.
    */
   awards: {
+    /**
+     * The Judge Advisor's code. Set it and the award panel splits into two
+     * tiers: winner entry and the reveal need THIS code, while the rest of
+     * the desk runs on the ordinary PIN. Empty means no separate tier (the
+     * desk PIN governs awards too), which is right for a small event. The
+     * env var JA_PIN overrides it; an empty JA_PIN disables the tier.
+     */
+    pin?: string;
     list: { id: string; title: string; description?: string }[];
   };
   /**
@@ -236,7 +244,7 @@ export const DEFAULTS: Config = {
     spotify: { clientId: '', refreshToken: '', deviceName: '', playlistUri: '' },
   },
   sponsors: { list: [] },
-  awards: { list: [] },
+  awards: { pin: '', list: [] },
   slides: { list: [] },
   rundown: { segments: [] },
   accessibility: { services: [], ask: '' },

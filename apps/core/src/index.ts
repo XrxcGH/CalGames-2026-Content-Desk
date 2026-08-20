@@ -529,8 +529,9 @@ if (config.rundown.segments.length) {
 // The awards ceremony: titles and definitions from config, the reveal from a
 // button, and the winner held out of the bus until the moment it happens on
 // stage. See awards.ts for why that last part is load-bearing.
-const awards = new Awards(bus, config.awards.list);
+const awards = new Awards(ROOT, bus, config.awards.list);
 awards.attach();
+await awards.load();
 
 // Recognition and info slides, plus the moderated shout-out queue. Additions
 // typed at the event persist to data/slides.json.

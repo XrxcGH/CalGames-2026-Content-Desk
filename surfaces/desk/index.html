@@ -409,17 +409,44 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
     <div>
       <section>
         <h2>Awards</h2>
+
+        <!-- The lock. When a Judge Advisor code is configured, the whole
+             panel is behind it: not just winner entry but the reveal, so the
+             desk cannot put a winner on screen before the JA decides the
+             ceremony has begun. The JA hands the code over right before
+             playoffs; until then this section is a closed door that says who
+             has the key. -->
+        <div id="awLock" hidden>
+          <p class="hint">Awards are locked behind the <b>Judge Advisor's
+            code</b>, which is not the desk PIN. The JA loads winners from
+            their own page all day and hands the code to the desk right before
+            the ceremony. Nothing award-related can go on screen until then.</p>
+          <div class="row">
+            <input id="awCode" type="password" autocomplete="off"
+              aria-label="Judge Advisor awards code"
+              placeholder="Awards code from the JA" style="flex:2 1 180px">
+            <button class="btn" id="awUnlock">Unlock awards</button>
+          </div>
+          <p class="hint" id="awLockHint" aria-live="polite"></p>
+        </div>
+
+        <div id="awPanel">
         <p class="hint">Show puts the title and definition up for the GA to read.
-          Type the winner here first: it stays OFF every feed until you press
-          <b>Reveal</b>, so nothing spoils the moment. Presented awards tick off.</p>
+          A winner the JA loaded rides along automatically; the winner box here
+          is only for last-second corrections. Everything stays OFF every feed
+          until you press <b>Reveal</b>. Presented awards tick off.</p>
         <div id="awList" class="pbook" style="max-height:180px"></div>
         <div class="row" style="margin-top:8px">
-          <input id="awCustomTitle" placeholder="Or a custom award title" style="flex:2 1 180px">
-          <input id="awCustomDesc" placeholder="One-line definition" style="flex:3 1 220px">
+          <input id="awCustomTitle" aria-label="Custom award title"
+            placeholder="Or a custom award title" style="flex:2 1 180px">
+          <input id="awCustomDesc" aria-label="Custom award definition"
+            placeholder="One-line definition" style="flex:3 1 220px">
         </div>
         <div class="row">
-          <input id="awWinnerIn" placeholder="Winner (person or team name)" style="flex:3 1 200px">
-          <input id="awTeamIn" placeholder="Team #" inputmode="numeric" style="flex:0 1 90px">
+          <input id="awWinnerIn" aria-label="Award winner"
+            placeholder="Winner (blank = use the JA's loaded one)" style="flex:3 1 200px">
+          <input id="awTeamIn" aria-label="Winning team number"
+            placeholder="Team #" inputmode="numeric" style="flex:0 1 90px">
         </div>
         <div class="row">
           <button class="btn btn--go" id="awShow">Show the award</button>
@@ -427,6 +454,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <button class="btn" id="awClear">Clear</button>
         </div>
         <p class="hint" id="awHint" aria-live="polite"></p>
+        </div>
       </section>
 
       <section>

@@ -229,6 +229,13 @@ const SHOTS = [
     },
   },
   {
+    name: 'testcard',
+    url: '/s/testcard',
+    note: 'The AV test pattern for installing any display: crop wedges, the ' +
+      'broadcast safe areas, a stretch circle, brand and gray ramps, a live ' +
+      'clock. Built for the committee’s LED-wall row.',
+  },
+  {
     name: 'phone-gp-shoutout',
     url: '/s/gp',
     width: 430, height: 932,
@@ -433,6 +440,10 @@ async function main() {
       // every render. The comment above claimed it merely "binds a spare
       // port on this machine", which 0.0.0.0 is not.
       HOST: '127.0.0.1',
+      // An empty JA_PIN collapses the Judge Advisor tier the same way the
+      // empty REMOTE_PIN collapses the desk gate: this desk exists only to
+      // be photographed, and the award shot has to be able to drive a reveal.
+      JA_PIN: '',
     },
   });
   desk.stdout.on('data', () => {});

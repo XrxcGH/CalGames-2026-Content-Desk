@@ -22,6 +22,8 @@
  * nothing, and know at a glance what is left.
  */
 
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { EventBus } from './bus.ts';
 import type { DeskEvent } from './types.ts';
 
@@ -46,15 +48,33 @@ const teamOf = (v: unknown): number | null => {
   return Number.isInteger(n) && n > 0 && n < 100_000 ? n : null;
 };
 
+export interface StagedWinner { winner: string; team: number | null }
+
 export class Awards {
   #bus: EventBus;
+  #file: string;
+  #dir: string;
   #list: AwardDef[];
   #presented = new Map<string, PresentedAward>();
+  /**
+   * Winners the Judge Advisor loaded ahead of the ceremony, keyed by award id.
+   *
+   * Persisted to data/awards-staged.json, and the persistence is not
+   * optional: the JA stages winners as judging concludes — early afternoon —
+   * and may be unreachable by the ceremony. A desk restart at 4pm that lost
+   * every staged winner would wreck the one segment that cannot be re-run.
+   * The file lives in the same trust domain as config.json (the desk laptop,
+   * gitignored), and each entry is deleted the moment its award is presented,
+   * so the file empties itself as the ceremony runs.
+   */
+  #staged = new Map<string, StagedWinner>();
   /** The award on screen, and the winner being held back for the reveal. */
   #live: { id: string; title: string; winner: string; team: number | null } | null = null;
 
-  constructor(bus: EventBus, list: unknown[] = []) {
+  constructor(root: string, bus: EventBus, list: unknown[] = []) {
     this.#bus = bus;
+    this.#dir = join(root, 'data');
+    this.#file = join(this.#dir, 'awards-staged.json');
     this.#list = (Array.isArray(list) ? list : []).flatMap(raw => {
       const item = raw as Record<string, unknown> | null;
       const id = clean(item?.['id'], 40);
@@ -66,6 +86,63 @@ export class Awards {
 
   attach(): () => void {
     return this.#bus.subscribe(ev => this.observe(ev));
+  }
+
+  async load(): Promise<void> {
+    try {
+      const raw = JSON.parse(await readFile(this.#file, 'utf8')) as
+        { staged?: Record<string, StagedWinner> };
+      for (const [id, v] of Object.entries(raw.staged ?? {})) {
+        const winner = clean(v?.winner, 120);
+        if (winner) this.#staged.set(id, { winner, team: teamOf(v?.team) });
+      }
+      if (this.#staged.size) {
+        console.log(`[awards] ${this.#staged.size} staged winner(s) restored`);
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn('[awards] staged winners could not be read:', (err as Error).message);
+      }
+    }
+  }
+
+  async #save(): Promise<void> {
+    try {
+      if (this.#staged.size === 0) {
+        // An empty file named "staged winners" is still an invitation to go
+        // looking; delete it instead, so the ceremony ends with no residue.
+        await rm(this.#file, { force: true });
+        return;
+      }
+      await mkdir(this.#dir, { recursive: true });
+      const tmp = `${this.#file}.tmp`;
+      await writeFile(tmp, JSON.stringify({
+        staged: Object.fromEntries(this.#staged),
+      }, null, 2));
+      await rename(tmp, this.#file);
+    } catch (err) {
+      // In-memory staging still works for this session; say so and carry on.
+      console.warn('[awards] staged winners could not be saved:', (err as Error).message);
+    }
+  }
+
+  /**
+   * The Judge Advisor loading a winner ahead of the ceremony. Overwrites any
+   * previous staging for the award — re-entering is how a typo gets fixed.
+   */
+  async stage(id: string, opts: { winner?: string; team?: number | null }): Promise<void> {
+    if (!this.#list.some(a => a.id === id)) throw new Error(`There is no award "${id}".`);
+    const winner = clean(opts.winner, 120);
+    if (!winner) throw new Error('Type the winner to load.');
+    this.#staged.set(id, { winner, team: teamOf(opts.team) });
+    await this.#save();
+  }
+
+  /** Take a staged winner back out (wrong award picked, decision reopened). */
+  async unstage(id: string): Promise<boolean> {
+    const had = this.#staged.delete(id);
+    if (had) await this.#save();
+    return had;
   }
 
   /** Exposed so a restart rebuilds the ceremony checklist from the log. */
@@ -98,8 +175,13 @@ export class Awards {
     const description = fromList?.description ?? clean(opts.description, 400);
     const id = fromList?.id ?? `custom-${Date.now().toString(36)}`;
 
-    const winner = clean(opts.winner, 120);
-    this.#live = { id, title, winner, team: teamOf(opts.team) };
+    // A winner typed now wins; otherwise the one the JA staged rides along.
+    const staged = this.#staged.get(id);
+    const winner = clean(opts.winner, 120) || staged?.winner || '';
+    const team = opts.team !== undefined && opts.team !== null
+      ? teamOf(opts.team)
+      : staged?.team ?? null;
+    this.#live = { id, title, winner, team };
 
     // No winner in this payload, ever. See the header.
     this.#bus.emit({
@@ -124,6 +206,9 @@ export class Awards {
       source: 'manual',
       payload: { id: this.#live.id, award: this.#live.title, winner, team },
     });
+    // Presented means public: the staged copy has done its job, and the file
+    // of secrets should shrink as the ceremony runs, not linger after it.
+    if (this.#staged.delete(this.#live.id)) void this.#save();
   }
 
   clear(): void {
@@ -132,19 +217,40 @@ export class Awards {
   }
 
   /**
-   * The ceremony as a checklist. `pendingWinner` says whether a reveal is
-   * armed WITHOUT saying what it is: the console is behind the PIN, but a
-   * snapshot is the kind of thing that ends up in a screen share.
+   * The ceremony as a checklist, in two tiers.
+   *
+   * The FULL view is for a Judge Advisor session: it includes the staged
+   * winners, because the JA typed them and has to be able to proof-read them
+   * — a typo nobody can re-read goes on the projector at the reveal.
+   *
+   * The LOCKED view is what a desk session sees before the JA hands over the
+   * code: titles, definitions, and what has already been presented (public
+   * by then). No staged winners, and no staged FLAGS either — "a winner is
+   * loaded for Directors'" is itself timing information the desk does not
+   * need before the ceremony.
    */
-  get snapshot(): {
-    list: (AwardDef & { presented: PresentedAward | null })[];
+  snapshot(full: boolean): {
+    list: (AwardDef & {
+      presented: PresentedAward | null;
+      staged?: StagedWinner | null;
+    })[];
     live: string | null;
-    pendingWinner: boolean;
+    pendingWinner?: boolean;
   } {
+    if (!full) {
+      return {
+        list: this.#list.map(a => ({ ...a, presented: this.#presented.get(a.id) ?? null })),
+        live: this.#live?.id ?? null,
+      };
+    }
     return {
-      list: this.#list.map(a => ({ ...a, presented: this.#presented.get(a.id) ?? null })),
+      list: this.#list.map(a => ({
+        ...a,
+        presented: this.#presented.get(a.id) ?? null,
+        staged: this.#staged.get(a.id) ?? null,
+      })),
       live: this.#live?.id ?? null,
-      pendingWinner: !!this.#live?.winner,
+      pendingWinner: !!this.#live?.winner || (!!this.#live && this.#staged.has(this.#live.id)),
     };
   }
 }

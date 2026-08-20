@@ -33,6 +33,11 @@ export const OPEN_SURFACES: ReadonlySet<string> = new Set([
   'next',      // "when do we play?", the whole point is that anyone can open it
   'watch',     // kiosk wrapper: composites the open screens for a pit monitor
   'gp',        // the shout-out form; its one write is moderated before air
+  'testcard',  // the AV crew's screen test pattern; it is a picture of nothing
+  // The Judge Advisor's page. Open to LOAD because the JA does not hold the
+  // desk PIN: the page is a sign-in shell, and every read or write behind it
+  // requires the JA session the shell's own unlock creates.
+  'awards',
 ]);
 
 /**
@@ -133,6 +138,9 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // to authenticate at all. Gating /signin would mean nobody redirected
   // there for lacking a PIN could ever load the form that lets them enter one.
   if (path === '/api/auth' || path === '/api/auth/status' || path === '/signin') return false;
+  // The Judge Advisor's door, same reasoning as /api/auth: gating the unlock
+  // endpoint behind the thing it unlocks would lock everyone out.
+  if (path === '/api/awards/auth') return false;
 
   // Anything that only reads is judged against the read list. OPTIONS belongs
   // here and NOT in a blanket exemption: this once returned false for every
