@@ -16,6 +16,8 @@ import { WebSocket } from 'ws';
 import { EventBus } from './bus.ts';
 import { MediaLibrary } from './media.ts';
 import { startServer } from './server.ts';
+import { DEFAULTS } from './config.ts';
+import { EventContent } from './content.ts';
 
 // The gate deliberately OFF (the documented escape hatch): these tests are
 // about what an ALREADY-AUTHORIZED session may do, not about the door.
@@ -117,6 +119,58 @@ test('a declined team\'s photo is unreachable by every path spelling', async () 
       assert.equal(res.status, 404, `${p} must not serve a declined team's photo`);
     }
   } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the three codes open three doors, and none opens another\'s', async () => {
+  // Desk PIN, awards code, settings code: three people, three secrets. Each
+  // session must open exactly its own routes. The defaults ship as desk
+  // 0864, JA 1357, settings 4567, all warned about at boot.
+  process.env['SETUP_PIN'] = '4567';
+  process.env['JA_PIN'] = '1357';
+  const dir = await mkdtemp(join(tmpdir(), 'cg-tiers-'));
+  const bus = new EventBus();
+  const server = startServer({
+    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 2, host: '127.0.0.1',
+    config: structuredClone(DEFAULTS), content: new EventContent(dir),
+  });
+  const base = `http://127.0.0.1:${PORT + 2}`;
+  try {
+    // The desk session (gate off via REMOTE_PIN='') cannot read settings.
+    const deskRead = await fetch(`${base}/api/setup`);
+    assert.equal(deskRead.status, 403);
+    assert.match((await deskRead.json()).error, /settings code/);
+
+    // The settings code unlocks /api/setup...
+    const auth = await fetch(`${base}/api/setup/auth`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: '4567' }),
+    });
+    assert.equal(auth.status, 200);
+    const cookie = (auth.headers.get('set-cookie') ?? '').split(';')[0]!;
+    const read = await fetch(`${base}/api/setup`, { headers: { cookie } });
+    assert.equal(read.status, 200);
+
+    // ...and nothing else: not the desk's own reads, not awards writes.
+    // (REMOTE_PIN is '' here so the desk itself is open; the award POST is
+    // the closed door that proves the settings cookie is not a skeleton key.)
+    const aw = await fetch(`${base}/api/awards`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+      body: JSON.stringify({ action: 'clear' }),
+    });
+    assert.equal(aw.status, 403);
+
+    // A wrong settings code counts against the lockout and is refused.
+    const bad = await fetch(`${base}/api/setup/auth`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: '0000' }),
+    });
+    assert.equal(bad.status, 401);
+  } finally {
+    delete process.env['SETUP_PIN'];
+    delete process.env['JA_PIN'];
     server.close();
     await rm(dir, { recursive: true, force: true });
   }

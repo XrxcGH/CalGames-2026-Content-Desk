@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en" data-surface="console">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Event settings · CalGames 2026</title>
+<link rel="stylesheet" href="/theme/tokens.css">
+<link rel="stylesheet" href="/shared/fonts.css">
+<style>
+/* The content lead's page: everything about the event that used to require
+   editing config.json, behind its own code. Deliberately NOT part of the
+   desk console and deliberately not gated by the desk PIN: sixty desk
+   controls need many hands, and the sponsor list needs exactly one. The
+   desk PIN cannot open this page, the settings code cannot open the desk,
+   and the Judge Advisor's code opens neither. Credentials (API tokens, the
+   codes themselves) stay in config.json on the desk machine and never
+   appear here. */
+body { font-size: var(--font-ui-body); }
+.wrap { margin: 0 auto; max-width: 1500px; padding: 18px 22px 60px; }
+@media (min-width: 1150px) {
+  .cols { columns: 460px; column-gap: 18px; }
+  .cols > section { break-inside: avoid; }
+}
+header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
+h1 { font-size: 24px; font-variation-settings: "wdth" 118; margin: 0; }
+.hint { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
+.spacer { margin-left: auto; }
+
+section { background: var(--surface-raised); padding: 16px 18px; margin-bottom: 14px;
+  clip-path: var(--chamfer); --ch: 14px; }
+h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 12px; }
+label { display: block; font-family: var(--font-cond); font-weight: 600; font-size: 14px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); margin: 10px 0 6px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+input, select { padding: 10px 12px; font-family: var(--font-display); }
+input { width: 100%; box-sizing: border-box; }
+.row input { width: auto; }
+.btn--go { background: var(--accent); color: var(--text-on-accent); }
+.setrow { background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 8px;
+  padding: 10px 12px; margin-bottom: 8px; }
+.setrow .row { margin-bottom: 0; }
+.err { color: var(--st-bad-text); }
+
+/* The gate: the page is a shell until the settings code opens it. */
+#gate { max-width: 560px; margin: 8vh auto 0; }
+#gate .btn--go { padding: 12px 22px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Event settings</h1>
+    <span class="hint">The content half of config.json, edited live. Credentials stay in the file.</span>
+    <span class="spacer"></span>
+  </header>
+
+  <section id="gate">
+    <h2>Settings code</h2>
+    <p class="hint">This page is for the content lead: the event's name, sponsors, run of
+      show, scoring thresholds and accessibility services. It takes the settings code,
+      which is not the desk PIN and not the awards code.</p>
+    <form id="unlockForm">
+      <div class="row" style="margin-top:10px">
+        <input id="code" type="password" autocomplete="off" style="flex:1 1 200px"
+          aria-label="Settings code" placeholder="The settings code">
+        <button class="btn btn--go" id="unlock" type="submit">Unlock</button>
+      </div>
+    </form>
+    <p class="hint err" id="gateErr" role="status"></p>
+  </section>
+
+  <div class="cols" id="editors" hidden>
+<section>
+    <h2>Event</h2>
+    <p class="hint">Everything on this page saves on the desk itself and overrides
+      config.json live, so nobody edits JSON mid-event.</p>
+    <p class="hint" id="setOverrides" aria-live="polite"></p>
+    <label for="setEvName">Event name</label>
+    <div class="row">
+      <input id="setEvName" placeholder="CalGames" style="flex:3 1 160px">
+      <input id="setEvYear" type="number" min="2000" max="2100"
+        aria-label="Event year" style="flex:0 1 90px">
+    </div>
+    <label for="setEvKey">TBA event key</label>
+    <input id="setEvKey" placeholder="2026cacg">
+    <label for="setEvUrl">Results link, shown in video descriptions</label>
+    <input id="setEvUrl" placeholder="https://www.thebluealliance.com/event/2026cacg">
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn--go" id="setEvSave">Save event</button>
+    </div>
+    <p class="hint" id="setEvMsg" aria-live="polite"></p>
+  </section>
+
+<section>
+    <h2>Bonus RP thresholds</h2>
+    <p class="hint">The offseason committee's numbers. Saving moves the reducer, the
+      badges and the talent view together, immediately.</p>
+    <label for="setRpFuel">Energized: fuel</label>
+    <input id="setRpFuel" type="number" min="0" max="10000">
+    <label for="setRpSuper">Supercharged: fuel</label>
+    <input id="setRpSuper" type="number" min="0" max="10000">
+    <label for="setRpTower">Traversal: tower points</label>
+    <input id="setRpTower" type="number" min="0" max="10000">
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn--go" id="setRpSave">Save thresholds</button>
+    </div>
+    <p class="hint" id="setRpMsg" aria-live="polite"></p>
+  </section>
+
+<section>
+    <h2>Screens and stream</h2>
+    <label for="setFieldUrl">Field feed URL, for the pit monitors</label>
+    <input id="setFieldUrl" placeholder="Blank is fine: the overlay draws its own backdrop">
+    <label for="setWebcast">Webcast URL, registered on TBA for GameDay</label>
+    <input id="setWebcast" placeholder="https://www.youtube.com/watch?v=...">
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn--go" id="setScrSave">Save screens</button>
+    </div>
+    <p class="hint" id="setScrMsg" aria-live="polite"></p>
+  </section>
+
+<section>
+    <h2>Sponsor list</h2>
+    <p class="hint">Tier decides how often a card comes round, never how big it is
+      drawn. Logos live under <b>media/sponsors/</b> on the desk machine.</p>
+    <div id="setSpRows"></div>
+    <div class="row">
+      <button class="btn" id="setSpAdd">Add a sponsor</button>
+      <button class="btn btn--go" id="setSpSave">Save sponsors</button>
+    </div>
+    <p class="hint" id="setSpMsg" aria-live="polite"></p>
+  </section>
+
+<section>
+    <h2>Run of show</h2>
+    <p class="hint">A matches block takes a COUNT and times itself from measured
+      pace. Everything else takes minutes. Segments keep their progress when
+      edited mid-day; the desk advances them.</p>
+    <div id="setRdRows"></div>
+    <div class="row">
+      <button class="btn" id="setRdAdd">Add a segment</button>
+      <button class="btn btn--go" id="setRdSave">Save run of show</button>
+    </div>
+    <p class="hint" id="setRdMsg" aria-live="polite"></p>
+  </section>
+
+<section>
+    <h2>Accessibility services</h2>
+    <p class="hint">Each line is something a person in the building can act on.
+      Never list a service the event does not have.</p>
+    <div id="setAxRows"></div>
+    <label for="setAxAsk">Who to ask</label>
+    <input id="setAxAsk" placeholder="Any volunteer in a purple shirt, or the desk by the stage">
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="setAxAdd">Add a service</button>
+      <button class="btn btn--go" id="setAxSave">Save accessibility</button>
+    </div>
+    <p class="hint" id="setAxMsg" aria-live="polite"></p>
+  </section>
+  </div>
+</div>
+
+<script type="module">
+import { iconEl } from '/shared/icons.js';
+
+const $ = id => document.getElementById(id);
+let setupDraft = null;
+
+function show(unlocked) {
+  $('gate').hidden = unlocked;
+  $('editors').hidden = !unlocked;
+}
+
+async function loadSetup() {
+  try {
+    const res = await fetch('/api/setup');
+    if (res.status === 401 || res.status === 403) { show(false); return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    show(true);
+    setupDraft = {
+      sponsors: (s.sponsors.list ?? []).map(x => ({ ...x })),
+      rundown: (s.rundown.segments ?? []).map(x => ({ ...x })),
+      services: (s.accessibility.services ?? []).map(x => ({ ...x })),
+    };
+    $('setEvName').value = s.event.name ?? '';
+    $('setEvYear').value = s.event.year ?? '';
+    $('setEvKey').value = s.event.key ?? '';
+    $('setEvUrl').value = s.event.resultsUrl ?? '';
+    $('setRpFuel').value = s.game.rpEnergizedFuel ?? '';
+    $('setRpSuper').value = s.game.rpSuperchargedFuel ?? '';
+    $('setRpTower').value = s.game.rpTraversalTower ?? '';
+    $('setFieldUrl').value = s.kiosk.fieldStreamUrl ?? '';
+    $('setWebcast').value = s.stream.webcastUrl ?? '';
+    $('setAxAsk').value = s.accessibility.ask ?? '';
+    const NAMES = { event: 'event', game: 'thresholds', kiosk: 'field feed',
+      stream: 'webcast', sponsors: 'sponsors', rundown: 'run of show',
+      accessibility: 'accessibility', awards: 'awards' };
+    $('setOverrides').textContent = s.overridden?.length
+      ? 'Edited on this desk (overriding config.json): '
+        + s.overridden.map(k => NAMES[k] ?? k).join(', ') + '.'
+      : 'Nothing edited yet: everything below still comes from config.json.';
+    paintSetupRows();
+  } catch (err) {
+    $('setEvMsg').textContent = `Settings could not load: ${err.message}`;
+  }
+}
+
+async function saveSetup(section, value, msgId, okText) {
+  try {
+    const res = await fetch('/api/setup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section, value }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $(msgId).textContent = okText;
+    await loadSetup();          // repaint from the sanitized truth
+    return true;
+  } catch (err) {
+    $(msgId).textContent = err.message;
+    return false;
+  }
+}
+
+/**
+ * One editor for all three lists. Each item renders as a sunken chip of
+ * inputs bound straight to the draft object; Save posts the whole draft and
+ * repaints from what the server actually stored.
+ */
+function paintRowEditor(box, items, fields, noun) {
+  box.replaceChildren(...items.map((item, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'setrow';
+    const line = document.createElement('div');
+    line.className = 'row';
+    for (const f of fields) {
+      let input;
+      if (f.options) {
+        input = document.createElement('select');
+        for (const opt of f.options) {
+          const o = document.createElement('option');
+          o.value = opt; o.textContent = opt;
+          input.append(o);
+        }
+        input.value = f.options.includes(item[f.key]) ? item[f.key] : f.options[0];
+        input.onchange = () => { item[f.key] = input.value; };
+      } else {
+        input = document.createElement('input');
+        if (f.num) { input.type = 'number'; input.min = '0'; }
+        input.placeholder = f.ph ?? '';
+        input.value = item[f.key] ?? '';
+        input.oninput = () => {
+          item[f.key] = f.num ? (Number(input.value) || 0) : input.value;
+        };
+      }
+      input.setAttribute('aria-label', `${noun} ${i + 1}: ${f.name}`);
+      input.style.flex = f.flex ?? '1 1 110px';
+      line.append(input);
+    }
+
+    const up = document.createElement('button');
+    up.className = 'btn';
+    up.append(iconEl('chevron-up'), ' Up');
+    up.disabled = i === 0;
+    up.setAttribute('aria-label', `Move ${noun} ${i + 1} up`);
+    up.onclick = () => {
+      [items[i - 1], items[i]] = [items[i], items[i - 1]];
+      paintSetupRows();
+    };
+    const down = document.createElement('button');
+    down.className = 'btn';
+    down.append(iconEl('chevron-down'), ' Down');
+    down.disabled = i === items.length - 1;
+    down.setAttribute('aria-label', `Move ${noun} ${i + 1} down`);
+    down.onclick = () => {
+      [items[i], items[i + 1]] = [items[i + 1], items[i]];
+      paintSetupRows();
+    };
+    const kill = document.createElement('button');
+    kill.className = 'btn kill';
+    kill.textContent = 'Remove';
+    kill.setAttribute('aria-label', `Remove ${noun} ${i + 1}`);
+    kill.onclick = () => { items.splice(i, 1); paintSetupRows(); };
+    line.append(up, down, kill);
+    chip.append(line);
+    return chip;
+  }));
+  if (!items.length) {
+    box.innerHTML = `<p class="hint" style="padding:4px 0 8px">None yet. Add the first ${noun} below.</p>`;
+  }
+}
+
+function paintSetupRows() {
+  if (!setupDraft) return;
+  paintRowEditor($('setSpRows'), setupDraft.sponsors, [
+    { key: 'name', name: 'name', ph: 'Sponsor name', flex: '2 1 150px' },
+    { key: 'tier', name: 'tier', options: ['supporting', 'major', 'title'] },
+    { key: 'line', name: 'announcer line', ph: 'One line the announcer can read', flex: '3 1 190px' },
+    { key: 'logo', name: 'logo path', ph: '/media/sponsors/acme.png', flex: '2 1 150px' },
+  ], 'sponsor');
+  paintRowEditor($('setRdRows'), setupDraft.rundown, [
+    { key: 'label', name: 'label', ph: 'Quals block 1', flex: '2 1 130px' },
+    { key: 'kind', name: 'kind', options: ['matches', 'break', 'ceremony', 'selection', 'awards', 'gap'] },
+    { key: 'matches', name: 'match count', ph: 'Matches', num: true, flex: '0 1 86px' },
+    { key: 'minutes', name: 'minutes', ph: 'Min', num: true, flex: '0 1 70px' },
+    { key: 'audience', name: 'audience label', ph: 'Shown on the countdown', flex: '2 1 160px' },
+  ], 'segment');
+  paintRowEditor($('setAxRows'), setupDraft.services, [
+    { key: 'label', name: 'service', ph: 'Quiet room', flex: '1 1 130px' },
+    { key: 'detail', name: 'where and when', ph: 'Room D-4, all day', flex: '2 1 190px' },
+  ], 'service');
+}
+
+$('setSpAdd').onclick = () => { setupDraft?.sponsors.push({ name: '' }); paintSetupRows(); };
+$('setRdAdd').onclick = () => { setupDraft?.rundown.push({ label: '', kind: 'break' }); paintSetupRows(); };
+$('setAxAdd').onclick = () => { setupDraft?.services.push({ label: '', detail: '' }); paintSetupRows(); };
+
+$('setEvSave').onclick = () => void saveSetup('event', {
+  name: $('setEvName').value, year: Number($('setEvYear').value) || undefined,
+  key: $('setEvKey').value, resultsUrl: $('setEvUrl').value,
+}, 'setEvMsg', 'Saved. Stream titles and descriptions use it from now on.');
+
+$('setRpSave').onclick = () => void saveSetup('game', {
+  rpEnergizedFuel: Number($('setRpFuel').value),
+  rpSuperchargedFuel: Number($('setRpSuper').value),
+  rpTraversalTower: Number($('setRpTower').value),
+}, 'setRpMsg', 'Saved. The badges follow the new numbers now.');
+
+$('setScrSave').onclick = async () => {
+  const ok = await saveSetup('kiosk', { fieldStreamUrl: $('setFieldUrl').value },
+    'setScrMsg', 'Saved.');
+  if (ok) {
+    await saveSetup('stream', { webcastUrl: $('setWebcast').value },
+      'setScrMsg', 'Saved. Pit monitors pick the feed up on their next reload.');
+  }
+};
+
+$('setSpSave').onclick = () => void saveSetup('sponsors', { list: setupDraft?.sponsors ?? [] },
+  'setSpMsg', 'Saved. The rotation restarts from the top of the list.');
+
+$('setRdSave').onclick = () => void saveSetup('rundown', { segments: setupDraft?.rundown ?? [] },
+  'setRdMsg', 'Saved. Segments that kept their label keep their progress.');
+
+$('setAxSave').onclick = () => void saveSetup('accessibility', {
+  services: setupDraft?.services ?? [], ask: $('setAxAsk').value,
+}, 'setAxMsg', 'Saved. The screens update on their next rotation.');
+
+$('unlockForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = $('gateErr');
+  err.textContent = '';
+  try {
+    const res = await fetch('/api/setup/auth', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: $('code').value.trim() }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    $('code').value = '';
+    await loadSetup();
+  } catch (e2) {
+    err.textContent = e2.message;
+  }
+});
+
+void loadSetup();
+</script>
+</body>
+</html>

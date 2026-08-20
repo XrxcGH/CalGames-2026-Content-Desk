@@ -369,6 +369,8 @@ const SHOTS = [
     note: 'Running the crowd game: rounds, open, reveal, next.' },
   { name: 'console-house-audio', url: '/s/house', auth: true,
     note: 'The music machine: walk-ups, stingers, the playlist.' },
+  { name: 'console-event-settings', url: '/s/setup', auth: true, height: 1500,
+    note: 'The content lead's page: the content half of config.json, edited live behind its own settings code.' },
   { name: 'console-referee-review', url: '/s/var', auth: true, height: 1200,
     note: 'Head referee frame-step. Read-only: no cut, no air, no publish.' },
   { name: 'console-team-media', url: '/s/media', auth: true, height: 1200,
@@ -447,7 +449,7 @@ async function main() {
       // An empty JA_PIN collapses the Judge Advisor tier the same way the
       // empty REMOTE_PIN collapses the desk gate: this desk exists only to
       // be photographed, and the award shot has to be able to drive a reveal.
-      JA_PIN: '',
+      JA_PIN: '', SETUP_PIN: '',
     },
   });
   desk.stdout.on('data', () => {});

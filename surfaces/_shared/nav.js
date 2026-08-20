@@ -136,13 +136,36 @@ export function mountNav(current, opts = {}) {
   let ws = null;
   let ready = false;
   let backoff = 250;
+  let lastSeen = 0;
+
+  // The same half-open watchdog the shared client runs: the strip's socket
+  // hears the 10s server beat, so 25s of silence means the pipe is dead and
+  // the take buttons are lying. drop() is shared by the close event and the
+  // watchdog, because a half-open socket may never deliver a close.
+  let dropped = false;
+  function drop(sock) {
+    if (sock !== ws || dropped) return;
+    dropped = true;
+    ready = false;
+    setTimeout(connectNav, backoff);
+    backoff = Math.min(backoff * 2, 5000);
+  }
+  setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastSeen > 25_000) {
+      const sock = ws;
+      try { sock.close(); } catch { /* already dying */ }
+      drop(sock);
+    }
+  }, 5_000);
 
   function connectNav() {
+    dropped = false;
     ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?surface=nav`);
 
-    ws.addEventListener('open', () => { ready = true; backoff = 250; });
+    ws.addEventListener('open', () => { ready = true; backoff = 250; lastSeen = Date.now(); });
 
     ws.addEventListener('message', ev => {
+      lastSeen = Date.now();
       try {
         const msg = JSON.parse(ev.data);
         // A refused take used to vanish: the server answers {t:'denied'} (a
@@ -174,11 +197,8 @@ export function mountNav(current, opts = {}) {
       } catch { /* not a state frame */ }
     });
 
-    ws.addEventListener('close', () => {
-      ready = false;
-      setTimeout(connectNav, backoff);
-      backoff = Math.min(backoff * 2, 5000);
-    });
+    const sock = ws;
+    ws.addEventListener('close', () => drop(sock));
     ws.addEventListener('error', () => ws.close());
   }
   const note = document.createElement('span');

@@ -94,14 +94,9 @@ function paintLiveState(s) {
       + 'Tick names and press Put on air to replace them.');
   }
 
-  // The event timer.
-  if (s.timer) {
-    const left = Math.max(0, Math.ceil((s.timer.endsAt - desk.serverNow) / 1000));
-    setText($('tmHint'),
-      `${s.timer.label} is RUNNING on the side screens: ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left.`);
-  } else if ($('tmHint').textContent.includes('RUNNING')) {
-    setText($('tmHint'), 'Cleared.');
-  }
+  // The event timer's hint lives with the ticker below, not here: this
+  // subscriber runs once per bus EVENT, and a countdown that only moves when
+  // something else happens is frozen exactly when the timer is in use.
 
   // The lower third.
   if (s.lowerThird && !$('thirdHint').textContent) {
@@ -131,10 +126,42 @@ function paintLiveState(s) {
   }
 }
 
+/**
+ * The event-timer hint counts down on the ticker, not on the state feed.
+ *
+ * It used to be computed in paintLiveState, which only runs per bus event,
+ * and the timer's whole use case is a break, when the bus goes quiet for
+ * minutes: the hint froze at the time left as of the last event ("4:37
+ * left." for the entire break) while the side screens counted down
+ * correctly. setText's diff keeps the aria-live announcement to the
+ * once-a-second the string actually changes.
+ *
+ * It only ever repaints its own lines. A failure like "Still running: ..."
+ * from a botched Clear survives a quiet bus today precisely because nothing
+ * paints over it; a per-frame overwrite would erase it before the operator
+ * ever saw it, which is the emergState bug all over again.
+ */
+function paintTimerHint() {
+  const s = desk.state;
+  if (!s) return;
+  const showing = $('tmHint').textContent;
+  const ours = showing === '' || showing === 'Cleared.'
+    || showing.includes('RUNNING') || showing.includes('on the side screens');
+  if (s.timer) {
+    if (!ours) return;
+    const left = Math.max(0, Math.ceil((s.timer.endsAt - desk.serverNow) / 1000));
+    setText($('tmHint'),
+      `${s.timer.label} is RUNNING on the side screens: ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left.`);
+  } else if (showing.includes('RUNNING')) {
+    setText($('tmHint'), 'Cleared.');
+  }
+}
+
 startTicker(() => {
   const c = desk.matchClock;
   setText($('nClock'), clockDisplayFor(desk.state, c));
   setText($('nPhase'), PHASE_LABEL[phaseFor(desk.state, c)] ?? '');
+  paintTimerHint();
 });
 
 // ---- event log -------------------------------------------------------------
@@ -157,14 +184,46 @@ function logLine(ev) {
   $('log').prepend(row);
   while ($('log').children.length > 120) $('log').lastChild.remove();
 }
-desk.on('desk', logLine);
+// The live feed and the one-shot backfill race each other on a mid-show
+// reload (the documented re-auth remedy, exactly when events fire several a
+// second): a live event landing before /api/events/recent resolved got
+// buried under 120 prepended history rows, and the events recorded between
+// socket open and the response appeared twice. So live events are HELD until
+// the backfill settles, then everything paints once, oldest first, deduped
+// by the bus's own event id.
+const logSeen = new Set();
+let logHold = [];   // live events waiting on the backfill; null once merged
+
+function logEvent(ev) {
+  if (ev.id) {
+    if (logSeen.has(ev.id)) return;
+    logSeen.add(ev.id);
+    // The dedupe only needs to cover deliveries still in flight around the
+    // merge; an unbounded set on a console that runs all day is a slow leak.
+    if (logSeen.size > 300) logSeen.delete(logSeen.values().next().value);
+  }
+  logLine(ev);
+}
+
+desk.on('desk', ev => { if (logHold) logHold.push(ev); else logEvent(ev); });
 
 // Backfilled on load: the server keeps the last 200 events, and a console
-// that reloads mid-show (the documented re-auth remedy) should still answer
-// "what just happened", not open with an empty log.
+// that reloads mid-show should still answer "what just happened", not open
+// with an empty log.
 fetch('/api/events/recent').then(r => (r.ok ? r.json() : []))
-  .then(events => { for (const ev of (events ?? []).slice(-120)) logLine(ev); })
-  .catch(() => { /* the live feed still fills it */ });
+  .then(events => {
+    // History first, then whatever arrived while the fetch was out. Held
+    // events were all emitted at or after the response was built, so this
+    // order is oldest to newest, the overlap collapses on id, and prepending
+    // keeps the newest row on top where the operator reads it.
+    for (const ev of [...(events ?? []), ...logHold].slice(-120)) logEvent(ev);
+    logHold = null;
+  })
+  .catch(() => {
+    // The live feed still fills the log; just stop holding it back.
+    for (const ev of logHold ?? []) logEvent(ev);
+    logHold = null;
+  });
 
 // ---- actions ---------------------------------------------------------------
 const emit = (type, payload) => desk.emit({ type, payload });
@@ -795,6 +854,7 @@ paintOnAir();
 // Every control is one press, because the moment this gets used is the moment
 // an announcer has started talking over a song.
 let audioSnap = null;
+let lastClipSig = '';
 
 async function audio(action, body) {
   try {
@@ -867,10 +927,17 @@ function paintAudio(s) {
 
   // One button per clip. Team walk-ups first, which is the order an alliance
   // introduction runs in.
+  // Rebuilt on a signature of ids, labels and teams, not the count: the
+  // library rescans on every upload and ids derive from filenames, so
+  // swapping one walk-up for a corrected file under a new name changes the
+  // set without changing its size. A count guard kept every button's old
+  // closure alive, and the press that mattered posted a clip id the server
+  // no longer had.
   const clips = s.clips ?? [];
   const box = $('audClips');
-  if (box.dataset.n !== String(clips.length)) {
-    box.dataset.n = String(clips.length);
+  const clipSig = JSON.stringify(clips.map(c => [c.id, c.label, c.team]));
+  if (clipSig !== lastClipSig) {
+    lastClipSig = clipSig;
     box.replaceChildren(...clips.map(c => {
       const btn = document.createElement('button');
       btn.className = 'btn';
@@ -1563,190 +1630,3 @@ $('tmClear').onclick = async () => {
     $('tmHint').textContent = `Still running: ${err.message}. Press Clear again.`;
   }
 };
-
-
-// ---- event setup: the content half of config, edited at the desk ------------
-// GET/POST /api/setup, desk-gated. The server sanitizes and persists to
-// data/event-content.json and overlays the live config; content.ts's
-// allowlist is what keeps credentials out of reach of this panel.
-let setupDraft = null;
-
-async function loadSetup() {
-  try {
-    const res = await fetch('/api/setup');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const s = await res.json();
-    setupDraft = {
-      sponsors: (s.sponsors.list ?? []).map(x => ({ ...x })),
-      rundown: (s.rundown.segments ?? []).map(x => ({ ...x })),
-      services: (s.accessibility.services ?? []).map(x => ({ ...x })),
-    };
-    $('setEvName').value = s.event.name ?? '';
-    $('setEvYear').value = s.event.year ?? '';
-    $('setEvKey').value = s.event.key ?? '';
-    $('setEvUrl').value = s.event.resultsUrl ?? '';
-    $('setRpFuel').value = s.game.rpEnergizedFuel ?? '';
-    $('setRpSuper').value = s.game.rpSuperchargedFuel ?? '';
-    $('setRpTower').value = s.game.rpTraversalTower ?? '';
-    $('setFieldUrl').value = s.kiosk.fieldStreamUrl ?? '';
-    $('setWebcast').value = s.stream.webcastUrl ?? '';
-    $('setAxAsk').value = s.accessibility.ask ?? '';
-    const NAMES = { event: 'event', game: 'thresholds', kiosk: 'field feed',
-      stream: 'webcast', sponsors: 'sponsors', rundown: 'run of show',
-      accessibility: 'accessibility', awards: 'awards' };
-    $('setOverrides').textContent = s.overridden?.length
-      ? 'Edited on this desk (overriding config.json): '
-        + s.overridden.map(k => NAMES[k] ?? k).join(', ') + '.'
-      : 'Nothing edited yet: everything below still comes from config.json.';
-    paintSetupRows();
-  } catch (err) {
-    $('setEvMsg').textContent = `Setup could not load: ${err.message}`;
-  }
-}
-
-async function saveSetup(section, value, msgId, okText) {
-  try {
-    const res = await fetch('/api/setup', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section, value }),
-    });
-    const out = await res.json();
-    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
-    $(msgId).textContent = okText;
-    await loadSetup();          // repaint from the sanitized truth
-    return true;
-  } catch (err) {
-    $(msgId).textContent = err.message;
-    return false;
-  }
-}
-
-/**
- * One editor for all three lists. Each item renders as a sunken chip of
- * inputs bound straight to the draft object; Save posts the whole draft and
- * repaints from what the server actually stored.
- */
-function paintRowEditor(box, items, fields, noun) {
-  box.replaceChildren(...items.map((item, i) => {
-    const chip = document.createElement('div');
-    chip.className = 'setrow';
-    const line = document.createElement('div');
-    line.className = 'row';
-    for (const f of fields) {
-      let input;
-      if (f.options) {
-        input = document.createElement('select');
-        for (const opt of f.options) {
-          const o = document.createElement('option');
-          o.value = opt; o.textContent = opt;
-          input.append(o);
-        }
-        input.value = f.options.includes(item[f.key]) ? item[f.key] : f.options[0];
-        input.onchange = () => { item[f.key] = input.value; };
-      } else {
-        input = document.createElement('input');
-        if (f.num) { input.type = 'number'; input.min = '0'; }
-        input.placeholder = f.ph ?? '';
-        input.value = item[f.key] ?? '';
-        input.oninput = () => {
-          item[f.key] = f.num ? (Number(input.value) || 0) : input.value;
-        };
-      }
-      input.setAttribute('aria-label', `${noun} ${i + 1}: ${f.name}`);
-      input.style.flex = f.flex ?? '1 1 110px';
-      line.append(input);
-    }
-
-    const up = document.createElement('button');
-    up.className = 'btn';
-    up.append(iconEl('chevron-up'), ' Up');
-    up.disabled = i === 0;
-    up.setAttribute('aria-label', `Move ${noun} ${i + 1} up`);
-    up.onclick = () => {
-      [items[i - 1], items[i]] = [items[i], items[i - 1]];
-      paintSetupRows();
-    };
-    const down = document.createElement('button');
-    down.className = 'btn';
-    down.append(iconEl('chevron-down'), ' Down');
-    down.disabled = i === items.length - 1;
-    down.setAttribute('aria-label', `Move ${noun} ${i + 1} down`);
-    down.onclick = () => {
-      [items[i], items[i + 1]] = [items[i + 1], items[i]];
-      paintSetupRows();
-    };
-    const kill = document.createElement('button');
-    kill.className = 'btn kill';
-    kill.textContent = 'Remove';
-    kill.setAttribute('aria-label', `Remove ${noun} ${i + 1}`);
-    kill.onclick = () => { items.splice(i, 1); paintSetupRows(); };
-    line.append(up, down, kill);
-    chip.append(line);
-    return chip;
-  }));
-  if (!items.length) {
-    box.innerHTML = `<p class="hint" style="padding:4px 0 8px">None yet. Add the first ${noun} below.</p>`;
-  }
-}
-
-function paintSetupRows() {
-  if (!setupDraft) return;
-  paintRowEditor($('setSpRows'), setupDraft.sponsors, [
-    { key: 'name', name: 'name', ph: 'Sponsor name', flex: '2 1 150px' },
-    { key: 'tier', name: 'tier', options: ['supporting', 'major', 'title'] },
-    { key: 'line', name: 'announcer line', ph: 'One line the announcer can read', flex: '3 1 190px' },
-    { key: 'logo', name: 'logo path', ph: '/media/sponsors/acme.png', flex: '2 1 150px' },
-  ], 'sponsor');
-  paintRowEditor($('setRdRows'), setupDraft.rundown, [
-    { key: 'label', name: 'label', ph: 'Quals block 1', flex: '2 1 130px' },
-    { key: 'kind', name: 'kind', options: ['matches', 'break', 'ceremony', 'selection', 'awards', 'gap'] },
-    { key: 'matches', name: 'match count', ph: 'Matches', num: true, flex: '0 1 86px' },
-    { key: 'minutes', name: 'minutes', ph: 'Min', num: true, flex: '0 1 70px' },
-    { key: 'audience', name: 'audience label', ph: 'Shown on the countdown', flex: '2 1 160px' },
-  ], 'segment');
-  paintRowEditor($('setAxRows'), setupDraft.services, [
-    { key: 'label', name: 'service', ph: 'Quiet room', flex: '1 1 130px' },
-    { key: 'detail', name: 'where and when', ph: 'Room D-4, all day', flex: '2 1 190px' },
-  ], 'service');
-}
-
-$('setSpAdd').onclick = () => { setupDraft?.sponsors.push({ name: '' }); paintSetupRows(); };
-$('setRdAdd').onclick = () => { setupDraft?.rundown.push({ label: '', kind: 'break' }); paintSetupRows(); };
-$('setAxAdd').onclick = () => { setupDraft?.services.push({ label: '', detail: '' }); paintSetupRows(); };
-
-$('setEvSave').onclick = () => void saveSetup('event', {
-  name: $('setEvName').value, year: Number($('setEvYear').value) || undefined,
-  key: $('setEvKey').value, resultsUrl: $('setEvUrl').value,
-}, 'setEvMsg', 'Saved. Stream titles and descriptions use it from now on.');
-
-$('setRpSave').onclick = () => void saveSetup('game', {
-  rpEnergizedFuel: Number($('setRpFuel').value),
-  rpSuperchargedFuel: Number($('setRpSuper').value),
-  rpTraversalTower: Number($('setRpTower').value),
-}, 'setRpMsg', 'Saved. The badges follow the new numbers now.');
-
-$('setScrSave').onclick = async () => {
-  const ok = await saveSetup('kiosk', { fieldStreamUrl: $('setFieldUrl').value },
-    'setScrMsg', 'Saved.');
-  if (ok) {
-    await saveSetup('stream', { webcastUrl: $('setWebcast').value },
-      'setScrMsg', 'Saved. Pit monitors pick the feed up on their next reload.');
-  }
-};
-
-$('setSpSave').onclick = () => void saveSetup('sponsors', { list: setupDraft?.sponsors ?? [] },
-  'setSpMsg', 'Saved. The rotation restarts from the top of the list.');
-
-$('setRdSave').onclick = () => void saveSetup('rundown', { segments: setupDraft?.rundown ?? [] },
-  'setRdMsg', 'Saved. Segments that kept their label keep their progress.');
-
-$('setAxSave').onclick = () => void saveSetup('accessibility', {
-  services: setupDraft?.services ?? [], ask: $('setAxAsk').value,
-}, 'setAxMsg', 'Saved. The screens update on their next rotation.');
-
-// Loaded when the group is first opened, not at boot: this panel is a
-// before-doors tool and the desk's first paint should spend its time on the
-// show surfaces.
-$('eventSetup').addEventListener('toggle', () => {
-  if ($('eventSetup').open && !setupDraft) void loadSetup();
-});

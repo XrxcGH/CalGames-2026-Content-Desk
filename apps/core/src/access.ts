@@ -38,6 +38,9 @@ export const OPEN_SURFACES: ReadonlySet<string> = new Set([
   // desk PIN: the page is a sign-in shell, and every read or write behind it
   // requires the JA session the shell's own unlock creates.
   'awards',
+  // The event-settings page: the same sign-in-shell pattern, behind the
+  // settings code held by the content lead.
+  'setup',
 ]);
 
 /**
@@ -139,8 +142,9 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // there for lacking a PIN could ever load the form that lets them enter one.
   if (path === '/api/auth' || path === '/api/auth/status' || path === '/signin') return false;
   // The Judge Advisor's door, same reasoning as /api/auth: gating the unlock
-  // endpoint behind the thing it unlocks would lock everyone out.
-  if (path === '/api/awards/auth') return false;
+  // endpoint behind the thing it unlocks would lock everyone out. The
+  // settings door gets the same treatment.
+  if (path === '/api/awards/auth' || path === '/api/setup/auth') return false;
 
   // Anything that only reads is judged against the read list. OPTIONS belongs
   // here and NOT in a blanket exemption: this once returned false for every

@@ -85,10 +85,15 @@
     "list": []
   },
 
+  "setup": {
+    "//": "The settings code for /s/setup, where the content half of this file (event, sponsors, run of show, thresholds, accessibility) is edited live by the content lead. Ships as 4567; change it for the event. Not the desk PIN, not the awards code. Explicitly empty = the desk PIN covers settings. Env var SETUP_PIN overrides.",
+    "pin": "4567"
+  },
+
   "awards": {
     "//": "The judged awards, with the definition the GA reads on air while the plate is up. The desk shows title+definition first and reveals the winner on a second press; the winner never enters any feed until that press.",
-    "//pin": "The Judge Advisor's code, NOT the desk PIN. Set it and the whole awards panel locks: the JA loads winners from /s/awards all day (that page needs only this code), and the desk crew cannot see, type, or reveal a winner until the JA hands this code over before the ceremony. Empty = no separate tier, desk PIN covers awards. Env var JA_PIN overrides.",
-    "pin": "",
+    "//pin": "The Judge Advisor's code, NOT the desk PIN. Ships as 1357; change it for the event. The awards panel locks behind it: the JA loads winners from /s/awards all day (that page needs only this code), and the desk crew cannot see, type, or reveal a winner until the JA hands this code over before the ceremony. Explicitly empty = no separate tier, desk PIN covers awards. Env var JA_PIN overrides.",
+    "pin": "1357",
     "//example": "{ \"id\": \"directors\", \"title\": \"Directors' Award\", \"description\": \"For the team that best embodies the spirit of CalGames.\" }",
     "list": []
   },

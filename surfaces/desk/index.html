@@ -742,102 +742,16 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           style="width:100%; margin-top:8px; display:none"></textarea>
         <p class="hint" id="chapState" aria-live="polite"></p>
       </section>
-      </details>
-
-      <!-- The content half of config.json, editable here. Credentials and
-           machine wiring stay in the file; content.ts holds the allowlist
-           that keeps it that way. -->
-      <details class="group" id="eventSetup">
-        <summary>Event setup: name, sponsors, run of show</summary>
-<section>
-        <h2>Event</h2>
-        <p class="hint">Everything in this group saves on the desk itself and overrides
-          config.json live, so nobody edits JSON mid-event. Credentials stay in
-          config.json on this machine.</p>
-        <p class="hint" id="setOverrides" aria-live="polite"></p>
-        <label for="setEvName">Event name</label>
-        <div class="row">
-          <input id="setEvName" placeholder="CalGames" style="flex:3 1 160px">
-          <input id="setEvYear" type="number" min="2000" max="2100"
-            aria-label="Event year" style="flex:0 1 90px">
-        </div>
-        <label for="setEvKey">TBA event key</label>
-        <input id="setEvKey" placeholder="2026cacg">
-        <label for="setEvUrl">Results link, shown in video descriptions</label>
-        <input id="setEvUrl" placeholder="https://www.thebluealliance.com/event/2026cacg">
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn--go" id="setEvSave">Save event</button>
-        </div>
-        <p class="hint" id="setEvMsg" aria-live="polite"></p>
-      </section>
 
 <section>
-        <h2>Bonus RP thresholds</h2>
-        <p class="hint">The offseason committee's numbers. Saving moves the reducer, the
-          badges and the talent view together, immediately.</p>
-        <label for="setRpFuel">Energized: fuel</label>
-        <input id="setRpFuel" type="number" min="0" max="10000">
-        <label for="setRpSuper">Supercharged: fuel</label>
-        <input id="setRpSuper" type="number" min="0" max="10000">
-        <label for="setRpTower">Traversal: tower points</label>
-        <input id="setRpTower" type="number" min="0" max="10000">
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn--go" id="setRpSave">Save thresholds</button>
-        </div>
-        <p class="hint" id="setRpMsg" aria-live="polite"></p>
-      </section>
-
-<section>
-        <h2>Screens and stream</h2>
-        <label for="setFieldUrl">Field feed URL, for the pit monitors</label>
-        <input id="setFieldUrl" placeholder="Blank is fine: the overlay draws its own backdrop">
-        <label for="setWebcast">Webcast URL, registered on TBA for GameDay</label>
-        <input id="setWebcast" placeholder="https://www.youtube.com/watch?v=...">
-        <div class="row" style="margin-top:10px">
-          <button class="btn btn--go" id="setScrSave">Save screens</button>
-        </div>
-        <p class="hint" id="setScrMsg" aria-live="polite"></p>
-      </section>
-
-<section>
-        <h2>Sponsor list</h2>
-        <p class="hint">Tier decides how often a card comes round, never how big it is
-          drawn. Logos live under <b>media/sponsors/</b> on this machine.</p>
-        <div id="setSpRows"></div>
-        <div class="row">
-          <button class="btn" id="setSpAdd">Add a sponsor</button>
-          <button class="btn btn--go" id="setSpSave">Save sponsors</button>
-        </div>
-        <p class="hint" id="setSpMsg" aria-live="polite"></p>
-      </section>
-
-<section>
-        <h2>Run of show editor</h2>
-        <p class="hint">A matches block takes a COUNT and times itself from measured
-          pace. Everything else takes minutes. Segments keep their progress when
-          edited mid-day.</p>
-        <div id="setRdRows"></div>
-        <div class="row">
-          <button class="btn" id="setRdAdd">Add a segment</button>
-          <button class="btn btn--go" id="setRdSave">Save run of show</button>
-        </div>
-        <p class="hint" id="setRdMsg" aria-live="polite"></p>
-      </section>
-
-<section>
-        <h2>Accessibility services</h2>
-        <p class="hint">Each line is something a person in the building can act on.
-          Never list a service the event does not have.</p>
-        <div id="setAxRows"></div>
-        <label for="setAxAsk">Who to ask</label>
-        <input id="setAxAsk" placeholder="Any volunteer in a purple shirt, or the desk by the stage">
-        <div class="row" style="margin-top:10px">
-          <button class="btn" id="setAxAdd">Add a service</button>
-          <button class="btn btn--go" id="setAxSave">Save accessibility</button>
-        </div>
-        <p class="hint" id="setAxMsg" aria-live="polite"></p>
+        <h2>Event content</h2>
+        <p class="hint">The event's name, sponsors, run of show, thresholds and
+          accessibility services are edited on their own page: <b>/s/setup</b>,
+          behind the settings code the content lead holds (not the desk PIN).
+          The award list lives with the Judge Advisor at <b>/s/awards</b>.</p>
       </section>
       </details>
+
 
 <section>
         <h2>Event log</h2>

@@ -103,14 +103,27 @@ export interface Config {
    */
   awards: {
     /**
-     * The Judge Advisor's code. Set it and the award panel splits into two
-     * tiers: winner entry and the reveal need THIS code, while the rest of
-     * the desk runs on the ordinary PIN. Empty means no separate tier (the
-     * desk PIN governs awards too), which is right for a small event. The
-     * env var JA_PIN overrides it; an empty JA_PIN disables the tier.
+     * The Judge Advisor's code. The award panel runs in two tiers: winner
+     * entry, the award editor and the reveal need THIS code, while the rest
+     * of the desk runs on the ordinary PIN. Ships with the default 1357
+     * (change it for the event, like the desk PIN); an explicitly empty
+     * value collapses the tier so the desk PIN governs awards too, which is
+     * right for a small event. The env var JA_PIN overrides it.
      */
     pin?: string;
     list: { id: string; title: string; description?: string }[];
+  };
+  /**
+   * The event-settings code: who may edit the content half of config on the
+   * Event settings page (/s/setup). A third tier, separate from the desk PIN
+   * and the JA code, because the person trusted to rename the event or
+   * rewrite the sponsor list is the content lead, not every desk volunteer.
+   * Ships with the default 4567 (change it for the event); an explicitly
+   * empty value collapses the tier onto the desk PIN. The env var SETUP_PIN
+   * overrides it.
+   */
+  setup: {
+    pin?: string;
   };
   /**
    * Recognition and info slides: volunteer thank-yous, session announcements,
@@ -244,7 +257,8 @@ export const DEFAULTS: Config = {
     spotify: { clientId: '', refreshToken: '', deviceName: '', playlistUri: '' },
   },
   sponsors: { list: [] },
-  awards: { pin: '', list: [] },
+  awards: { pin: '1357', list: [] },
+  setup: { pin: '4567' },
   slides: { list: [] },
   rundown: { segments: [] },
   accessibility: { services: [], ask: '' },

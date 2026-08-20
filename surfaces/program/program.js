@@ -420,6 +420,7 @@ const STATUS_KIND = {
   replay: 'Match replay', custom: 'Announcement',
 };
 
+let statusLeaveTimer = null;
 function paintStatus(status) {
   const card = $('statusCard');
   if (!status) {
@@ -427,12 +428,23 @@ function paintStatus(status) {
     // broadcast reads as a glitch rather than as the card retiring.
     if (!card.hidden && card.dataset.leaving !== 'true') {
       card.dataset.leaving = 'true';
-      const done = () => { card.hidden = true; delete card.dataset.leaving; };
+      // done() re-checks the flag: a status re-shown inside the 500ms fade
+      // deletes it, and the stale callback (this timer, or a transitionend
+      // from the ENTRANCE transition) must then do nothing. Without the
+      // check, clear-then-repost hid the fresh card, and because a status
+      // is up precisely when the bus is quiet, "Under review" stayed
+      // silently missing until the next event. Same class as hideThird.
+      const done = () => {
+        if (card.dataset.leaving !== 'true') return;
+        card.hidden = true;
+        delete card.dataset.leaving;
+      };
       card.addEventListener('transitionend', done, { once: true });
-      setTimeout(done, 500);
+      statusLeaveTimer = setTimeout(done, 500);
     }
     return;
   }
+  clearTimeout(statusLeaveTimer);
   delete card.dataset.leaving;
   const back = status.backAt
     ? ` (back ~${new Date(status.backAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`
@@ -591,6 +603,7 @@ desk.on('lower_third.show', () => {
  * and leaves the other three alone.
  */
 let panelKey = '';
+let panelLeaveTimer = null;
 function paintPanel(panel) {
   const el = $('anPanel');
   const strap = $('anStrap');
@@ -617,15 +630,26 @@ function paintPanel(panel) {
   if (people.length === 0) {
     if (!el.hidden) {
       el.dataset.leaving = 'true';
-      const done = () => { el.hidden = true; delete el.dataset.leaving; };
+      // done() re-checks the flag, because the re-show path clears it: a
+      // panel hidden and re-shown inside the 500ms leave (a mis-tap fixed,
+      // or remove-last then add) used to be blanked by the stale callback,
+      // and the keyed early-return above then never touched `hidden` again,
+      // so the analysis screen stayed EMPTY while state said three guests
+      // were on air. hideThird fixed this class; this one had missed it.
+      const done = () => {
+        if (el.dataset.leaving !== 'true') return;
+        el.hidden = true;
+        delete el.dataset.leaving;
+      };
       // The timeout is the belt: transitionend does not fire if the element is
       // display:none'd by something else mid-flight, and a panel stuck
       // half-off the bottom of the frame is worse than one that cuts.
       el.addEventListener('transitionend', done, { once: true });
-      setTimeout(done, 500);
+      panelLeaveTimer = setTimeout(done, 500);
     }
     return;
   }
+  clearTimeout(panelLeaveTimer);
   delete el.dataset.leaving;
   el.hidden = false;
 

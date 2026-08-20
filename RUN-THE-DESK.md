@@ -114,6 +114,20 @@ READY
 to need it. Write the PIN there too. It is a door code, not a secret; roughly
 eight people need it.
 
+The desk actually has **three codes**, one per job, and only the first goes
+on the whiteboard:
+
+| Code | Who holds it | Opens | Shipped default |
+| --- | --- | --- | --- |
+| Desk PIN | The desk crew | Every operator console | `0864` |
+| Awards code | The Judge Advisor | `/s/awards`, winner entry and the reveal | `1357` |
+| Settings code | The content lead | `/s/setup`, the event's content | `4567` |
+
+The defaults exist so a practice run works out of the box. **Change all
+three before the event** (`REMOTE_PIN`, and `awards.pin` / `setup.pin` in
+`config.json`): anyone with a copy of this handbook knows the defaults, and
+the desk warns about each one still in use at startup.
+
 The numbers will be different at your event. Use what your window prints, not
 what is printed here.
 
@@ -511,9 +525,12 @@ on stage disagrees with what was loaded); leave it blank otherwise. The
 winner genuinely does not exist anywhere the audience can reach until Reveal,
 so there is nothing to leak. The lock means that now includes this console.
 
-If no awards code was set up, there is no lock and the panel simply works on
-the desk PIN: type the winner yourself before Show, and do not read it aloud
-to anyone standing behind the desk.
+The desk ships with a default awards code (1357), so the lock exists from
+the first boot; change the code for the event, the same as the PIN. An event
+small enough that the producer IS the Judge Advisor can set `awards.pin` to
+empty in `config.json`, which removes the lock and runs awards on the desk
+PIN: then type the winner yourself before Show, and do not read it aloud to
+anyone standing behind the desk.
 
 ### Slides and shout-outs
 
@@ -540,12 +557,14 @@ the field and the drive teams have their setup clock. It clears itself the
 moment the match starts. The label and minutes boxes run any other countdown:
 meeting starts, doors, end of lunch.
 
-### Event setup: names, sponsors, and the run of show
+### Event settings: names, sponsors, and the run of show
 
-At the bottom of the right column, folded shut, is **Event setup**. It is a
-before-doors tool: everything about the event that used to require editing a
-file now lives here, saves the moment you press the section's Save button,
-takes effect immediately, and survives a restart.
+Event content lives on its own page: `ADDRESS/s/setup`, behind the
+**settings code**, which is not the desk PIN and not the awards code. The
+content lead holds it. It is a before-doors tool: everything about the
+event that used to require editing a file lives there, saves the moment you
+press the section's Save button, takes effect immediately, and survives a
+restart. The desk console links to it from the Setup fold.
 
 - **Event**: the event name and year (stream titles use them), the TBA event
   key, and the results link that goes in video descriptions.
@@ -564,8 +583,8 @@ takes effect immediately, and survives a restart.
   not have.
 
 Two things stay in `config.json` on the desk machine on purpose: credentials
-(API tokens, the PINs) and machine wiring (the camera list). If a screen in
-this group asks for something you do not have, that is a question for
+(API tokens, the codes) and machine wiring (the camera list). If a section
+on that page asks for something you do not have, that is a question for
 whoever set the desk up, not a file for you to edit.
 
 The awards list is the one content list NOT here: it belongs to the Judge
@@ -816,6 +835,7 @@ Replace `ADDRESS` with what the desk window printed.
 | --- | --- | --- |
 | Team media | `ADDRESS/s/media` | Whoever has the robot photos |
 | Post-match cards | `ADDRESS/s/cards` | Social media |
+| Event settings | `ADDRESS/s/setup` | The content lead, with the settings code |
 
 ### For everyone: no PIN
 
@@ -872,9 +892,11 @@ Print this. Tick it off.
 **Content**
 
 - [ ] Robot photos uploaded (`/s/media`)
-- [ ] Sponsors entered (desk, Event setup)
-- [ ] Run of show entered (desk, Event setup)
-- [ ] Event name, year, and TBA key checked (desk, Event setup)
+- [ ] Sponsors entered (`/s/setup`, settings code)
+- [ ] Run of show entered (`/s/setup`, settings code)
+- [ ] Event name, year, and TBA key checked (`/s/setup`, settings code)
+- [ ] All three codes changed from the shipped defaults; settings code given
+      to the content lead
 - [ ] Walk-up songs in place for playoff introductions
 - [ ] Award titles and definitions entered, in ceremony order (the JA's page, `/s/awards`)
 - [ ] Awards code set and given to the Judge Advisor (and to nobody else);

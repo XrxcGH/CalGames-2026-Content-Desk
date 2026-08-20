@@ -91,6 +91,9 @@ class DeskClient extends EventTarget {
   #skew = 0;
   /** True once a heartbeat has given the real server clock. See #apply. */
   #skewFromBeat = false;
+  /** Last frame time, for the half-open watchdog. */
+  #lastSeen = 0;
+  #watchdog = null;
   #ws = null;
   #backoff = 250;
   #name;
@@ -121,6 +124,7 @@ class DeskClient extends EventTarget {
     };
 
     ws.onmessage = e => {
+      this.#lastSeen = Date.now();
       const msg = JSON.parse(e.data);
       if (msg.t === 'snapshot') {
         this.media = msg.media ?? {};
@@ -156,23 +160,59 @@ class DeskClient extends EventTarget {
       }
     };
 
-    ws.onclose = () => {
-      this.connected = false;
-      // The next desk may be a different process with a different clock.
-      this.#skewFromBeat = false;
-      this.dispatchEvent(new CustomEvent('link', { detail: false }));
-      setTimeout(() => this.#connect(), this.#backoff);
-      this.#backoff = Math.min(this.#backoff * 2, 5000);
-    };
+    ws.onclose = () => this.#dropped(ws);
     ws.onerror = () => ws.close();
+
+    /*
+     * The liveness watchdog. Reconnection used to hang entirely on onclose,
+     * and a half-open path fires no close: the AP roam or unplugged switch
+     * port the server's heartbeat comment names kills the TCP path without a
+     * FIN ever reaching this browser, the socket stays OPEN, and because
+     * surfaces never send anything, nothing ever surfaces the death. The
+     * surface then renders a frozen score forever while `connected` stays
+     * true and every console's write guard happily "sends" into the void.
+     *
+     * The server beats every 10 seconds, so silence past 25 (two missed
+     * beats and margin) means the pipe is gone. #dropped() is called
+     * directly rather than waiting for close(), because a browser can take
+     * a very long time to abort an unanswered closing handshake.
+     */
+    this.#lastSeen = Date.now();
+    if (!this.#watchdog) {
+      this.#watchdog = setInterval(() => {
+        const sock = this.#ws;
+        if (!sock || sock.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - this.#lastSeen > 25_000) {
+          sock.onclose = null;
+          try { sock.close(); } catch { /* already dying */ }
+          this.#dropped(sock);
+        }
+      }, 5_000);
+    }
+  }
+
+  /** One path for a dead socket, whether the browser noticed or we did. */
+  #dropped(ws) {
+    if (this.#ws !== ws) return;         // an old socket's late close event
+    this.#ws = null;
+    this.connected = false;
+    // The skew is NOT reset here. The last beat-derived answer, even a
+    // reconnect-old one, beats re-deriving from `updatedAt`, which on a
+    // quiet desk is minutes stale and put a visibly wrong countdown on the
+    // venue screens for the 10 seconds until the next heartbeat. A genuinely
+    // different desk process corrects at its first beat.
+    this.dispatchEvent(new CustomEvent('link', { detail: false }));
+    setTimeout(() => this.#connect(), this.#backoff);
+    this.#backoff = Math.min(this.#backoff * 2, 5000);
   }
 
   #apply(state) {
-    // A floor, not a correction. `updatedAt` is the last EVENT's timestamp, so
-    // it is the server's clock as of some moment in the past: fine at the
-    // instant an event lands, stale by however long the desk has been quiet.
-    // The 10-second heartbeat carries the real thing; this only has to get a
-    // freshly-connected surface close enough to render its first frame.
+    // A floor, not a correction, and only for a surface that has NEVER heard
+    // a heartbeat. `updatedAt` is the last EVENT's timestamp: fine at the
+    // instant an event lands, minutes stale on a quiet desk. Re-deriving
+    // from it after every reconnect overwrote a beat-correct skew with a
+    // stale one and put a wrong countdown on the venue screens until the
+    // next beat; a kept skew is at worst seconds old.
     if (state.updatedAt && !this.#skewFromBeat) this.#skew = state.updatedAt - Date.now();
     this.state = state;
     this.dispatchEvent(new CustomEvent('state', { detail: state }));
