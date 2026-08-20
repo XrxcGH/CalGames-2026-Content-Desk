@@ -67,7 +67,9 @@ button { cursor: pointer; border: 0; padding: 10px 14px; clip-path: var(--chamfe
   font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   letter-spacing: .08em; text-transform: uppercase; }
 button:hover { background: var(--btn-hover); }
-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+/* Inset: every button here is chamfer-clipped, and a ring drawn outside the
+   clip renders as nothing. */
+button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -5px; }
 button.key { background: var(--accent); color: var(--cg-black); }
 button[disabled] { opacity: .45; cursor: not-allowed; }
 /* Background, color and border come from the shared console field rule in
@@ -75,7 +77,9 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 select { padding: 9px 12px; font-family: var(--font-cond); font-size: 14px; }
 
 .marks { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
-.mark { display: grid; grid-template-columns: 68px 1fr auto; gap: 12px; align-items: center;
+/* Four columns for the four spans: clock, phase word, label, kind. Three
+   columns wrapped the phase word into the 68px clock column. */
+.mark { display: grid; grid-template-columns: 68px 76px 1fr auto; gap: 12px; align-items: center;
   text-align: left; width: 100%; background: var(--surface-sunken);
   padding: 9px 12px; clip-path: var(--chamfer); --ch: 8px;
   font-family: inherit; text-transform: none; letter-spacing: 0; font-weight: 400; }

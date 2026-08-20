@@ -119,10 +119,16 @@ body {
    same test the broadcast would. */
 #floor {
   position: absolute; bottom: 8.5%; left: 0; right: 0; text-align: center;
-  font-family: var(--font-display); font-weight: 700; font-size: 28px;
+  font-family: var(--font-display); font-weight: 700;
+  /* Display-RELATIVE, not a fixed 28px: the broadcast is a 1080 stage scaled
+     to whatever this wall is, so the sample must scale the same way. Fixed
+     pixels let a 768-line projector pass a readability test the real
+     graphics then failed (the sample drew 40% larger than broadcast type),
+     and made a 4K wall fail one it would pass. */
+  font-size: calc(28 / 1080 * 100vh);
 }
 #floor small { display: block; font-family: var(--font-cond); font-weight: 600;
-  font-size: 14px; color: var(--cg-white-dim); letter-spacing: .12em;
+  font-size: calc(14 / 1080 * 100vh); color: var(--cg-white-dim); letter-spacing: .12em;
   text-transform: uppercase; margin-top: 4px; }
 </style>
 </head>

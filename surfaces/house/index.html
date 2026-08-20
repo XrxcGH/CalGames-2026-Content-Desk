@@ -292,8 +292,8 @@ function paint(s) {
 
   const warn = [];
   if (s.players?.armed > 1) {
-    warn.push('Two house players are armed. If one of them is the machine OBS captures, ' +
-      'the music is going to the stream. Close the other one.');
+    warn.push(`${s.players.armed} house players are armed. If one of them is the machine ` +
+      'OBS captures, the music is going to the stream. Close every one but this.');
   }
   if (s.music?.configured && !s.music.reachable && s.music.linked) {
     warn.push('The music service is not answering. Clips still play from this machine.');

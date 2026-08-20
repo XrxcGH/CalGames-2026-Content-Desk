@@ -683,10 +683,25 @@ function paintEmergency(e) {
   $('emergMsg').textContent = e.message;
   $('emergDetail').textContent = e.detail ?? '';
   // Whoever raised this was typing in a hurry, so the type fits itself.
+  //
+  // Measured against the PLATE, not the message's own box: .emerg-msg is an
+  // auto-height flex item, so its scrollHeight always equals its clientHeight
+  // and the old guard could never fire; the fit steps were unreachable and a
+  // 200-character message pushed the EVACUATE chip half off the top of frame.
+  // The centered flex column overflows in BOTH directions, which scrollHeight
+  // cannot see either, so this checks the first and last children against the
+  // plate's edges directly.
   const msg = $('emergMsg');
   msg.removeAttribute('data-fit');
+  const fits = () => {
+    const box = el.getBoundingClientRect();
+    const first = el.firstElementChild.getBoundingClientRect();
+    const last = el.lastElementChild.getBoundingClientRect();
+    return first.top >= box.top - 1 && last.bottom <= box.bottom + 1
+      && msg.scrollWidth <= msg.clientWidth;
+  };
   for (const step of ['1', '2']) {
-    if (msg.scrollHeight <= msg.clientHeight && msg.scrollWidth <= msg.clientWidth) break;
+    if (fits()) break;
     msg.dataset.fit = step;
   }
 }

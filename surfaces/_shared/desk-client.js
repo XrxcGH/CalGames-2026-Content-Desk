@@ -252,6 +252,32 @@ export function applyDisplayMode() {
  * button. This lived as two hand-kept copies (desk and remote) and they had
  * already drifted ("Field wide" vs "Field"). One table, one vocabulary.
  */
+/**
+ * Program screens: canonical order and display names, shared by the nav
+ * strip, the desk's screen row, and the phone remote. Three surfaces used to
+ * keep three hand-typed sets ("Overview" / "Pre-match", "Match" / "Score
+ * bar", "Score" / "Final"), which taught three names for one screen. The
+ * names follow what the audience sees, not the internal id.
+ */
+export const SCREENS = [
+  { id: 'overview', label: 'Pre-match' },
+  { id: 'match', label: 'Match' },
+  { id: 'score', label: 'Final' },
+  { id: 'selection', label: 'Selection' },
+  { id: 'explain', label: 'Explainer' },
+  { id: 'analysis', label: 'Analysis' },
+  { id: 'cardcall', label: 'Card call' },
+  { id: 'arcade', label: 'Arcade' },
+  { id: 'sponsor', label: 'Sponsor' },
+  { id: 'blank', label: 'Blank' },
+  { id: 'auto', label: 'Auto' },
+];
+export const SCREEN_LABEL = Object.fromEntries(SCREENS.map(s => [s.id, s.label]));
+// Screens that exist at runtime but earn no button (a slide or an award is
+// taken from its own panel, never cold from a screen row).
+SCREEN_LABEL['slide'] = 'Slide';
+SCREEN_LABEL['award'] = 'Award';
+
 export const SCENE_LABEL = {
   intro: 'Intro', match: 'Field wide', score: 'Score',
   replay: 'Replay', desk: 'Desk', arcade: 'Arcade',

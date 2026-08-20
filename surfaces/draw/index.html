@@ -88,8 +88,9 @@ body {
 /* Two-tone ring: a plain white ring was invisible on the white "note" swatch,
    so the analyst could not tell which ink was active. */
 .ink[aria-pressed="true"] { box-shadow: inset 0 0 0 3px var(--cg-black), inset 0 0 0 6px var(--cg-white); }
+/* Inset: all three are chamfer-clipped, and an outset ring clips to nothing. */
 .tool:focus-visible, .ink:focus-visible, .tag:focus-visible {
-  outline: 3px solid var(--focus-ring); outline-offset: 2px;
+  outline: 3px solid var(--focus-ring); outline-offset: -3px;
 }
 
 /* Link state: a quiet dot in the corner, not a labeled readout. Spectators

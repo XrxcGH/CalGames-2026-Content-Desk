@@ -161,9 +161,9 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
   <section>
     <h2>Screen</h2>
     <div class="grid">
-      <button class="b" data-screen="overview">Overview</button>
+      <button class="b" data-screen="overview">Pre-match</button>
       <button class="b" data-screen="match">Match</button>
-      <button class="b" data-screen="score">Score</button>
+      <button class="b" data-screen="score">Final</button>
       <button class="b b--warn" data-screen="blank">Blank</button>
       <!-- Every take above holds the screen until Auto releases it. Without
            this button one tap here would freeze the show's automation with no
@@ -394,19 +394,32 @@ async function loadScenes() {
     const res = await fetch('/api/scenes');
     if (!res.ok) return;
     const { scenes } = await res.json();
-    if (!scenes) return;
+    if (!scenes) {
+      // Say so, the way the desk does: a bare "Cameras" heading over nothing
+      // reads as broken, and a phone cannot open devtools to find out why.
+      $('sceneGrid').innerHTML = '<p class="hint">Show automation is off. '
+        + 'Cameras are cut from OBS itself.</p>';
+      return;
+    }
     $('sceneGrid').replaceChildren(...Object.entries(scenes).map(([key, name]) => {
       const b = document.createElement('button');
       b.className = 'b';
       b.textContent = SCENE_LABEL[key] ?? key;
       b.dataset.scene = name;
       b.onclick = tap(async () => {
-        const r = await fetch('/api/scene', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scene: name }),
-        });
-        if (r.ok) toast(b.textContent);
-        else toast((await r.json()).error ?? 'Failed', true);
+        // try/catch like the audio helper: tap() has already buzzed by the
+        // time this runs, and a rejected fetch (desk restarting, phone
+        // roaming APs) escaped as silence after a success vibration.
+        try {
+          const r = await fetch('/api/scene', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scene: name }),
+          });
+          if (r.ok) toast(b.textContent);
+          else toast((await r.json()).error ?? 'Failed', true);
+        } catch (err) {
+          toast(`Not cut: ${err.message}`, true);
+        }
       });
       return b;
     }));
@@ -505,6 +518,10 @@ async function loadCues() {
     }
     if (!res.ok) return;
     const { cues = [] } = await res.json();
+    if (!cues.length) {
+      $('cues').innerHTML = '<p class="hint">No cues are configured on this desk.</p>';
+      return;
+    }
     // Built as nodes, not as a string. Cue names come from config.json, which
     // is operator-authored text (the arcade overlay already comments that
     // exactly this is "an on-air HTML injection point"), and interpolating it

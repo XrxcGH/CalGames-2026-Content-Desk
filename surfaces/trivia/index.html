@@ -90,8 +90,13 @@
 }
 .opt-text {
   font-family: var(--font-cond); font-weight: 600; font-size: 54px; line-height: 1.08;
-  color: var(--cg-white);
+  color: var(--cg-white); overflow-wrap: anywhere;
 }
+/* fitOptions() steps these on, same contract as the question: a host-typed
+   answer long enough to wrap past two lines would otherwise grow its box and
+   push the pane out the bottom of frame. */
+.opts[data-fit="1"] .opt-text { font-size: 44px; }
+.opts[data-fit="2"] .opt-text { font-size: 36px; }
 .opt-count {
   margin-left: auto;
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
@@ -207,6 +212,17 @@ function fitQuestion() {
   if (over()) el.dataset.fit = '2';
 }
 
+// Same budget for the answers: two line boxes per option. Any option past
+// that steps the whole set down together, so the four boxes stay matched.
+function fitOptions() {
+  const box = $('opts');
+  delete box.dataset.fit;
+  const over = () => [...box.querySelectorAll('.opt-text')].some(t =>
+    t.scrollHeight > parseFloat(getComputedStyle(t).lineHeight) * 2 + 1);
+  if (over()) box.dataset.fit = '1';
+  if (over()) box.dataset.fit = '2';
+}
+
 function paint(s) {
   if (!s) return;
   snap = s;
@@ -251,6 +267,7 @@ function paint(s) {
     : `${q.answers} answer${q.answers === 1 ? '' : 's'} in`;
   $('fuse').style.visibility = revealed ? 'hidden' : 'visible';
   fitQuestion();
+  fitOptions();
   showPane('pane-q');
 }
 

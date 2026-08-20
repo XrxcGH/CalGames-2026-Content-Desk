@@ -336,11 +336,19 @@ export class TriviaStore {
   #validate(draft: QuestionDraft, preserve?: Pick<TriviaQuestion, 'kind' | 'matchId'>): TriviaQuestion {
     const text = String(draft.text ?? '').trim();
     if (!text) throw new Error('The question needs text.');
+    // Caps sized to the overlay's fit steps: past these, even the smallest
+    // step overflows the pane, and the failure would be on the projector.
+    if (text.length > 200) {
+      throw new Error('Keep the question under 200 characters: it has to fit on the screen.');
+    }
 
     const options = (Array.isArray(draft.options) ? draft.options : [])
       .map(o => String(o ?? '').trim());
     if (options.length !== 4 || options.some(o => !o)) {
       throw new Error('Four answer options are required, and none can be blank.');
+    }
+    if (options.some(o => o.length > 90)) {
+      throw new Error('Keep each answer under 90 characters: it has to fit in its box on the screen.');
     }
 
     const answer = Number(draft.answer);

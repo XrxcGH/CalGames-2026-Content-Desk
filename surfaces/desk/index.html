@@ -15,7 +15,9 @@ body { font-size: var(--font-ui-body); }
 /* The jump strip: the page is twenty-odd sections tall, and mid-show nobody
    scroll-hunts. Sticky, one row, every anchor a section that matters under
    pressure. Safety is styled as what it is. */
-.jump { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap;
+/* Under the injected nav strip, not underneath it: nav.js publishes its
+   measured height as --opnav-h (it wraps to two rows on narrow windows). */
+.jump { position: sticky; top: var(--opnav-h, 0px); z-index: 30; display: flex; flex-wrap: wrap;
   gap: 6px; padding: 8px 0; margin: 0 0 10px;
   background: var(--page-bg); }
 .jump a { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
@@ -255,7 +257,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
     <a href="#sec-slides">Slides</a>
     <a href="#sec-timer">Timer</a>
     <a href="#sec-awards">Awards</a>
-    <a href="#sec-safety" class="danger">Safety</a>
+    <a href="#emergSection" class="danger">Safety</a>
   </nav>
 
   <div class="grid">
@@ -326,7 +328,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
 <section id="sec-cameras">
-        <h2>Cameras <span class="hint" id="sceneNote">·</span></h2>
+        <h2>Cameras <span class="hint" id="sceneNote" aria-live="polite">·</span></h2>
         <div class="row" id="sceneRow"></div>
         <p class="hint">The shot, not the graphic. Screens follow the match on their own,
           so a late cut leaves the graphics right. Autopilot never cuts away from the field
@@ -336,7 +338,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 <section>
         <h2>Replay markers</h2>
         <div class="row">
-          <button class="btn" id="mark" aria-label="Mark replay moment (keyboard shortcut space bar)" style="width:100%">Mark<kbd aria-hidden="true">SPACE</kbd></button>
+          <button class="btn needs-link" id="mark" aria-label="Mark replay moment (keyboard shortcut space bar)" style="width:100%">Mark<kbd aria-hidden="true">SPACE</kbd></button>
         </div>
         <p class="hint">Drops a marker at <b>now − 2s</b>, because human reaction time
           is real. Automation catches the scoring; a human catches the interesting.</p>
@@ -368,7 +370,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <label>Walk-ups and stingers</label>
         <div class="row" id="audClips"></div>
-        <p class="hint" id="audioHint">The player runs on the music machine at
+        <p class="hint" id="audioHint" aria-live="polite">The player runs on the music machine at
           <b>/s/house</b>. Walk-up files go in <b>media/audio/walkups</b>, named for the
           team.</p>
       </section>
@@ -388,8 +390,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <label class="in" for="statusMin" style="font-family:var(--font-cond);font-weight:600;font-size: 14px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim)">Back in</label>
           <input id="statusMin" type="number" min="0" max="120" placeholder="min" style="width:70px">
           <input id="statusCustom" placeholder="Custom message..." aria-label="Custom status message" style="flex:1;min-width:180px">
-          <button class="btn" id="statusShowCustom">Show custom</button>
-          <button class="btn" id="statusClear">Hide card</button>
+          <button class="btn needs-link" id="statusShowCustom">Show custom</button>
+          <button class="btn needs-link" id="statusClear">Hide card</button>
         </div>
       </section>
 
@@ -400,9 +402,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <label for="t2">Line 2</label>
         <input id="t2" placeholder="Analyst · CalGames Content Desk">
         <div class="row" style="margin-top:12px">
-          <button class="btn btn--go" id="thirdShow" aria-label="Show lower third (keyboard shortcut T)">Show<kbd aria-hidden="true">T</kbd></button>
+          <button class="btn btn--go needs-link" id="thirdShow" aria-label="Show lower third (keyboard shortcut T)">Show<kbd aria-hidden="true">T</kbd></button>
           <label class="pstu" for="thirdPinned"><input type="checkbox" id="thirdPinned">Pin (stays up)</label>
-          <button class="btn" id="thirdHide" aria-label="Hide lower third (keyboard shortcut Y)">Hide<kbd aria-hidden="true">Y</kbd></button>
+          <button class="btn needs-link" id="thirdHide" aria-label="Hide lower third (keyboard shortcut Y)">Hide<kbd aria-hidden="true">Y</kbd></button>
         </div>
         <p class="hint" id="thirdHint" aria-live="polite"></p>
       </section>
@@ -454,10 +456,10 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           automatically; this field is the manual fallback. <b>Hide</b> kills the
           render surface instantly without clearing the analyst's pad.</p>
         <div class="row" style="margin-top:12px">
-          <button class="btn" id="teleSend">Send frame</button>
-          <button class="btn" id="teleLive">Go live</button>
-          <button class="btn" id="teleClear">Clear ink</button>
-          <button class="btn" id="teleHide">Hide</button>
+          <button class="btn needs-link" id="teleSend">Send frame</button>
+          <button class="btn needs-link" id="teleLive">Go live</button>
+          <button class="btn needs-link" id="teleClear">Clear ink</button>
+          <button class="btn needs-link" id="teleHide">Hide</button>
         </div>
       </section>
     </div>
@@ -661,7 +663,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <label for="mBlue">Blue alliance: team numbers</label>
         <input id="mBlue" placeholder="100 115 670" value="100 115 670">
         <div class="row" style="margin-top:12px">
-          <button class="btn" id="loadMatch">Load</button>
+          <button class="btn needs-link" id="loadMatch">Load</button>
         </div>
         <p class="hint">With the Cheesy bridge up, names fill in from the field's team
           list on their own. Running desk-only, numbers alone are enough for the overview to

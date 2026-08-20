@@ -1792,7 +1792,7 @@ h2{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2
   background:var(--surface-raised);text-decoration:none;color:var(--text);
   clip-path:var(--chamfer);--ch:12px;transition:background var(--dur-tap) linear}
 .row:hover{background:var(--btn-hover)}
-.row:focus-visible{outline:3px solid var(--focus-ring)}
+.row:focus-visible{outline:3px solid var(--focus-ring);outline-offset:-6px}
 .row b{font-size:19px}
 .row code{font-family:var(--font-mono);color:var(--accent);font-size:13px}
 .row i{grid-column:1/-1;color:var(--text-dim);font-style:normal;font-size:13px}
@@ -1914,6 +1914,16 @@ ${sections}</body></html>`;
       // Surfaces may inject events. Source is forced to 'manual', so a surface
       // can never claim to be the field.
       if (msg.t === 'emit' && msg.init?.type) {
+        // The award family is refused here BY TYPE: every award write is
+        // supposed to sit behind the Judge Advisor tier on /api/awards, and
+        // this socket authenticates with the desk PIN alone. Without this
+        // check, any desk-PIN session could fire a fabricated
+        // award.presented and put a fake winner on the projector
+        // mid-ceremony; the JA gate held the secret but not the stage.
+        if (String(msg.init.type).startsWith('award.')) {
+          send(ws, { t: 'denied', reason: 'Awards run through /api/awards and the JA code.' });
+          return;
+        }
         bus.emit({ ...msg.init, source: 'manual' });
         return;
       }

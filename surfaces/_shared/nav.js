@@ -12,6 +12,8 @@
  * at. It writes the same `screen.change` event the desk console does.
  */
 
+import { SCREENS } from '/shared/desk-client.js';
+
 const CONSOLES = [
   { id: 'desk', label: 'Desk' },
   { id: 'replay', label: 'Replay' },
@@ -24,20 +26,8 @@ const CONSOLES = [
   { id: 'cards', label: 'Cards' },
 ];
 
-/** Program screens, in the order the show actually uses them. */
-const SCREENS = [
-  { id: 'overview', label: 'Pre-match' },
-  { id: 'match', label: 'Match' },
-  { id: 'score', label: 'Final' },
-  { id: 'selection', label: 'Selection' },
-  { id: 'explain', label: 'Explainer' },
-  { id: 'analysis', label: 'Analysis' },
-  { id: 'cardcall', label: 'Card call' },
-  { id: 'arcade', label: 'Arcade' },
-  { id: 'blank', label: 'Blank' },
-  // Not a screen: hands control back to the match lifecycle.
-  { id: 'auto', label: 'Auto' },
-];
+// Program screens come from desk-client's shared SCREENS list: the strip,
+// the desk's own row, and the phone remote must all teach the same words.
 
 const CSS = `
 .opnav { position: sticky; top: 0; z-index: 50;
@@ -89,7 +79,9 @@ export function mountNav(current, opts = {}) {
   skip.addEventListener('blur', () => { skip.style.left = '-9999px'; });
   document.body.prepend(skip);
   // The landmark the link needs: the page's own wrapper, promoted.
-  const wrap = document.querySelector('.wrap, main');
+  // The telestrator pad has neither, so the drawing surface is the fallback:
+  // a skip link that lands nowhere is worse than none.
+  const wrap = document.querySelector('.wrap, main') ?? document.querySelector('#pad');
   if (wrap && !wrap.id) wrap.id = 'main';
   if (wrap && wrap.tagName !== 'MAIN') wrap.setAttribute('role', 'main');
 
@@ -107,6 +99,14 @@ export function mountNav(current, opts = {}) {
       : '');
 
   document.body.prepend(nav);
+
+  // The strip wraps to two rows on narrow windows, so its height is a fact
+  // only the browser knows. Published as a root variable for any page-level
+  // sticky bar (the desk's jump strip) that has to stack under it.
+  const setNavHeight = () =>
+    document.documentElement.style.setProperty('--opnav-h', `${nav.offsetHeight}px`);
+  setNavHeight();
+  window.addEventListener('resize', setNavHeight);
 
   if (!withScreens) return nav;
 
@@ -130,6 +130,19 @@ export function mountNav(current, opts = {}) {
     ws.addEventListener('message', ev => {
       try {
         const msg = JSON.parse(ev.data);
+        // A refused take used to vanish: the server answers {t:'denied'} (a
+        // desk restart invalidates this page's session; award events are
+        // JA-only) and this handler only looked for state frames, so the
+        // operator pressed, nothing happened, and nothing said why.
+        if (msg?.t === 'denied') {
+          note.textContent = msg.reason === 'PIN required'
+            ? 'The desk restarted. Reload this page to sign back in.'
+            : (msg.reason || 'The desk refused that.');
+          note.hidden = false;
+          clearTimeout(note._t);
+          note._t = setTimeout(() => { note.hidden = true; }, 6000);
+          return;
+        }
         const state = msg?.state;
         const screen = state?.screen ?? msg?.payload?.screen;
         if (!screen) return;
@@ -153,6 +166,12 @@ export function mountNav(current, opts = {}) {
     });
     ws.addEventListener('error', () => ws.close());
   }
+  const note = document.createElement('span');
+  note.className = 'lbl';
+  note.setAttribute('role', 'status');
+  note.hidden = true;
+  nav.append(note);
+
   connectNav();
 
   for (const b of nav.querySelectorAll('button[data-screen]')) {

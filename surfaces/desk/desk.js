@@ -7,7 +7,7 @@
 
 import {
   connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker,
-  SCENE_LABEL,
+  SCENE_LABEL, SCREENS, SCREEN_LABEL,
 } from '/shared/desk-client.js';
 import { iconEl } from '/shared/icons.js';
 
@@ -34,7 +34,8 @@ desk.on('link', up => {
   // emit() silently drops on a closed socket, so an enabled button was a lie:
   // pressing End at the buzzer during a desk restart did nothing, and the
   // only clue was this dot. The stream section already models honest-disabled.
-  for (const b of document.querySelectorAll('[data-emit], [data-score], [data-screen-take]')) {
+  for (const b of document.querySelectorAll(
+    '[data-emit], [data-score], [data-screen-take], [data-status], .needs-link')) {
     b.disabled = !up;
   }
 });
@@ -182,14 +183,10 @@ for (const b of document.querySelectorAll('[data-score]')) {
 // dropdown was missing `sponsor` entirely, and a hardware button could take a
 // screen the main console could not. The fallback list only exists for the
 // seconds before the map loads.
-const SCREEN_FALLBACK = ['overview', 'match', 'score', 'analysis', 'arcade',
-  'selection', 'explain', 'sponsor', 'blank', 'auto'];
-const SCREEN_WORDS = {
-  overview: 'Overview', match: 'Score bar', score: 'Final', analysis: 'Analysis',
-  arcade: 'Arcade', selection: 'Selection', explain: 'Explainer',
-  sponsor: 'Sponsor', slide: 'Slide', award: 'Award', cardcall: 'Card',
-  blank: 'Blank', auto: 'Auto',
-};
+// Order and names shared with the nav strip and the remote: the strip above
+// this row must never teach different words than the row itself.
+const SCREEN_FALLBACK = SCREENS.filter(s => s.id !== 'cardcall').map(s => s.id);
+const SCREEN_WORDS = SCREEN_LABEL;
 let screenIds = SCREEN_FALLBACK;
 
 function buildScreenRow() {
@@ -315,6 +312,13 @@ $('teleHide').onclick = () => emit('telestrator.hide');
 $('mark').onclick = () => mark();
 
 function mark() {
+  // No record for a drop: emit() on a closed socket goes nowhere, and a
+  // marker line painted anyway would tell the replay op a moment was saved
+  // when it was not.
+  if (!desk.connected) {
+    $('linkText').textContent = 'reconnecting: the marker was NOT saved';
+    return;
+  }
   // Back-date by 2s: by the time a human presses the button, the moment has
   // already passed.
   const at = (desk.matchClock ?? 0) - 2;
@@ -358,6 +362,14 @@ addEventListener('keydown', e => {
   const fn = KEYS[e.key.toLowerCase()];
   if (!fn) return;
   e.preventDefault();
+  // The buttons go honest-disabled while the socket is down; the shortcuts
+  // must not keep lying on their behalf. emit() silently drops on a closed
+  // socket, and the number row is the PRIMARY interface during a match, so a
+  // shortcut pressed mid-restart says so out loud instead of doing nothing.
+  if (!desk.connected) {
+    $('linkText').textContent = 'reconnecting: that key press was NOT sent';
+    return;
+  }
   fn();
 });
 
@@ -767,7 +779,7 @@ $('panelHide').onclick = async () => {
   } catch (err) {
     onAir = had;
     $('panelHint').textContent =
-      `Still on air: ${err.message}. Press Clear again.`;
+      `Still on air: ${err.message}. Press Hide again.`;
   }
 };
 
@@ -1433,6 +1445,9 @@ function paintSlideDeck({ deck = [], live = null }) {
     kill.textContent = 'Remove';
     kill.onclick = e => {
       e.preventDefault();
+      // One slot from Show, and there is no undo: deleting a slide typed at
+      // the event deletes the typing too.
+      if (!confirm(`Remove the slide "${sl.title}" from the deck?`)) return;
       void slideAction({ action: 'remove', id: sl.id }, 'Removed.');
     };
     row.append(who, show, kill);

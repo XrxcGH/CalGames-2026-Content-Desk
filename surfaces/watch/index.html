@@ -26,10 +26,16 @@ html {
   background-attachment: fixed;
   min-height: 100%;
 }
+/* No background on this shared rule: the shorthand would wipe the brand
+   layers painted on html above (a shorthand resets background-image), which
+   is how the feed-less kiosk showed the overlay on plain black while its own
+   menu promised the CalGames backdrop. The stage keeps its own black for
+   letterboxing real video. */
 html, body {
   margin: 0; height: 100%; overflow: hidden;
-  background: #000; color: var(--cg-white);
+  color: var(--cg-white);
 }
+body { background: transparent; }
 
 /* A fixed 16:9 stage centered in whatever the screen is, so the overlay lands
    pixel-for-pixel on the video behind it. Letterboxing is black, which is what
@@ -84,7 +90,7 @@ a.card { display: block; text-decoration: none; color: inherit;
   background-size: var(--tex-perf-size);
   clip-path: var(--chamfer); --ch: 14px; padding: 16px 18px; }
 a.card:hover { background-color: var(--cg-purple-hi); }
-a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: 3px; }
+a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; }
 .card b { display: block; font-size: 19px; margin-bottom: 4px; }
 .card span { color: var(--cg-white-dim); font-size: 14px; line-height: 1.5; }
 .card code { display: block; margin-top: 9px; font-family: var(--font-mono); font-size: 13px;

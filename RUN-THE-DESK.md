@@ -156,8 +156,9 @@ Open the desk address in a browser on the desk laptop. You get an index page
 listing every screen. Open **Desk console** (`/s/desk`). It asks for the PIN
 once.
 
-At the top of the desk console is the **doors check**. It answers one question:
-*is this thing ready?* Everything on it is green, amber, or red.
+In the desk console's right column, inside the fold named **Setup & end of
+day**, is the **doors check**. It answers one question: *is this thing
+ready?* Everything on it is green, amber, or red.
 
 Run it **at doors**, meaning when the audience is let in, not five minutes
 before the first match.
@@ -466,7 +467,7 @@ Check the shot before you cut to it: YouTube can disable chat or take a stream
 down over minors on camera without a visible adult, and getting that wrong ends
 the stream, not the clip.
 
-Press **Clear** when they get up.
+Press **Hide** when they get up.
 
 ### Status cards and safety messages
 
@@ -491,8 +492,8 @@ takes only their code, not the desk PIN). That page is also where the award
 list itself gets built: **Add an award** for each judged award in ceremony
 order, **Edit title or description** to fix wording, **Remove from the
 ceremony** if plans change. No file editing, ever. While that is happening, your
-Awards section shows a lock: you can see the award titles and nothing else.
-That is deliberate. Nobody at the desk can see, type, or reveal a winner, so
+Awards section shows only the lock and its code box; even the award titles
+wait behind it. That is deliberate. Nobody at the desk can see, type, or reveal a winner, so
 nobody at the desk can leak one, even by accident, even with a camera pointed
 at the console.
 
@@ -761,7 +762,7 @@ Ordered by how often it happens.
 | Camera buttons do nothing | OBS is not connected, or a scene is misspelled | Chapter 4, steps 2 and 7 |
 | Music is coming out of the stream | The house page is on the wrong machine | Chapter 10: this one matters |
 | No robot photos | None uploaded for those teams | Fine. It falls back to a gold team number |
-| A wrong name on screen | Somebody typed it | Fix it in the profile list and press Put on air again |
+| A wrong name on screen | Somebody typed it | Forget that profile, add it again spelled right, tick it, press Put on air |
 | "Port already in use" on start | An old copy is still running | The launcher offers to stop it. Say yes |
 
 ### The universal fix
@@ -793,7 +794,6 @@ Replace `ADDRESS` with what the desk window printed.
 | Telestrator render | `ADDRESS/s/tele` | Transparent. Layer over the replay |
 | Arcade overlay | `ADDRESS/s/arcade` | Over the game capture |
 | Trivia overlay | `ADDRESS/s/trivia` | Crowd game |
-| Side screen | `ADDRESS/s/side` | For venue TVs, not for OBS |
 
 ### Run the show: these need the PIN
 
@@ -822,6 +822,7 @@ Replace `ADDRESS` with what the desk window printed.
 | Screen | URL | Notes |
 | --- | --- | --- |
 | Pick a screen | `ADDRESS/s/watch` | Hand this to anyone setting up a monitor |
+| Side screen | `ADDRESS/s/side` | Venue TVs, full screen. Never an OBS source |
 | When do we play? | `ADDRESS/s/next` | Parents, on their own phones |
 | Trivia play | `ADDRESS/s/quiz` | The crowd's phones |
 | Shout-outs | `ADDRESS/s/gp` | Submit a Gracious Professionalism moment. Moderated at the desk |

@@ -26,7 +26,8 @@ button { margin-top: 14px; width: 100%; padding: 13px; border: 0; cursor: pointe
   background: var(--accent); color: var(--text-on-accent);
   font-family: var(--font-cond); font-weight: 700; font-size: 15px;
   letter-spacing: .1em; text-transform: uppercase; }
-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+/* Inset: the button is chamfer-clipped and an outset ring clips to nothing. */
+button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
 /* --st-bad (#C13030) is only 3.17:1 on this panel. Errors are the one
    thing an operator must be able to read at a glance, so this uses the
    lightened console red the rest of the dark surfaces use. */
