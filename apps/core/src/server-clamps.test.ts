@@ -175,3 +175,62 @@ test('the three codes open three doors, and none opens another\'s', async () => 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a concurrent flood cannot walk the PIN keyspace, and the doors are independent', async () => {
+  // The critical review finding: authBlocked was checked, then the body was
+  // awaited, then the failure recorded, so a burst of concurrent guesses all
+  // passed the check while the counter was still zero. The reservation now
+  // counts in-flight attempts, so at most FAIL_LIMIT are ever live at once.
+  process.env['SETUP_PIN'] = '';
+  process.env['JA_PIN'] = '9999';
+  const dir = await mkdtemp(join(tmpdir(), 'cg-flood-'));
+  const bus = new EventBus();
+  const server = startServer({
+    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 3, host: '127.0.0.1',
+  });
+  const base = `http://127.0.0.1:${PORT + 3}`;
+  const post = (path: string, pin: string) =>
+    fetch(base + path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    }).then(r => r.status);
+  try {
+    // REMOTE_PIN is '' so /api/auth reports the tier is off... use the JA door,
+    // which has a real code (9999), for the flood: 100 concurrent wrong codes.
+    const wrong = Array.from({ length: 100 }, (_, i) => String(1000 + i));
+    const statuses = await Promise.all(wrong.map(p => post('/api/awards/auth', p)));
+    const tried = statuses.filter(x => x === 401).length;
+    const locked = statuses.filter(x => x === 429).length;
+    assert.ok(tried <= 5, `at most FAIL_LIMIT guesses may land, got ${tried}`);
+    assert.ok(locked >= 90, `the rest must be locked out, got ${locked}`);
+    // The correct code is now locked out too: the budget is spent.
+    assert.equal(await post('/api/awards/auth', '9999'), 429);
+  } finally {
+    delete process.env['SETUP_PIN'];
+    delete process.env['JA_PIN'];
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the open urls route never echoes a credential embedded in the field feed', async () => {
+  process.env['SETUP_PIN'] = '';
+  const dir = await mkdtemp(join(tmpdir(), 'cg-urls-'));
+  const config = structuredClone(DEFAULTS);
+  config.kiosk.fieldStreamUrl = 'rtsp://admin:hunter2@10.0.0.9:554/stream1';
+  const bus = new EventBus();
+  const server = startServer({
+    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 4, host: '127.0.0.1', config,
+  });
+  try {
+    const urls = await fetch(`http://127.0.0.1:${PORT + 4}/api/urls`).then(r => r.json()) as
+      { fieldStream: string };
+    assert.equal(urls.fieldStream.includes('hunter2'), false, 'the camera password must not leak');
+    assert.equal(urls.fieldStream.includes('admin'), false, 'nor the username');
+    assert.match(urls.fieldStream, /10\.0\.0\.9/, 'the host itself still passes through');
+  } finally {
+    delete process.env['SETUP_PIN'];
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

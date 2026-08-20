@@ -176,6 +176,22 @@ export function startServer(opts: ServerOpts) {
   }
 
   /** Never let a path escape its mount point. */
+  /** Drop any user:pass@ from a URL before it goes to an open surface. */
+  function stripUserinfo(raw: string): string {
+    if (!raw) return raw;
+    try {
+      const u = new URL(raw);
+      if (!u.username && !u.password) return raw;
+      u.username = '';
+      u.password = '';
+      return u.toString();
+    } catch {
+      // Not a parseable absolute URL (a bare path, a relative ref): a regex
+      // strip of an authority's userinfo, leaving the rest untouched.
+      return raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1');
+    }
+  }
+
   function safeJoin(base: string, urlPath: string): string | null {
     // A malformed percent escape is an unfindable file, not a server error:
     // decoding /theme/%zz used to throw and answer 500 instead of 404.
@@ -315,10 +331,55 @@ export function startServer(opts: ServerOpts) {
   // Below the limit, every miss still waits this long for its verdict, so
   // even a spread-out attack is capped at a few guesses a second.
   const FAIL_DELAY_MS = 250;
-  const authFails = new Map<string, { count: number; blockedUntil: number }>();
+  /*
+   * The brute-force lockout, keyed by DOOR and address.
+   *
+   * Two properties this has to hold, both learned from a security review:
+   *
+   * Per DOOR, not shared. The desk PIN, the awards code and the settings
+   * code each get their own counter. A correct PIN on one door clears only
+   * that door: a shared counter (cleared on any success) let a desk-PIN
+   * holder walk the four-digit awards code four guesses at a time, resetting
+   * the count with their own PIN between rounds, and the whole point of the
+   * awards tier is that the desk crew cannot reach a winner.
+   *
+   * In-flight attempts count toward the limit. The async doors read the
+   * request body with `await` between the block check and the failure
+   * record, so a burst of concurrent requests all cleared the check while
+   * the counter was still zero and every four-digit code fell in a single
+   * round trip. Reserving a slot synchronously, before any await, makes
+   * concurrent attempts see one another: FAIL_LIMIT of them can be in
+   * flight at once, and no more.
+   */
+  const authFails = new Map<string, { count: number; blockedUntil: number; inflight: number }>();
+  const failKey = (door: string, addr: string): string => `${door}\u0000${addr}`;
 
-  const authBlocked = (addr: string): boolean =>
-    (authFails.get(addr)?.blockedUntil ?? 0) > Date.now();
+  const authBlocked = (addr: string, door = 'desk'): boolean => {
+    const rec = authFails.get(failKey(door, addr));
+    if (!rec) return false;
+    return rec.blockedUntil > Date.now() || rec.count + rec.inflight >= FAIL_LIMIT;
+  };
+
+  /** Reserve a guessing slot, SYNCHRONOUSLY, before any await. Every reserve
+   *  is resolved by exactly one of noteAuthFail / noteAuthPass / authRelease. */
+  const authReserve = (addr: string, door = 'desk'): void => {
+    const k = failKey(door, addr);
+    const rec = authFails.get(k) ?? { count: 0, blockedUntil: 0, inflight: 0 };
+    rec.inflight += 1;
+    authFails.set(k, rec);
+  };
+
+  /** Drop a reservation without counting it: a malformed body is the caller's
+   *  mistake, not a wrong code, so it must not burn a guess. */
+  const authRelease = (addr: string, door = 'desk'): void => {
+    const rec = authFails.get(failKey(door, addr));
+    if (rec) rec.inflight = Math.max(0, rec.inflight - 1);
+  };
+
+  /** A correct code: clear THIS door's failures. Never a cross-door reset. */
+  const noteAuthPass = (addr: string, door = 'desk'): void => {
+    authFails.delete(failKey(door, addr));
+  };
 
   /**
    * Constant-time PIN comparison.
@@ -333,16 +394,20 @@ export function startServer(opts: ServerOpts) {
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
-  function noteAuthFail(addr: string): void {
-    const rec = authFails.get(addr) ?? { count: 0, blockedUntil: 0 };
+  function noteAuthFail(addr: string, door = 'desk'): void {
+    const k = failKey(door, addr);
+    const rec = authFails.get(k) ?? { count: 0, blockedUntil: 0, inflight: 0 };
+    // Drop the reservation the async doors took; the sync paths (header PIN,
+    // WS) never reserved, so the clamp keeps this safe for them too.
+    rec.inflight = Math.max(0, rec.inflight - 1);
     rec.count += 1;
     if (rec.count >= FAIL_LIMIT) {
       const ms = Math.min(LOCKOUT_BASE_MS * 2 ** (rec.count - FAIL_LIMIT), LOCKOUT_MAX_MS);
       rec.blockedUntil = Date.now() + ms;
-      console.warn(`[auth] ${addr} locked out for ${Math.round(ms / 1000)}s ` +
-        `after ${rec.count} failed PINs`);
+      console.warn(`[auth] ${door} door: ${addr} locked out for ${Math.round(ms / 1000)}s ` +
+        `after ${rec.count} failed attempts`);
     }
-    authFails.set(addr, rec);
+    authFails.set(k, rec);
   }
 
   /**
@@ -468,6 +533,9 @@ export function startServer(opts: ServerOpts) {
         if (authBlocked(addr)) {
           return json(res, 429, { error: 'Too many wrong PINs. Wait a minute, then try again.' });
         }
+        // Reserve the slot HERE, synchronously, before the body await: a
+        // concurrent flood must not all pass the block check above.
+        authReserve(addr);
         // Malformed JSON is the caller's mistake, not a server error: answer
         // 400 instead of letting the parse throw into the generic 500 handler.
         let body: { pin?: string };
@@ -475,6 +543,7 @@ export function startServer(opts: ServerOpts) {
           body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
             { pin?: string };
         } catch (err) {
+          authRelease(addr);
           if (err instanceof SyntaxError) {
             return json(res, 400, { error: 'Body must be JSON, like {"pin":"1234"}.' });
           }
@@ -487,7 +556,7 @@ export function startServer(opts: ServerOpts) {
           await new Promise<void>(r => setTimeout(r, FAIL_DELAY_MS));
           return json(res, 401, { error: 'That PIN was not accepted.' });
         }
-        authFails.delete(addr);
+        noteAuthPass(addr);
         res.setHeader('Set-Cookie',
           `${AUTH_COOKIE}=${SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
         return json(res, 200, { ok: true });
@@ -538,9 +607,16 @@ export function startServer(opts: ServerOpts) {
       // Open, because every QR code and every pit monitor needs it, and it
       // discloses only what the network already shows.
       if (path === '/api/urls') {
+        // The field feed URL is served on this OPEN route (the pit-monitor
+        // kiosk cannot type a PIN), so any credential embedded in it, like an
+        // IP camera's rtsp://user:pass@host, would reach every phone in the
+        // gym. Strip the userinfo before echoing: a credential-free stream
+        // (a YouTube live URL, a plain MJPEG) is unchanged, and a credentialed
+        // camera should be reached through a credential-free proxy rather
+        // than by broadcasting its password.
         return json(res, 200, {
           base: lanBase,
-          fieldStream: config?.kiosk?.fieldStreamUrl ?? '',
+          fieldStream: stripUserinfo(config?.kiosk?.fieldStreamUrl ?? ''),
         });
       }
 
@@ -841,7 +917,7 @@ export function startServer(opts: ServerOpts) {
       // attacker does not get a fresh budget per door), same failure delay.
       if (path === '/api/awards/auth' && req.method === 'POST') {
         const addr = req.socket.remoteAddress ?? 'unknown';
-        if (authBlocked(addr)) {
+        if (authBlocked(addr, 'ja')) {
           return json(res, 429, { error: 'Too many wrong codes. Wait a minute, then try again.' });
         }
         if (!JA_PIN) {
@@ -849,19 +925,21 @@ export function startServer(opts: ServerOpts) {
             error: 'No separate awards code is set on this desk. The ordinary PIN covers awards.',
           });
         }
+        authReserve(addr, 'ja');
         let body: { pin?: string };
         try {
           body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as { pin?: string };
         } catch {
+          authRelease(addr, 'ja');
           return json(res, 400, { error: 'Body must be JSON, like {"pin":"1234"}.' });
         }
         if (!safeEqual(String(body.pin ?? ''), JA_PIN)) {
-          noteAuthFail(addr);
+          noteAuthFail(addr, 'ja');
           console.warn(`[awards] rejected JA code attempt from ${addr}`);
           await new Promise<void>(r => setTimeout(r, FAIL_DELAY_MS));
           return json(res, 401, { error: 'That code was not accepted.' });
         }
-        authFails.delete(addr);
+        noteAuthPass(addr, 'ja');
         res.setHeader('Set-Cookie',
           `${JA_COOKIE}=${JA_SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
         return json(res, 200, { ok: true });
@@ -871,7 +949,7 @@ export function startServer(opts: ServerOpts) {
       // as the JA door above.
       if (path === '/api/setup/auth' && req.method === 'POST') {
         const addr = req.socket.remoteAddress ?? 'unknown';
-        if (authBlocked(addr)) {
+        if (authBlocked(addr, 'setup')) {
           return json(res, 429, { error: 'Too many wrong codes. Wait a minute, then try again.' });
         }
         if (!SETUP_PIN) {
@@ -879,19 +957,21 @@ export function startServer(opts: ServerOpts) {
             error: 'No separate settings code is set on this desk. The ordinary PIN covers settings.',
           });
         }
+        authReserve(addr, 'setup');
         let body: { pin?: string };
         try {
           body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as { pin?: string };
         } catch {
+          authRelease(addr, 'setup');
           return json(res, 400, { error: 'Body must be JSON, like {"pin":"1234"}.' });
         }
         if (!safeEqual(String(body.pin ?? ''), SETUP_PIN)) {
-          noteAuthFail(addr);
+          noteAuthFail(addr, 'setup');
           console.warn(`[setup] rejected settings code attempt from ${addr}`);
           await new Promise<void>(r => setTimeout(r, FAIL_DELAY_MS));
           return json(res, 401, { error: 'That code was not accepted.' });
         }
-        authFails.delete(addr);
+        noteAuthPass(addr, 'setup');
         res.setHeader('Set-Cookie',
           `${SETUP_COOKIE}=${SETUP_SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
         return json(res, 200, { ok: true });
@@ -1978,7 +2058,7 @@ ${sections}</body></html>`;
         const ok = !!REMOTE_PIN && safeEqual(String(msg.pin ?? ''), REMOTE_PIN);
         if (ok) {
           authed.add(ws);
-          authFails.delete(addr);
+          noteAuthPass(addr);
           send(ws, { t: 'auth', ok: true });
           return;
         }

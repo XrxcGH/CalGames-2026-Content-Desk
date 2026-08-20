@@ -95,6 +95,7 @@ export class Vitals {
     const results = await Promise.allSettled([
       this.#disk(), this.#recorder(), this.#obs(), this.#audioInputs(),
       this.#field(), this.#publish(), this.#house(), this.#coverage(),
+      this.#codes(),
     ]);
     for (const r of results) {
       if (r.status === 'fulfilled') checks.push(...r.value);
@@ -201,6 +202,49 @@ export class Vitals {
       blocking: true,
       detail: bad || `${sources.length} source(s) rolling`,
       ...(bad ? { fix: 'Check the capture device is still plugged in, then restart the desk.' } : {}),
+    }];
+  }
+
+  /**
+   * The access codes, and whether any still ships as its factory default.
+   *
+   * The doors check is the forcing function: the codes ship with working
+   * defaults so a practice run works out of the box, but a default awards
+   * code is a public one (it is in the repo and the handbook), and the
+   * awards tier exists to keep winners secret until the ceremony. A default
+   * left in place at a real event is a spoiler leak, and this is the one
+   * place someone looks before doors and asks "is this ready".
+   *
+   * Resolved exactly as the server resolves them (env var, then config, then
+   * the shipped default), so this reports what is actually live.
+   */
+  #codes(): Vital[] {
+    const cfg = this.#d.config;
+    const desk = process.env['REMOTE_PIN'] ?? '0864';
+    const ja = (process.env['JA_PIN'] ?? cfg.awards?.pin ?? '1357').trim();
+    const setup = (process.env['SETUP_PIN'] ?? cfg.setup?.pin ?? '4567').trim();
+    const onDefault: string[] = [];
+    if (desk === '0864') onDefault.push('desk PIN');
+    if (ja === '1357') onDefault.push('awards code');
+    if (setup === '4567') onDefault.push('settings code');
+    if (!onDefault.length) {
+      return [{ id: 'codes', label: 'Access codes', level: 'ok',
+        detail: 'all three changed from the shipped defaults' }];
+    }
+    // A WARNING, not a blocker: a kitchen-table practice run is on defaults by
+    // design and must not read as a broken event, but a real operator running
+    // the doors check sees the amber and the reason. The awards code is called
+    // out by name because it is the one whose default leaks spoilers.
+    const leaksSpoilers = onDefault.includes('awards code');
+    return [{
+      id: 'codes', label: 'Access codes', level: 'warn',
+      detail: `still on the shipped default: ${onDefault.join(', ')}. `
+        + (leaksSpoilers
+          ? 'Anyone with a copy of this software knows the awards code, so it '
+            + 'leaks winners before the ceremony. Change it for a real event.'
+          : 'Anyone with a copy of this software knows these. Change them for a real event.'),
+      fix: 'Set REMOTE_PIN, and awards.pin / setup.pin in config.json, to '
+        + 'codes chosen for this event.',
     }];
   }
 
