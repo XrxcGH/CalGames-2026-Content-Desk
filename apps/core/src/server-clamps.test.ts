@@ -141,7 +141,7 @@ test('the three codes open three doors, and none opens another\'s', async () => 
     // The desk session (gate off via REMOTE_PIN='') cannot read settings.
     const deskRead = await fetch(`${base}/api/setup`);
     assert.equal(deskRead.status, 403);
-    assert.match((await deskRead.json()).error, /settings code/);
+    assert.match(((await deskRead.json()) as { error: string }).error, /settings code/);
 
     // The settings code unlocks /api/setup...
     const auth = await fetch(`${base}/api/setup/auth`, {
