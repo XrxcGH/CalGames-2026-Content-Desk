@@ -54,6 +54,11 @@ input { width: 100%; box-sizing: border-box; }
     <h1>Event settings</h1>
     <span class="hint">The content half of config.json, edited live. Credentials stay in the file.</span>
     <span class="spacer"></span>
+    <!-- This session lasts sixteen hours on a laptop that gets passed between
+         volunteers, and the route to end it already existed and was reachable
+         from nowhere. The awards tablet has had this button all along, for the
+         same reason. -->
+    <button class="btn" id="lock" type="button" hidden>Lock this page</button>
   </header>
 
   <section id="gate">
@@ -171,7 +176,25 @@ let setupDraft = null;
 function show(unlocked) {
   $('gate').hidden = unlocked;
   $('editors').hidden = !unlocked;
+  $('lock').hidden = !unlocked;
 }
+
+/*
+ * Lock the page again.
+ *
+ * POST /api/setup/signout has always existed and nothing on this page reached
+ * it, so the only way to end a session was to restart the desk. The session
+ * lasts sixteen hours, on a laptop that gets passed between volunteers, and
+ * this page edits the event's content: the award list is held back from it
+ * now, but the sponsor rotation, the run of show and the ranking-point
+ * thresholds are all here.
+ */
+$('lock').onclick = async () => {
+  try { await fetch('/api/setup/signout', { method: 'POST' }); } catch { /* going anyway */ }
+  show(false);
+  const pin = document.querySelector('#gate input');
+  if (pin) { pin.value = ''; pin.focus(); }
+};
 
 async function loadSetup() {
   try {
@@ -344,7 +367,11 @@ function paintRowEditor(box, items, fields, noun) {
     // so restoreFocus clamps to whatever row now sits at the end.
     kill.onclick = () => {
       items.splice(i, 1);
-      pendingFocus = { boxId: box.id, row: i, ctl: 'kill' };
+      // Deliberately NOT ctl: 'kill'. Landing on the next row's Remove button
+      // means the keyboard reflex that deleted this row deletes another one,
+      // which is the destructive-repeat hazard restoreFocus was rewritten to
+      // avoid. No ctl falls through to the row's first field.
+      pendingFocus = { boxId: box.id, row: i };
       paintSetupRows();
     };
     line.append(up, down, kill);

@@ -30,6 +30,23 @@ const int = (v: unknown, lo: number, hi: number, fallback: number): number => {
   return Number.isFinite(n) && n >= lo && n <= hi ? n : fallback;
 };
 
+/**
+ * Like `int`, but a number out of range is an ERROR rather than a default.
+ *
+ * Used for the ranking-point thresholds, where silently substituting a default
+ * is the worst of the three options. The settings page reports success, the
+ * typed value is gone, the PREVIOUS value is gone too, and the badges on every
+ * screen now light at a number nobody in the building agreed to. The content
+ * lead sees "Saved" and has no reason to look again.
+ */
+const intOrThrow = (v: unknown, lo: number, hi: number, label: string): number => {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < lo || n > hi) {
+    throw new Error(`${label} must be a whole number between ${lo} and ${hi}.`);
+  }
+  return n;
+};
+
 /** Slug for a list row that arrived without an id. */
 export const slug = (title: string): string =>
   title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'item';
@@ -67,9 +84,11 @@ const SANITIZERS: Record<string, (v: unknown) => unknown> = {
   game(v: unknown) {
     const o = (v ?? {}) as Record<string, unknown>;
     return {
-      rpEnergizedFuel: int(o['rpEnergizedFuel'], 0, 10_000, 100),
-      rpSuperchargedFuel: int(o['rpSuperchargedFuel'], 0, 10_000, 360),
-      rpTraversalTower: int(o['rpTraversalTower'], 0, 10_000, 50),
+      // Refused by name rather than replaced by a default: these decide when
+      // a ranking-point badge lights on every screen in the building.
+      rpEnergizedFuel: intOrThrow(o['rpEnergizedFuel'], 0, 10_000, 'Energized fuel'),
+      rpSuperchargedFuel: intOrThrow(o['rpSuperchargedFuel'], 0, 10_000, 'Supercharged fuel'),
+      rpTraversalTower: intOrThrow(o['rpTraversalTower'], 0, 10_000, 'Traversal tower'),
     };
   },
   kiosk(v: unknown) {
@@ -97,7 +116,17 @@ const SANITIZERS: Record<string, (v: unknown) => unknown> = {
       // would make the broadcast depend on venue internet mid-ceremony.
       // "//host/x" is off-origin too (protocol-relative), so one leading
       // slash exactly.
-      const logo = line(r['logo'], 200);
+      // Normalised rather than discarded. A path with no scheme and no leading
+      // slash is the spelling the section's own hint printed
+      // ("media/sponsors/..."), and it was silently dropped: the sponsor saved,
+      // reported success, and aired with no logo. Off-origin is still refused
+      // below, because a logo fetched from the internet makes the broadcast
+      // depend on venue Wi-Fi mid-ceremony.
+      const logoRaw = line(r['logo'], 200);
+      const logo = logoRaw
+        && !/^[a-z]+:/i.test(logoRaw) && !logoRaw.startsWith('//') && !logoRaw.startsWith('/')
+        ? `/${logoRaw}`
+        : logoRaw;
       list.push({
         id, name,
         ...(SPONSOR_TIERS.has(tier) ? { tier: tier as SponsorPlan['tier'] } : {}),

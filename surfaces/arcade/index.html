@@ -414,7 +414,16 @@ function paint(s) {
   const gp = s.gp;
   box('gp', !!gp && boxes.gp);
   if (gp) {
-    $('gpName').textContent = `${gp.name} · race ${Math.min(gp.races.length + 1, gp.raceCount)} of ${gp.raceCount}`;
+    /*
+     * The clamp says what it means. This header labels the race about to run,
+     * and Math.min pinned it at the last one, so a finished grand prix sat on
+     * air reading "race 4 of 4" for as long as the standings were up: the
+     * room was told a race was coming that had already been run.
+     */
+    const done = gp.races.length >= gp.raceCount;
+    $('gpName').textContent = done
+      ? `${gp.name} · final · ${gp.raceCount} races`
+      : `${gp.name} · race ${gp.races.length + 1} of ${gp.raceCount}`;
     // Eight rows is as far as the panel can hang at broadcast type before it
     // reaches the game's own HUD along the bottom of the capture.
     $('gpRows').innerHTML = s.standings.slice(0, 8).map((row, i) => `

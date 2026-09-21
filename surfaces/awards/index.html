@@ -204,6 +204,13 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
     <p class="err" id="gateErr" hidden role="status"></p>
   </div>
 
+  <!-- A confirmation that outlives the repaint which follows it. Each award
+       card carries its own note, and staging a winner reloads the whole list,
+       so "Loaded" was written onto a node that was destroyed milliseconds
+       later: the one sentence telling the Judge Advisor the winner is in was
+       never actually seen. This line sits outside #list, so nothing the
+       reload does can touch it. -->
+  <p class="ok-line" id="pageNote" role="status" hidden></p>
   <div id="list" hidden></div>
 
 <script type="module">
@@ -401,6 +408,16 @@ function emptyCard() {
   return card;
 }
 
+/** Say something on the page-level line, and let it retire on its own. */
+let pageNoteTimer = null;
+function pageSay(text) {
+  const el2 = $('pageNote');
+  el2.textContent = text;
+  el2.hidden = false;
+  clearTimeout(pageNoteTimer);
+  pageNoteTimer = setTimeout(() => { el2.hidden = true; el2.textContent = ''; }, 12_000);
+}
+
 function awardCard(a, order, lastInDay) {
   const card = el('div', 'card aw-row');
   const note = el('p');
@@ -485,9 +502,11 @@ function awardCard(a, order, lastInDay) {
         try {
           await api({ action: 'stage', id: a.id, winner: winner.value.trim(),
             team: Number(team.value) || undefined });
-          note.className = 'ok-line';
-          note.textContent = 'Loaded. Re-read it above: what is loaded is what gets revealed.';
           await load();
+          // After the reload, and on the page-level line, because `note`
+          // belongs to a card this reload has just replaced.
+          pageSay(`Loaded for ${a.title}. Re-read it above: what is loaded is `
+            + 'what gets revealed.');
         } catch (err) { sayErr(note, err); }
       };
       row.append(winner, team, save);

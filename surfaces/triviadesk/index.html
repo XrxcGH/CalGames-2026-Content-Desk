@@ -62,6 +62,8 @@ input:focus { outline: none; border-color: var(--accent); }
    the host must read at a glance, so this uses the lightened console red the
    other dark surfaces use. */
 #status[data-err] { color: var(--st-bad-text); }
+/* The question bank's own voice, same treatment. */
+#qState[data-err] { color: var(--st-bad-text); }
 /* ---- question bank editor ---- */
 #bank { display: flex; flex-direction: column; gap: 8px; }
 .qrow { display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; align-items: center;
@@ -517,7 +519,7 @@ async function bankAction(act, i, bank) {
       // wording they wrote, so it asks first.
       if (!confirm(`Delete "${bank[i].text}"?`)) return;
       await post('question/remove', { index: i });
-      say('Question deleted.');
+      bankSay('Question deleted.');
     } else if (act === 'edit') {
       editing = i;
       const q = bank[i];
@@ -531,7 +533,22 @@ async function bankAction(act, i, bank) {
       return;
     }
     await loadBank();
-  } catch (e) { say(e.message, true); }
+  } catch (e) { bankSay(e.message, true); }
+}
+
+/**
+ * The question bank answers in its own section.
+ *
+ * It used to report through #status, which lives in the Now panel at the top
+ * of the page, while the add and edit form two inches away used #qState. So
+ * the same panel spoke in two places: a host who moved a question and hit the
+ * store's refusal ("That question is on the screen right now") read nothing
+ * where they were looking, and the explanation appeared next to the live
+ * question instead, where it reads as a comment on the round in progress.
+ */
+function bankSay(msg, isErr = false) {
+  $('qState').textContent = msg;
+  $('qState').toggleAttribute('data-err', isErr);
 }
 
 function clearForm() {

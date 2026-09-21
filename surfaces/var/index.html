@@ -332,6 +332,36 @@ async function grab() {
 
 function fail(message) { $('err').textContent = message; }
 
+/**
+ * Seek straight to a wall time, for a moment that carries no match clock.
+ *
+ * grab() maps a match clock onto a wall time and posts that; this is the same
+ * request with the mapping already done.
+ */
+async function grabAt(atMs) {
+  if (busy) return;
+  busy = true;
+  $('err').textContent = '';
+  try {
+    const res = await fetch('/api/frame', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sourceId: $('src').value, atMs: Math.round(atMs), send: false }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    $('viewer').innerHTML = `<img alt="Flagged moment" src="${body.url}?t=${Date.now()}">`;
+    shownAt = null;
+    $('viewer').dataset.stale = 'false';
+    $('staleNote').hidden = true;
+    $('atSub').textContent = 'flagged moment, outside the match clock';
+  } catch (err) {
+    fail(err.message);
+  } finally {
+    busy = false;
+  }
+}
+
 // ---- markers --------------------------------------------------------------
 let lastMarksSig = null;
 // "0:07" alone is ambiguous: auto and endgame both count down through it.
@@ -354,7 +384,7 @@ async function loadMarkers() {
     return;
   }
   $('marks').innerHTML = marks.map(m => `
-    <button class="mark" data-p="${m.priority}" data-c="${m.matchClock ?? ''}">
+    <button class="mark" data-p="${m.priority}" data-c="${m.matchClock ?? ''}" data-ts="${m.ts ?? ''}">
       <span class="c">${m.matchClock === null ? '--' : clockLabel(m.matchClock)}</span>
       <span class="k">${m.matchClock === null ? '' : esc(phaseWord(m.matchClock))}</span>
       <span class="l">${esc(m.label)}</span>
@@ -362,7 +392,21 @@ async function loadMarkers() {
     </button>`).join('');
   for (const b of document.querySelectorAll('.mark')) {
     b.onclick = () => {
-      if (b.dataset.c === '') return;
+      /*
+       * A moment flagged outside a match has no match clock, and these rows
+       * rendered as ordinary clickable buttons that did nothing at all when
+       * the referee clicked them. They still have a wall time, which is what
+       * the seek actually needs: grab() only uses the match clock to work one
+       * out. Seek by that instead of refusing in silence.
+       */
+      if (b.dataset.c === '') {
+        const ts = Number(b.dataset.ts);
+        if (!Number.isFinite(ts) || ts <= 0) {
+          return fail('That moment was flagged without a time, so there is '
+            + 'nothing to seek to.');
+        }
+        return void grabAt(ts);
+      }
       setAt(Number(b.dataset.c));
       void grab();
     };

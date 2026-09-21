@@ -233,6 +233,8 @@ import { connect } from '/shared/desk-client.js';
 const $ = id => document.getElementById(id);
 let lastState = null;
 let lastRosterSig = null;
+/** The standings markup last painted, so an unchanged poll does not rebuild. */
+let lastGpHTML = null;
 const desk = connect('arcadedesk');
 
 desk.on('link', up => {
@@ -395,14 +397,36 @@ function paint(s) {
       'when you press End set.</p>';
   }
 
+  /*
+   * Rebuilt only when the markup actually changes, and with the keyboard put
+   * back where it was.
+   *
+   * innerHTML replaces every child even for an identical string, and this
+   * runs on every arcade snapshot plus a 30-second reconciliation poll. A
+   * scorer tabbing down the racers to build a finish order lost their place
+   * to any unrelated event, which during a grand prix is constant: the whole
+   * point of these buttons is that they are clicked or Entered in sequence.
+   */
   const gp = s.gp;
-  $('gpRows').innerHTML = gp
+  const gpHTML = gp
     ? s.standings.map((row, i) =>
         `<button type="button" data-racer="${escapeHtml(row.player.name)}" title="Add to the finish order">` +
         `<span class="mono">${i + 1}</span>` +
         `<span>${escapeHtml(row.player.name)}${row.player.team ? ' · ' + row.player.team : ''}</span>` +
         `<span class="mono">${row.points} pts · ${row.positions.join(', ') || '-'}</span></button>`).join('')
     : '<p class="hint">No grand prix running.</p>';
+  if (gpHTML !== lastGpHTML) {
+    lastGpHTML = gpHTML;
+    const active = document.activeElement;
+    const heldRacer = active && $('gpRows').contains(active) ? active.dataset.racer : null;
+    $('gpRows').innerHTML = gpHTML;
+    if (heldRacer) {
+      const esc = window.CSS && CSS.escape ? CSS.escape(heldRacer) : heldRacer;
+      const back = $('gpRows').querySelector(`[data-racer="${esc}"]`)
+        ?? $('gpRows').querySelector('button');
+      if (back) back.focus();
+    }
+  }
   // The order field's placeholder says "click racers below," and it means it: each click
   // (or Enter/Space, since these are real buttons) appends that racer to the finish-order field.
   for (const rowEl of document.querySelectorAll('#gpRows button[data-racer]')) {

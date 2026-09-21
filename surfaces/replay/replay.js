@@ -144,6 +144,16 @@ function paintMarkers() {
   // "red 8 fuel burst 1:36" in comfortable type, clicked it, and nothing
   // happened; the real target needed aiming under a 20-second replay window.
   // Each row frames the same window the track sliver does.
+  /*
+   * Keep the keyboard where it was. This rebuilds on every incoming marker,
+   * and markers arrive while the operator is working the list: the replay
+   * console is used hardest in the sixty seconds after a match, which is
+   * exactly when the desk is still stamping marks. Losing focus mid-list
+   * means starting the tab walk again from the top of the console.
+   */
+  const active = document.activeElement;
+  const heldMark = active && $('markers').contains(active) ? active.dataset.ts : null;
+
   $('markers').replaceChildren(...(markers.length
     ? [...markers].reverse().map(m => {
       const row = document.createElement('button');
@@ -158,6 +168,8 @@ function paintMarkers() {
       clock.className = 'mono';
       clock.textContent = m.matchClock === null ? '-' : clockDisplay(m.matchClock);
       row.append(label, clock);
+      // A stable identity for the focus restore above. markers.ts stamps ts.
+      if (m.ts !== undefined && m.ts !== null) row.dataset.ts = String(m.ts);
       if (m.matchClock === null || m.matchClock === undefined) {
         row.disabled = true;
       } else {
@@ -170,6 +182,13 @@ function paintMarkers() {
       i.textContent = 'None yet. They appear as the match runs.';
       return i;
     })()]));
+
+  if (heldMark) {
+    const esc = window.CSS && CSS.escape ? CSS.escape(heldMark) : heldMark;
+    const back = $('markers').querySelector(`[data-ts="${esc}"]:not([disabled])`)
+      ?? $('markers').querySelector('button:not([disabled])');
+    if (back) back.focus();
+  }
 }
 
 async function loadMarkers() {
