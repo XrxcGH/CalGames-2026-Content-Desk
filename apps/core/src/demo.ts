@@ -185,10 +185,51 @@ export interface DemoExtras {
   trivia?: TriviaStore;
 }
 
-export function startDemo(bus: EventBus, extras: DemoExtras = {}): void {
-  console.log('[demo] simulated match loop running');
-  let matchNumber = 41;
+/**
+ * Fill every surface with believable sample data, once, and stop.
+ *
+ * The same seed `startDemo` lays down before its match loop, plus a loaded and
+ * running match with a score on it, so that a person opening /s/program or a
+ * pit monitor during a beta has something to look at. A desk with no field
+ * attached and no match loaded draws exactly nothing, which reads as broken
+ * rather than as idle, and "does the overlay work" is the first question
+ * anybody testing this asks.
+ *
+ * Deliberately NOT the match loop. A loop is the right thing when you are
+ * building graphics and want to watch the whole cycle; it is the wrong thing
+ * when you are showing somebody the overlay and want it to hold still.
+ *
+ * Every event carries DEMO_SOURCE, so nothing here can pass for field data in
+ * the event log, in a publish decision, or in a confidence check: the score
+ * arrives estimated and the graphics draw it outlined, which is the overlay's
+ * existing way of saying "this is a guess".
+ */
+export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
+  const matchNumber = 42;
+  seedStatic(bus, extras, matchNumber);
 
+  bus.emit({
+    type: 'match.loaded', source: DEMO_SOURCE,
+    payload: {
+      id: `q${matchNumber}`,
+      displayName: `Qualification ${matchNumber}`,
+      red: RED, blue: BLUE,
+    },
+  });
+  bus.emit({ type: 'match.start', source: DEMO_SOURCE });
+  bus.emit({
+    type: 'score.realtime', source: DEMO_SOURCE, confidence: 'estimated',
+    payload: {
+      red: { autoFuel: 42, teleopFuel: 66, autoTower: 0, teleopTower: 30, fouls: 0 },
+      blue: { autoFuel: 36, teleopFuel: 58, autoTower: 15, teleopTower: 20, fouls: 5 },
+    },
+  });
+  console.log('[sample] every surface seeded with sample data, tagged '
+    + `"${DEMO_SOURCE}" so it cannot pass for the field`);
+}
+
+/** The parts that are the same whether this is a one-shot seed or the loop. */
+function seedStatic(bus: EventBus, extras: DemoExtras, matchNumber: number): void {
   bus.emit({
     type: 'rankings.updated', source: DEMO_SOURCE,
     payload: { rankings: DEMO_RANKINGS, highestPlayedMatch: `Q${matchNumber}` },
@@ -209,6 +250,12 @@ export function startDemo(bus: EventBus, extras: DemoExtras = {}): void {
     console.warn('[demo] trivia seed failed:', (err as Error).message);
   }
   seedSelection(bus);
+}
+
+export function startDemo(bus: EventBus, extras: DemoExtras = {}): void {
+  console.log('[demo] simulated match loop running');
+  let matchNumber = 41;
+  seedStatic(bus, extras, matchNumber);
 
   const loop = async (): Promise<void> => {
     for (;;) {

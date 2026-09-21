@@ -12,7 +12,7 @@ import os from 'node:os';
 import { EventBus, logPathFor } from './bus.ts';
 import { MediaLibrary } from './media.ts';
 import { startServer } from './server.ts';
-import { startDemo } from './demo.ts';
+import { seedSampleState, startDemo } from './demo.ts';
 import { attachMarkers } from './markers.ts';
 import { attachPace } from './pace.ts';
 import { CheesyAdapter } from './ingest/cheesy/adapter.ts';
@@ -708,6 +708,9 @@ const server = startServer({
   bus, media, root: ROOT, port, host, recorder, clips, publish, config, cheesy, cues, obs,
   arcade, trivia, audio, audioClips, profiles, coverage, vitals, cardLedger,
   rundown, sponsors, awards, slides, lanBase, content,
+  // For the Sample data button on the desk. The server refuses to call it
+  // while the field bridge is up; see the route.
+  seedSample: () => seedSampleState(bus, { arcade, trivia }),
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).

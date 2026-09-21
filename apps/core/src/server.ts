@@ -151,6 +151,13 @@ export interface ServerOpts {
   /** Desk-editable event content, overlaid on config.json. */
   content?: EventContent | null;
   /**
+   * Fill every surface with sample data, once. See seedSampleState.
+   *
+   * Passed in rather than imported so the server has no opinion about where
+   * the data comes from, and so a desk built without it simply answers 503.
+   */
+  seedSample?: (() => void) | null;
+  /**
    * How long the first brute-force lockout lasts, in milliseconds.
    *
    * Injected rather than read from the environment on purpose: a security
@@ -167,7 +174,7 @@ export function startServer(opts: ServerOpts) {
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
-          lanBase = null, content = null, lockoutBaseMs } = opts;
+          lanBase = null, content = null, seedSample = null, lockoutBaseMs } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -1525,6 +1532,43 @@ export function startServer(opts: ServerOpts) {
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }
+      }
+
+      /*
+       * Fill the surfaces with sample data, for somebody testing this thing.
+       *
+       * A desk with no field attached and no match loaded draws nothing at
+       * all, which reads as broken rather than as idle, so "do the overlays
+       * even work" is the first question anyone evaluating this asks and the
+       * honest answer was "start it again with --demo". That means a restart,
+       * and a continuous match loop when all they wanted was to look at the
+       * graphic.
+       *
+       * Refused outright while the field bridge is up. That is the one signal
+       * that says this is a real event rather than somebody's desk, and
+       * putting invented teams on a projector in a gym is not a mistake worth
+       * leaving available. The events are tagged as demo either way, so the
+       * score renders outlined and the event log names the source.
+       */
+      if (path === '/api/sample' && req.method === 'POST') {
+        if (!seedSample) {
+          return json(res, 503, { error: 'Sample data is not available on this desk.' });
+        }
+        if (cheesy) {
+          return json(res, 409, {
+            error: 'The field bridge is running, so this desk is at an event. '
+              + 'Sample data would put invented teams on every screen. Stop the '
+              + 'bridge first if you really are only testing.',
+          });
+        }
+        console.warn('[sample] sample data requested from the desk');
+        seedSample();
+        return json(res, 200, {
+          ok: true,
+          note: 'Every surface now has sample data. It is tagged as demo, so '
+            + 'scores draw outlined and nothing here can be published. Load a '
+            + 'real match, or restart the desk, to clear it.',
+        });
       }
 
       // ---- house audio -----------------------------------------------------

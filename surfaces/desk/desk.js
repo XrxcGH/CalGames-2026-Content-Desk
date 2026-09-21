@@ -489,6 +489,33 @@ setInterval(() => {
   }
 }, 5000);
 
+/*
+ * Sample data, for somebody testing the desk rather than running a show.
+ *
+ * Confirmed before it fires: it puts invented team numbers on every screen in
+ * the building, and the one place that must never happen is the place where
+ * the screens are pointed at an audience. The server refuses outright while
+ * the field bridge is up, which is the real guard; this is the one that stops
+ * an idle click.
+ */
+$('sampleGo').onclick = async () => {
+  if (!confirm('Fill every screen with invented teams and scores? '
+    + 'This is for testing a monitor or showing somebody the graphics. '
+    + 'Do not do it during the show.')) return;
+  $('sampleGo').disabled = true;
+  setText($('sampleNote'), 'Seeding...');
+  try {
+    const res = await fetch('/api/sample', { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    setText($('sampleNote'), body.note ?? 'Done.');
+  } catch (err) {
+    setText($('sampleNote'), err.message);
+  } finally {
+    $('sampleGo').disabled = false;
+  }
+};
+
 // ---- telestrator -----------------------------------------------------------
 // The placeholder is a sample, not a default. It used to be the fallback, so
 // sending a frame before typing anything put "Analysis - Priya Raman" on

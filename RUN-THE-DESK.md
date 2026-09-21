@@ -729,6 +729,23 @@ the field and the drive teams have their setup clock. It clears itself the
 moment the match starts. The label and minutes boxes run any other countdown:
 meeting starts, doors, end of lunch.
 
+### Seeing what the screens look like, before there is a show
+
+A desk with no field attached and no match loaded draws nothing at all. Every
+overlay is empty, which looks broken and is not: there is simply nothing to
+report yet.
+
+For setting a pit monitor up, aiming a projector, or showing somebody what the
+broadcast looks like, the desk console has **Sample data** in the field-down
+kit. One press fills every screen with invented teams, scores, rankings and
+slides. It is for testing, not for the show:
+
+- Everything it puts up is tagged as sample, so scores draw **outlined**, the
+  same way a desk-typed guess does, and none of it can be published.
+- The button refuses outright while the field bridge is running, because a
+  desk talking to the field is a desk at an event.
+- Load a real match, or restart the desk, and it is gone.
+
 ### Show automation
 
 Near the top of the console, under **Show automation**, is a list of cues. A

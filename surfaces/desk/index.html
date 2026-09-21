@@ -880,6 +880,30 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="loadHint" aria-live="polite"></p>
       </section>
 
+<section id="sec-sample">
+        <h2>Sample data <span class="hint">for testing, not for the show</span></h2>
+        <!--
+          A desk with no field attached and no match loaded draws nothing at
+          all, on every screen. That reads as broken rather than as idle, so
+          the first question anyone evaluating this asks is whether the
+          overlays work, and the only answer used to be "start it again with
+          --demo", which means a restart and a match loop running underneath
+          you while you try to look at a still graphic.
+        -->
+        <p class="hint">Fills every screen with invented teams, scores, rankings and
+          slides so you can see what the overlays look like. For setting up a monitor,
+          showing somebody the graphics, or checking a projector. <b>Not for the
+          show.</b></p>
+        <p class="hint">Everything it emits is tagged as demo: scores draw
+          <b>outlined</b>, nothing can be published, and the event log names the source.
+          Load a real match, or restart the desk, to clear it. The button refuses
+          entirely while the field bridge is up.</p>
+        <div class="row">
+          <button class="btn" id="sampleGo">Fill the screens with sample data</button>
+        </div>
+        <p class="hint" id="sampleNote" role="status"></p>
+      </section>
+
 <section>
         <h2>Shadow scoring <span style="color:var(--st-warn)">· estimated</span></h2>
         <p class="hint">Typed scores publish at <b>estimated</b> confidence and render
