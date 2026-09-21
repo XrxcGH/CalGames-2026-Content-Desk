@@ -182,7 +182,7 @@ export function startFakeArena(opts: FakeArenaOpts) {
     order.forEach((key, i) => {
       out[key] = {
         Team: TEAMS[key],
-        Ds: { RobotLinked: i < linked, DsLinked: i < linked },
+        DsConn: { RobotLinked: i < linked, DsLinked: i < linked },
         Bypass: false,
       };
     });

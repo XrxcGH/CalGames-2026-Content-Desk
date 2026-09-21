@@ -34,13 +34,19 @@ function settle(s: AllianceScore, opponentFouls: number, t: RpThresholds): Allia
     // The field's figure wins when there is one. Everything else here is
     // derived and may be recomputed freely; this one was adopted.
     total: s.officialTotal ?? fuel + tower + opponentFouls,
-    // Scored against the live thresholds, never the defaults in REBUILT: an
-    // off-season event can move these, and a badge that lights at a number
-    // nobody is playing to is worse than no badge.
-    rp: {
+    // The field's answer when there is one. Cheesy scores the fuel bonuses on
+    // a COUNT of fuel and applies a G206 strip and a disable-at-zero rule the
+    // desk cannot see, so its booleans are not a second opinion, they are the
+    // question the desk is trying to approximate. See officialRp.
+    //
+    // Otherwise derived, against the LIVE thresholds rather than the defaults
+    // in REBUILT: an off-season event can move these, and a badge that lights
+    // at a number nobody is playing to is worse than no badge. A traversal
+    // threshold of zero means the bonus is off, not that everyone has it.
+    rp: s.officialRp ?? {
       energized: fuel >= t.energizedFuel,
       supercharged: fuel >= t.superchargedFuel,
-      traversal: tower >= t.traversalTower,
+      traversal: t.traversalTower > 0 && tower >= t.traversalTower,
     },
   };
 }
@@ -258,10 +264,19 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
        * period splits under it any less typed-in.
        */
       case 'match.score_posted': {
-        const p = (ev.payload ?? {}) as Partial<Record<Alliance, { score?: unknown }>>;
+        const p = (ev.payload ?? {}) as Partial<Record<Alliance, {
+          score?: unknown; officialRp?: AllianceScore['officialRp'];
+        }>>;
         let s: DeskState = { ...state, scorePostedAt: ev.ts, screen: auto(state, 'score') };
         let official = false;
         for (const side of ['red', 'blue'] as Alliance[]) {
+          // The committed bonuses, which are not always the last realtime
+          // frame's: a referee adjustment on the review page lands in the
+          // commit only, and a G206 added there strips all three at once.
+          const rp = p[side]?.officialRp;
+          if (rp) {
+            s = withScore(s, side, { officialRp: rp });
+          }
           const total = Number(p[side]?.score);
           if (!Number.isFinite(total)) continue;
           official = true;

@@ -10,6 +10,7 @@
  */
 
 import type { EmitInit, EventBus } from '../../bus.ts';
+import { REBUILT } from '../../types.ts';
 import type {
   Alliance, AllianceSelection, MatchInfo, RankingRow, Team, UpcomingMatch,
 } from '../../types.ts';
@@ -18,7 +19,7 @@ import {
   MatchState, MatchStatus, MatchType,
   type AllianceSelectionMessage,
   type ArenaStatusMessage, type MatchLoadMessage, type MatchTimeMessage,
-  type MatchWithResult, type RankingsResponse,
+  type MatchTimingMessage, type MatchWithResult, type RankingsResponse,
   type RealtimeScoreMessage, type ScorePostedMessage, type ScoreSummary,
 } from './protocol.ts';
 
@@ -148,6 +149,33 @@ export function mapSelection(msg: AllianceSelectionMessage): AllianceSelection {
   };
 }
 
+/**
+ * The three bonus ranking points, as the FIELD awarded them.
+ *
+ * Worth taking rather than recomputing, because the arena knows three things
+ * the desk cannot see. It scores the fuel bonuses on NumFuel, a count of
+ * fuel, where the desk only has fuel POINTS and fuel into an inactive hub
+ * scores nothing. A G206 call strips all three at once, and the desk never
+ * learns which rule a foul was for. And a traversal threshold of zero
+ * disables the tower bonus entirely, which is a setting, not a score.
+ *
+ * Null when the summary carries no opinion, which keeps the desk's own
+ * derivation alive for an operator-driven show with no field attached.
+ */
+function bonusRp(s: ScoreSummary | undefined):
+{ energized: boolean; supercharged: boolean; traversal: boolean } | null {
+  if (!s) return null;
+  const has = s.EnergizedBonusRankingPoint !== undefined
+    || s.SuperchargedBonusRankingPoint !== undefined
+    || s.TraversalBonusRankingPoint !== undefined;
+  if (!has) return null;
+  return {
+    energized: s.EnergizedBonusRankingPoint === true,
+    supercharged: s.SuperchargedBonusRankingPoint === true,
+    traversal: s.TraversalBonusRankingPoint === true,
+  };
+}
+
 interface Totals {
   autoFuel: number; teleopFuel: number; autoTower: number; teleopTower: number;
   foulsAgainst: number;
@@ -203,6 +231,9 @@ export class CheesyAdapter {
    */
   #loadedType: number | string | null = null;
   #loadedTypeOrder: number | null = null;
+  /** Non-null while the field's period lengths disagree with REBUILT. */
+  #timingMismatch: string[] | null = null;
+  #timingWarned = false;
 
   constructor(opts: CheesyAdapterOpts) {
     this.#bus = opts.bus;
@@ -357,12 +388,88 @@ export class CheesyAdapter {
       case 'scorePosted': return this.#onScorePosted(data as ScorePostedMessage);
       case 'arenaStatus': return this.#onArenaStatus(data as ArenaStatusMessage);
       case 'allianceSelection':
-        return this.#emit({
-          type: 'alliance_selection.update',
-          payload: mapSelection(data as AllianceSelectionMessage),
-        });
+        return this.#onAllianceSelection(data as AllianceSelectionMessage);
+      case 'matchTiming': return this.#onMatchTiming(data as MatchTimingMessage);
       default: return;   // lowerThird, playSound, etc.; the desk owns those
     }
+  }
+
+  // ---- field configuration ------------------------------------------------
+
+  /**
+   * The field's own period lengths, against the ones the desk is built for.
+   *
+   * The desk does not adopt these, and deliberately. REBUILT's timings are
+   * compiled into the clock, the phase labels, the replay markers, the motion
+   * lockdown and seven surfaces; quietly reinterpreting all of that from a
+   * websocket frame mid-event would turn one wrong number into a different
+   * wrong number in more places. What was missing was anybody NOTICING.
+   *
+   * So this compares and says so, once, loudly, with a vital the desk console
+   * shows. A scorekeeper shortening practice matches is a normal thing to do,
+   * and the difference between "the endgame chip is early all afternoon" and
+   * "the endgame chip is early all afternoon, and the desk said why at 9:14am"
+   * is the whole value here.
+   */
+  #onMatchTiming(msg: MatchTimingMessage): void {
+    const expected = {
+      AutoDurationSec: -REBUILT.AUTO_START,
+      TransitionShiftDurationSec: REBUILT.TRANSITION_END,
+      ShiftDurationSec: REBUILT.SHIFT_SECONDS,
+      EndgameDurationSec: REBUILT.MATCH_END - REBUILT.ENDGAME_START,
+    } as const;
+
+    const off: string[] = [];
+    for (const [key, want] of Object.entries(expected)) {
+      const got = msg[key as keyof MatchTimingMessage];
+      if (typeof got === 'number' && got !== want) {
+        off.push(`${key} is ${got}s, the desk is built for ${want}s`);
+      }
+    }
+    // PauseDurationSec has no REBUILT counterpart: the desk's clock treats
+    // teleop start as zero and never models the pause, so a change there
+    // moves nothing on air.
+    this.#timingMismatch = off.length ? off : null;
+    if (off.length && !this.#timingWarned) {
+      this.#timingWarned = true;
+      console.warn('[cheesy] the field\'s match timing does not match this desk: ' +
+        `${off.join('; ')}. Phase labels, the endgame chip, the lockdown and the ` +
+        'countdown will be wrong until they agree.');
+    }
+  }
+
+  /** Non-null while the field's periods disagree with REBUILT. For vitals. */
+  get timingMismatch(): string[] | null { return this.#timingMismatch; }
+
+  /**
+   * Alliance rosters.
+   *
+   * Cheesy writes every notifier's current value to a socket the moment it
+   * connects. allianceSelection comes from arena.AllianceSelectionAlliances,
+   * an IN-MEMORY field that is empty after any arena restart and is only
+   * repopulated when a human opens /alliance_selection in a browser, which
+   * does not fire the notifier.
+   *
+   * So an arena restart on Sunday, or any socket blip after one, delivered an
+   * empty alliance list, the reducer replaced the rosters wholesale, and the
+   * fourth alliance member disappeared from the selection board, the result
+   * card and the awards graphic for the rest of the playoffs, with nothing
+   * short of a desk restart able to bring it back.
+   *
+   * An empty list when a filled one is already held is therefore not news. It
+   * is the arena saying it has forgotten, and forgetting is not a fact about
+   * the alliances.
+   */
+  #onAllianceSelection(msg: AllianceSelectionMessage): void {
+    const next = mapSelection(msg);
+    const hasTeams = next.alliances.some(a => a.teams.length > 0);
+    const held = this.#bus.state.selection;
+    if (!hasTeams && held?.alliances.some(a => a.teams.length > 0)) {
+      console.warn('[cheesy] ignoring an empty alliance list: the arena has been ' +
+        'restarted and has not reloaded selection. Keeping the rosters we hold.');
+      return;
+    }
+    this.#emit({ type: 'alliance_selection.update', payload: next });
   }
 
   // ---- match lifecycle ----------------------------------------------------
@@ -581,14 +688,18 @@ export class CheesyAdapter {
     }
     this.#last = next;
 
-    const parts = (t: Totals) => ({
+    const parts = (t: Totals, summary: ScoreSummary | undefined) => ({
       autoFuel: t.autoFuel, teleopFuel: t.teleopFuel,
       autoTower: t.autoTower, teleopTower: t.teleopTower,
       fouls: t.foulsAgainst,
+      officialRp: bonusRp(summary),
     });
     this.#emit({
       type: 'score.realtime',
-      payload: { red: parts(next.red), blue: parts(next.blue) },
+      payload: {
+        red: parts(next.red, summaries.red),
+        blue: parts(next.blue, summaries.blue),
+      },
     });
 
     // Hub state, taken from the field rather than inferred. Cheesy reports a
@@ -688,8 +799,20 @@ export class CheesyAdapter {
     this.#emit({
       type: 'match.score_posted',
       payload: {
-        red: { score: msg.RedScoreSummary?.Score ?? 0, rp: msg.RedRankingPoints ?? 0 },
-        blue: { score: msg.BlueScoreSummary?.Score ?? 0, rp: msg.BlueRankingPoints ?? 0 },
+        red: {
+          score: msg.RedScoreSummary?.Score ?? 0,
+          rp: msg.RedRankingPoints ?? 0,
+          // The committed bonuses, which can differ from the last realtime
+          // frame: a referee adjustment on the review page lands in the
+          // commit and never in a realtime snapshot, and a G206 added there
+          // strips all three.
+          officialRp: bonusRp(msg.RedScoreSummary),
+        },
+        blue: {
+          score: msg.BlueScoreSummary?.Score ?? 0,
+          rp: msg.BlueRankingPoints ?? 0,
+          officialRp: bonusRp(msg.BlueScoreSummary),
+        },
       },
     });
     // Standings and the remaining schedule both just changed. Pull them now
@@ -713,8 +836,8 @@ export class CheesyAdapter {
       // Readiness needs a positive link: a station with no DS data yet is
       // not linked, it is unknown. "Down" stays explicit-false only, so the
       // dropped-robot marker never fires off missing data.
-      if (station?.Ds?.RobotLinked === true) { linked++; linkedNow.add(team); }
-      if (station?.Ds && station.Ds.RobotLinked === false) down.push(team);
+      if (station?.DsConn?.RobotLinked === true) { linked++; linkedNow.add(team); }
+      if (station?.DsConn && station.DsConn.RobotLinked === false) down.push(team);
     }
 
     // `down` is level state for the station-health strip and repeats on every

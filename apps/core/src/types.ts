@@ -220,12 +220,36 @@ export interface AllianceScore {
    */
   officialTotal: number | null;
   rp: { energized: boolean; supercharged: boolean; traversal: boolean };
+  /**
+   * The bonus RPs the FIELD awarded, when a field is telling us.
+   *
+   * Same shape of problem as `officialTotal`, and it matters more, because
+   * the desk's own arithmetic here is not merely a different number, it asks
+   * a different question. Cheesy Arena scores the fuel bonuses on NumFuel, a
+   * COUNT of fuel; the desk compares fuel POINTS, and fuel into an inactive
+   * hub scores nothing, so the two only agree on a match where every shot
+   * counted. The thresholds themselves are editable on the scorekeeper's
+   * settings page mid-event, and the desk reads its own copy from config.
+   *
+   * Three more things ride on the field's answer that the desk cannot see at
+   * all. A G206 call strips all three bonuses at once, and the desk knows
+   * nothing about the foul. A traversal threshold of zero DISABLES the tower
+   * bonus, where the desk's `tower >= 0` lights it permanently. And the
+   * arena's figure is the one that feeds the rankings the audience is about
+   * to read.
+   *
+   * So: adopted when present, derived when absent. Absent is the normal case
+   * for an operator-driven desk with no field, which is the whole reason the
+   * derivation stays.
+   */
+  officialRp: { energized: boolean; supercharged: boolean; traversal: boolean } | null;
 }
 
 export const emptyAllianceScore = (): AllianceScore => ({
   autoFuel: 0, teleopFuel: 0, autoTower: 0, teleopTower: 0,
   fuel: 0, tower: 0, fouls: 0, total: 0, officialTotal: null,
   rp: { energized: false, supercharged: false, traversal: false },
+  officialRp: null,
 });
 
 export interface MatchInfo {

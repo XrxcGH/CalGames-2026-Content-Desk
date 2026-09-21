@@ -347,7 +347,7 @@ export class Vitals {
       }];
     }
     const up = this.#d.bus.state.connected.cheesy;
-    return [{
+    const out: Vital[] = [{
       id: 'field', label: 'Field bridge', level: up ? 'ok' : 'warn',
       detail: up ? 'connected to Cheesy Arena' : 'not answering',
       ...(up ? {} : {
@@ -355,6 +355,29 @@ export class Vitals {
           'field host, and remember scores go on air estimated until it returns.',
       }),
     }];
+
+    /*
+     * The field's period lengths against the ones this desk is built for.
+     *
+     * Every one of them is editable on the scorekeeper's settings page, and
+     * shortening practice or filler matches is a normal thing to do at an
+     * offseason. The desk compiles its timings in, so if they diverge then
+     * the phase labels, the endgame chip, the motion lockdown, the replay
+     * markers and the on-air countdown are all quietly wrong for the rest of
+     * the day. Nothing anywhere would have said so; the arena has been
+     * sending its own numbers on every connect the whole time.
+     */
+    const off = this.#d.cheesy.timingMismatch;
+    if (off?.length) {
+      out.push({
+        id: 'field-timing', label: 'Match timing', level: 'warn',
+        detail: `the field disagrees with this desk: ${off.join('; ')}`,
+        fix: 'Either put the field back to the standard periods on its own ' +
+          'settings page, or expect the endgame chip, the lockdown and the ' +
+          'countdown to be off by that much for the rest of the day.',
+      });
+    }
+    return out;
   }
 
   async #publish(): Promise<Vital[]> {

@@ -117,19 +117,75 @@ export interface MatchLoadMessage {
   BreakNextMatchName?: string;
 }
 
+/**
+ * One driver station's slot on the field. field.AllianceStation.
+ *
+ * The connection field is DsConn, not Ds, and the stop flags are AStop and
+ * EStop, not Astop and Estop. Go emits struct field names verbatim when there
+ * are no json tags, and there are none on AllianceStation. The arena's own
+ * field monitor reads stationStatus.DsConn.RobotLinked, which is the same
+ * shape by a different name.
+ *
+ * Reading the wrong name meant every station looked like it had no DS data at
+ * all: `linked` stayed 0 and `down` stayed empty on every frame, all weekend.
+ * Three things depended on that and none of them could ever have fired. The
+ * dropped-robot replay marker, so "what happened to 846?" is never caught.
+ * The station-health strip, which showed six healthy robots with three dead.
+ * And match.armed, gated on `linked === fielded`, so the desk would never have
+ * cut to the score bar before a countdown for any match of the event.
+ */
+export interface AllianceStationStatus {
+  Team?: CheesyTeam | null;
+  DsConn?: {
+    RobotLinked?: boolean;
+    DsLinked?: boolean;
+    RadioLinked?: boolean;
+    RioLinked?: boolean;
+    /** The team plugged into the wrong station. Worth saying out loud. */
+    WrongStation?: string;
+    SecondsSinceLastRobotLink?: number;
+    BatteryVoltage?: number;
+  } | null;
+  AStop?: boolean;
+  EStop?: boolean;
+  Bypass?: boolean;
+  Ethernet?: boolean;
+}
+
 export interface ArenaStatusMessage {
   MatchId?: number;
-  AllianceStations?: Record<string, {
-    Team?: CheesyTeam | null;
-    Ds?: { RobotLinked?: boolean; DsLinked?: boolean } | null;
-    Astop?: boolean;
-    Estop?: boolean;
-    Bypass?: boolean;
-  } | null>;
+  AllianceStations?: Record<string, AllianceStationStatus | null>;
+  /**
+   * Embedded anonymously in the arena's message struct. Go names a key after
+   * an embedded non-struct type, so this arrives as "MatchState".
+   */
   MatchState?: MatchState;
   PlcIsHealthy?: boolean;
   FieldEStop?: boolean;
   IsFtaReady?: boolean;
+  CanStartMatch?: boolean;
+  /** Why the field is not ready, in the arena's own words. */
+  StartMatchConditions?: string[];
+}
+
+/**
+ * game.MatchTiming, sent whole on the `matchTiming` notifier and once to every
+ * socket on connect.
+ *
+ * Every field here is editable on the scorekeeper's /setup/settings page, and
+ * shortening practice or filler matches is a normal thing to do at an
+ * offseason. The desk compiles REBUILT's periods in, so if the field's numbers
+ * move and nothing notices, every phase label, the endgame chip, the motion
+ * lockdown, the replay markers and the on-air countdown are wrong for the rest
+ * of the day with nothing to correct them.
+ */
+export interface MatchTimingMessage {
+  AutoDurationSec?: number;
+  PauseDurationSec?: number;
+  TransitionShiftDurationSec?: number;
+  ShiftDurationSec?: number;
+  EndgameDurationSec?: number;
+  TimeoutDurationSec?: number;
 }
 
 export interface ScorePostedMessage {

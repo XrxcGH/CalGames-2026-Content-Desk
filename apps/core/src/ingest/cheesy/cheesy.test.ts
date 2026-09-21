@@ -502,6 +502,62 @@ test('an empty schedule maps to an empty deck rather than throwing', () => {
   assert.deepEqual(mapRankings({}), { highestPlayedMatch: '', rankings: [] });
 });
 
+test('the driver station field is named DsConn, and nothing else counts', () => {
+  /*
+   * field.AllianceStation, verbatim from the 2026 source:
+   *
+   *     type AllianceStation struct {
+   *         DsConn       *DriverStationConnection
+   *         TeamMatchLog *TeamMatchLog
+   *         Ethernet     bool
+   *         AStop        bool
+   *         EStop        bool
+   *         Bypass       bool
+   *         Team         *model.Team
+   *         ...
+   *     }
+   *
+   * No json tags anywhere on it, so Go emits those names verbatim, and the
+   * arena's own field monitor reads stationStatus.DsConn.RobotLinked.
+   *
+   * This file used to say `Ds`, in the parser AND in every fixture AND in the
+   * fake arena, so the tests passed against a shape the field never sends.
+   * With the real shape, `linked` stayed 0 and `down` stayed empty on every
+   * frame: the dropped-robot marker could never fire, the health strip showed
+   * six healthy robots with three dead, and match.armed is gated on
+   * `linked === fielded`, so the desk would never have cut to the score bar
+   * before a countdown all weekend.
+   *
+   * Hence a test on the NAME rather than on the behaviour: renaming the field
+   * back breaks this, where every other test in this section would still pass
+   * as long as its fixture was renamed to match.
+   */
+  const bus = new EventBus();
+  const seen: DeskEvent[] = [];
+  bus.subscribe(ev => seen.push(ev));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  // The old name, which the arena does not send. A station carrying only this
+  // has told the desk nothing, so nobody is down and nobody is linked.
+  adapter.ingest('arenaStatus', {
+    AllianceStations: {
+      R1: { Team: { Id: 846 }, Ds: { RobotLinked: false } },
+    } as never,
+    MatchState: MatchState.PreMatch,
+  });
+  const wrong = seen.filter(e => e.type === 'arena.status').at(-1)?.payload as { down: number[] };
+  assert.deepEqual(wrong.down, [], '`Ds` is not a key the arena sends');
+  assert.equal(seen.some(e => e.type === 'match.armed'), false,
+    'and a station the desk cannot read is not a station it can call ready');
+
+  // The real name, same robot, same state.
+  adapter.ingest('arenaStatus', {
+    AllianceStations: { R1: { Team: { Id: 846 }, DsConn: { RobotLinked: false } } },
+  });
+  const right = seen.filter(e => e.type === 'arena.status').at(-1)?.payload as { down: number[] };
+  assert.deepEqual(right.down, [846]);
+});
+
 test('reports robots that have lost their driver station link', () => {
   const bus = new EventBus();
   const seen: DeskEvent[] = [];
@@ -510,10 +566,10 @@ test('reports robots that have lost their driver station link', () => {
 
   adapter.ingest('arenaStatus', {
     AllianceStations: {
-      R1: { Team: { Id: 846 }, Ds: { RobotLinked: true } },
-      R2: { Team: { Id: 1868 }, Ds: { RobotLinked: false } },
-      R3: { Team: { Id: 253 }, Ds: { RobotLinked: false }, Bypass: true },
-      B1: { Team: null, Ds: null },
+      R1: { Team: { Id: 846 }, DsConn: { RobotLinked: true } },
+      R2: { Team: { Id: 1868 }, DsConn: { RobotLinked: false } },
+      R3: { Team: { Id: 253 }, DsConn: { RobotLinked: false }, Bypass: true },
+      B1: { Team: null, DsConn: null },
     },
   });
 
@@ -530,8 +586,8 @@ test('a dropped robot is an edge, not a level: one newlyDown per actual drop', (
 
   const frame = (r1: boolean, r2: boolean) => ({
     AllianceStations: {
-      R1: { Team: { Id: 846 }, Ds: { RobotLinked: r1 } },
-      R2: { Team: { Id: 1868 }, Ds: { RobotLinked: r2 } },
+      R1: { Team: { Id: 846 }, DsConn: { RobotLinked: r1 } },
+      R2: { Team: { Id: 1868 }, DsConn: { RobotLinked: r2 } },
     },
   });
   const newlyDowns = () => seen.filter(e => e.type === 'arena.status')
@@ -571,10 +627,10 @@ test('arms once when every fielded robot links, before the countdown', () => {
 
   const stations = (r2Linked: boolean) => ({
     AllianceStations: {
-      R1: { Team: { Id: 846 }, Ds: { RobotLinked: true } },
-      R2: { Team: { Id: 1868 }, Ds: { RobotLinked: r2Linked } },
-      R3: { Team: { Id: 253 }, Ds: { RobotLinked: false }, Bypass: true },
-      B1: { Team: { Id: 100 }, Ds: { RobotLinked: true } },
+      R1: { Team: { Id: 846 }, DsConn: { RobotLinked: true } },
+      R2: { Team: { Id: 1868 }, DsConn: { RobotLinked: r2Linked } },
+      R3: { Team: { Id: 253 }, DsConn: { RobotLinked: false }, Bypass: true },
+      B1: { Team: { Id: 100 }, DsConn: { RobotLinked: true } },
     },
   });
 
@@ -616,8 +672,8 @@ test('a station with no DS data yet blocks arming but is not "down"', () => {
   adapter.ingest('matchLoad', { Match: { Id: 9, LongName: 'Qualification 9' } });
   adapter.ingest('arenaStatus', {
     AllianceStations: {
-      R1: { Team: { Id: 846 }, Ds: { RobotLinked: true } },
-      R2: { Team: { Id: 1868 }, Ds: null },   // nothing heard yet: unknown, not down
+      R1: { Team: { Id: 846 }, DsConn: { RobotLinked: true } },
+      R2: { Team: { Id: 1868 }, DsConn: null },   // nothing heard yet: unknown, not down
     },
   });
 
@@ -895,4 +951,191 @@ test('joining at the normal time is unchanged', () => {
 
   assert.equal(seen.filter(t => t === 'match.start').length, 1, 'exactly one start');
   assert.equal(seen.filter(t => t === 'match.teleop_start').length, 1, 'exactly one re-anchor');
+});
+
+test('an arena restart does not wipe the alliance rosters', () => {
+  /*
+   * Cheesy writes each notifier's current value to a socket the moment it
+   * connects. The allianceSelection message comes from
+   * arena.AllianceSelectionAlliances, an IN-MEMORY field that is empty after
+   * any arena restart and is only repopulated when a human opens
+   * /alliance_selection in a browser, which does not fire the notifier.
+   *
+   * So an arena restart on Sunday, or any socket blip after one, delivered an
+   * empty list, and the reducer replaced the rosters wholesale. The fourth
+   * alliance member then vanished from the selection board, the result card
+   * and the awards graphic for the rest of the playoffs, with nothing short of
+   * a desk restart able to bring it back.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('allianceSelection', {
+    Alliances: [
+      { Id: 1, TeamIds: [254, 846, 1678, 100] },
+      { Id: 2, TeamIds: [971, 1868, 115] },
+    ],
+  });
+  assert.deepEqual(bus.state.selection?.alliances[0]?.teams, [254, 846, 1678, 100]);
+
+  // The arena comes back up and immediately tells every display it has no
+  // alliances. That is the arena saying it has forgotten, not a fact about
+  // the alliances.
+  adapter.ingest('allianceSelection', {
+    Alliances: [{ Id: 1, TeamIds: [] }, { Id: 2, TeamIds: [] }],
+  });
+  assert.deepEqual(bus.state.selection?.alliances[0]?.teams, [254, 846, 1678, 100],
+    'the fourth member is still there');
+
+  // A real change still lands, including one that shortens an alliance.
+  adapter.ingest('allianceSelection', {
+    Alliances: [{ Id: 1, TeamIds: [254, 846, 1678] }],
+  });
+  assert.deepEqual(bus.state.selection?.alliances[0]?.teams, [254, 846, 1678]);
+});
+
+test('an empty alliance list before selection is not suppressed', () => {
+  // The notifier fires before selection starts, sized to the event with every
+  // roster empty. That IS the board at that moment: a row of open slots.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('allianceSelection', {
+    Alliances: [{ Id: 1, TeamIds: [] }, { Id: 2, TeamIds: [] }],
+  });
+  assert.equal(bus.state.selection?.alliances.length, 2);
+});
+
+test('the field disagreeing about match timing is noticed and said out loud', () => {
+  /*
+   * AutoDurationSec and friends are editable on the scorekeeper's settings
+   * page, and the arena pushes them to every display on connect. The desk had
+   * no case for this notifier at all, so it fell through to `default: return`
+   * and kept its compiled-in periods. Shortening practice matches is a normal
+   * thing to do at an offseason, and if it happened the phase labels, the
+   * endgame chip, the lockdown, the replay markers and the countdown would be
+   * wrong for the rest of the day with nothing to say why.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  // The arena's defaults, which are the desk's.
+  adapter.ingest('matchTiming', {
+    AutoDurationSec: 20, PauseDurationSec: 3, TransitionShiftDurationSec: 10,
+    ShiftDurationSec: 25, EndgameDurationSec: 30, TimeoutDurationSec: 0,
+  });
+  assert.equal(adapter.timingMismatch, null, 'the shipped numbers agree');
+
+  // A scorekeeper shortens auto and the endgame for filler matches.
+  adapter.ingest('matchTiming', {
+    AutoDurationSec: 15, PauseDurationSec: 3, TransitionShiftDurationSec: 10,
+    ShiftDurationSec: 25, EndgameDurationSec: 20, TimeoutDurationSec: 0,
+  });
+  const off: string[] = adapter.timingMismatch ?? [];
+  assert.equal(off.length, 2, 'both changes are reported, not just the first');
+  assert.ok(off.some(s => s.includes('AutoDurationSec is 15s')), off.join(' | '));
+  assert.ok(off.some(s => s.includes('EndgameDurationSec is 20s')), off.join(' | '));
+
+  // Putting it back clears it: this is a live comparison, not a latch.
+  adapter.ingest('matchTiming', {
+    AutoDurationSec: 20, TransitionShiftDurationSec: 10,
+    ShiftDurationSec: 25, EndgameDurationSec: 30,
+  });
+  assert.equal(adapter.timingMismatch, null);
+
+  // The pause has no counterpart on the desk's clock, which treats teleop
+  // start as zero, so changing it moves nothing on air and is not reported.
+  adapter.ingest('matchTiming', {
+    AutoDurationSec: 20, PauseDurationSec: 8, TransitionShiftDurationSec: 10,
+    ShiftDurationSec: 25, EndgameDurationSec: 30,
+  });
+  assert.equal(adapter.timingMismatch, null);
+});
+
+test('bonus ranking points come from the field, not from the desk\'s arithmetic', () => {
+  /*
+   * The desk used to recompute all three from config thresholds, which asks a
+   * different question from the one the arena answers:
+   *
+   *   - Cheesy scores the fuel bonuses on NumFuel, a COUNT. The desk only has
+   *     fuel POINTS, and fuel into an inactive hub scores nothing, so the two
+   *     agree only on a match where every shot counted.
+   *   - The thresholds are editable on the scorekeeper's settings page
+   *     mid-event; the desk reads its own copy from config.json.
+   *   - A G206 call strips all three at once and the desk never learns which
+   *     rule a foul was for.
+   *   - A traversal threshold of zero DISABLES the tower bonus. `tower >= 0`
+   *     lit it permanently instead.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  // A lot of fuel POINTS, but the arena says the count did not reach the line.
+  adapter.ingest('realtimeScore', {
+    Red: { ScoreSummary: {
+      TeleopFuelPoints: 400, TeleopTowerPoints: 90,
+      EnergizedBonusRankingPoint: false,
+      SuperchargedBonusRankingPoint: false,
+      TraversalBonusRankingPoint: false,
+    } },
+  });
+  assert.deepEqual(bus.state.score.red.rp,
+    { energized: false, supercharged: false, traversal: false },
+    'the field says no, whatever the desk would have worked out');
+
+  // And the other way: the arena awards it on a figure the desk cannot see.
+  adapter.ingest('realtimeScore', {
+    Red: { ScoreSummary: {
+      TeleopFuelPoints: 4, TeleopTowerPoints: 0,
+      EnergizedBonusRankingPoint: true,
+      SuperchargedBonusRankingPoint: false,
+      TraversalBonusRankingPoint: true,
+    } },
+  });
+  assert.deepEqual(bus.state.score.red.rp,
+    { energized: true, supercharged: false, traversal: true });
+});
+
+test('a summary with no opinion leaves the desk deriving, for a show with no field', () => {
+  // The derivation is not dead code: an operator-driven desk with no arena
+  // attached is a supported way to run, and the badges still have to work.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('realtimeScore', {
+    Red: { ScoreSummary: { TeleopFuelPoints: 120, TeleopTowerPoints: 60 } },
+  });
+  assert.equal(bus.state.score.red.rp.energized, true, 'derived against thresholds');
+  assert.equal(bus.state.score.red.rp.traversal, true);
+});
+
+test('the posted score carries the committed bonuses, not the last live frame', () => {
+  // A referee adjustment on the review page lands in the commit and never in
+  // a realtime snapshot, and a G206 added there strips all three at once.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', { Match: { Id: 42, LongName: 'Qualification 42' } });
+  adapter.ingest('realtimeScore', {
+    Red: { ScoreSummary: {
+      TeleopFuelPoints: 150, TeleopTowerPoints: 60,
+      EnergizedBonusRankingPoint: true,
+      SuperchargedBonusRankingPoint: true,
+      TraversalBonusRankingPoint: true,
+    } },
+  });
+  assert.equal(bus.state.score.red.rp.energized, true);
+
+  adapter.ingest('scorePosted', {
+    Match: { Id: 42 },
+    RedScoreSummary: {
+      Score: 210,
+      EnergizedBonusRankingPoint: false,
+      SuperchargedBonusRankingPoint: false,
+      TraversalBonusRankingPoint: false,
+    },
+    BlueScoreSummary: { Score: 140 },
+  });
+  assert.deepEqual(bus.state.score.red.rp,
+    { energized: false, supercharged: false, traversal: false },
+    'G206 on the review page takes all three, and the badges have to follow');
+  assert.equal(bus.state.score.red.total, 210, 'and the official total still lands');
 });
