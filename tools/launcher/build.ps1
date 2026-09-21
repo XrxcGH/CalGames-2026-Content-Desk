@@ -91,7 +91,10 @@ $NeverShip = @('harness.mjs')
 $n = 0
 $skipped = 0
 foreach ($rel in $tracked) {
-    if ($NeverShip -contains ($rel -replace '\', '/')) { $skipped++; continue }
+    # .Replace, not -replace: the latter takes a REGEX, and a lone backslash is
+    # not a valid one. `git ls-files` already reports forward slashes, so this
+    # is only here for the case where it does not.
+    if ($NeverShip -contains $rel.Replace('\', '/')) { $skipped++; continue }
     $src = Join-Path $RepoRoot $rel
     if (-not (Test-Path -LiteralPath $src)) { continue }
     Copy-Into $src $Stage $rel
