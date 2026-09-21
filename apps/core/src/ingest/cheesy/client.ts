@@ -2,24 +2,59 @@
  * Hardened Cheesy Arena client. See docs/10-field-bridge.md.
  *
  * The FTA's condition is that nothing we do can interfere with Cheesy Arena
- * controlling the field. That resolves to a hard endpoint allowlist, and the
- * guarantee behind it is structural rather than procedural:
+ * controlling the field. That resolves to a hard endpoint allowlist, and for
+ * five of the six sockets the guarantee is structural rather than procedural:
  *
  *   Cheesy Arena's `websocket.HandleNotifiers` never calls Read(). Endpoints
  *   whose handler is HandleNotifiers-only CANNOT process anything we send.
  *
- * The endpoints that DO have a read loop are exactly the dangerous ones:
+ * The endpoints that DO have a read loop are mostly the dangerous ones:
  *   /match_play/websocket                startMatch, abortMatch, discardResults
  *   /panels/scoring/{position}/websocket  autoTower, endgame, addFoul
  *   /panels/referee/websocket            fouls and cards
  *   POST /setup/db/clear/{type}          wipes the event database
  *
  * None of those are reachable from here, by construction.
+ *
+ * ONE ALLOWLISTED SOCKET IS NOT HandleNotifiers-ONLY, and this comment used
+ * to claim all six were.
+ *
+ * /displays/field_monitor/websocket runs `go ws.HandleNotifiers(...)` in a
+ * goroutine and then enters its own read loop, which accepts an
+ * `updateTeamNotes` command that writes Team.FtaNotes and calls
+ * Database.UpdateTeam. That is a write into the event database, from a socket
+ * on the allowlist.
+ *
+ * Two things stand between that and the field, and only one of them is ours:
+ *
+ *   Theirs: the command is gated on `?fta=true` AND web.userIsAdmin. That
+ *   gate is weaker than it looks, because userIsAdmin returns true
+ *   unconditionally when EventSettings.AdminPassword is empty, which is the
+ *   normal state at an offseason event. So in practice the query parameter
+ *   is the whole gate.
+ *
+ *   Ours: this client never sets fta, and never sends an application frame on
+ *   any socket. #open builds the query string itself rather than taking it
+ *   from the caller, so `fta` cannot be smuggled in through a socket path,
+ *   and there is no send path in this file at all. The watchdog's PING is a
+ *   protocol-level frame that gorilla answers inside ReadJSON without ever
+ *   producing a command.
+ *
+ * Both of those are pinned by tests, because the invariant is now ours to
+ * keep rather than the arena's to enforce. The socket stays on the list
+ * because it is the only source of arenaStatus, which is how the desk knows
+ * a robot has lost its link.
  */
 
 import { WebSocket } from 'ws';
 
-/** WebSocket endpoints. Every one is HandleNotifiers-only (verified in source). */
+/**
+ * WebSocket endpoints.
+ *
+ * Five are HandleNotifiers-only and therefore cannot process anything we
+ * send. /displays/field_monitor/websocket is the exception: it has its own
+ * read loop behind a `?fta=true` gate. See the note at the top of this file.
+ */
 export const ALLOWED_SOCKETS = [
   '/api/arena/websocket',
   '/displays/audience/websocket',
@@ -28,6 +63,21 @@ export const ALLOWED_SOCKETS = [
   '/displays/rankings/websocket',
   '/displays/bracket/websocket',
 ] as const;
+
+/**
+ * The per-socket display id suffix. Registering a display OVERWRITES that
+ * id's configuration in the arena, so the desk's sockets must not share one
+ * id with each other or with a real screen.
+ *
+ * `/api/arena/websocket` is not a display and takes no id.
+ */
+const SOCKET_ID_SUFFIX: Record<string, string | undefined> = {
+  '/displays/audience/websocket': '-audience',
+  '/displays/field_monitor/websocket': '-fieldmon',
+  '/displays/queueing/websocket': '-queueing',
+  '/displays/rankings/websocket': '-rankings',
+  '/displays/bracket/websocket': '-bracket',
+};
 
 /** GET-only REST endpoints. Note that get() parses every response as JSON, so
  *  the binary entries (/api/bracket/svg, and /api/teams/{id}/avatar under the
@@ -157,11 +207,37 @@ export class CheesyClient {
   #open(path: string): void {
     if (this.#stopping) return;
 
-    // Display sockets want an explicit id; without one Cheesy allocates one and
-    // issues a redirect, which is state we did not ask it to create.
-    const needsId = path.startsWith('/displays/');
+    /*
+     * Display sockets want an explicit id; without one Cheesy allocates one
+     * and issues a redirect, which is state we did not ask it to create.
+     *
+     * A DIFFERENT id per socket, because registering is a write. Each
+     * connection calls arena.RegisterDisplay, which looks up Displays[id] and
+     * overwrites that display's whole configuration, Type included, then
+     * notifies. All five sharing one id meant the desk's own sockets fought
+     * over one registry entry: the scorekeeper's /setup/displays page, which
+     * is exactly what they open when a screen goes missing, showed a single
+     * row whose type flickered between Audience, Field Monitor, Queueing,
+     * Rankings and Bracket with a connection count of five.
+     *
+     * The sharper reason is collision. Any browser registered under the same
+     * id subscribes to that display's notifier, and the arena's own client
+     * navigates on a displayConfiguration whose URL differs. So a real
+     * audience projector sharing this id would have been driven to
+     * /displays/rankings mid-match by the desk's rankings socket. Suffixing
+     * turns one guessable string into five odd ones, and the arena never
+     * auto-assigns a non-numeric id, so nothing it hands out can collide.
+     *
+     * The query string is built HERE rather than taken from the caller, and
+     * that is load-bearing: /displays/field_monitor/websocket has a read loop
+     * gated on ?fta=true, so a path that could carry its own query would be a
+     * way to ask for the one socket that can write to the event database.
+     */
+    const suffix = SOCKET_ID_SUFFIX[path as AllowedSocket];
     const url = `ws://${this.#opts.host}${path}` +
-      (needsId ? `?displayId=${encodeURIComponent(this.#opts.displayId)}` : '');
+      (suffix
+        ? `?displayId=${encodeURIComponent(this.#opts.displayId + suffix)}`
+        : '');
 
     const ws = new WebSocket(url);
     this.#sockets.set(path, ws);
@@ -192,10 +268,14 @@ export class CheesyClient {
       if (msg.type) this.#opts.onEvent(msg.type, msg.data);
     });
 
-    // We never send an APPLICATION frame. The endpoints cannot read one, but
-    // belt and suspenders: nothing here writes one. (The watchdog in
-    // connect() writes protocol PINGs, a control frame, to make a dead TCP
-    // path prove itself; see the comment there.)
+    // We never send an APPLICATION frame. Five of the six endpoints cannot
+    // read one anyway, but /displays/field_monitor/websocket CAN: it has a
+    // read loop that accepts updateTeamNotes and writes to the event
+    // database. So on that socket this is not belt and suspenders, it is the
+    // guarantee itself, and nothing here writes one. (The watchdog in
+    // connect() writes protocol PINGs, a control frame, which gorilla answers
+    // inside ReadJSON without ever producing a command; see the comment
+    // there.)
     ws.on('close', () => this.#reopen(path, 'closed'));
     ws.on('error', err => this.#reopen(path, err.message));
   }

@@ -457,9 +457,11 @@ Two decisions shaped everything:
 - **The field bridge is approved**, on the condition that nothing can interfere with Cheesy Arena
   controlling the field.
 
-That condition resolves to a hard endpoint allowlist, and the guarantee behind it is **structural
-rather than procedural**: Cheesy Arena's `HandleNotifiers` never calls `Read()`, so the display
-endpoints we subscribe to *cannot* process anything we send. What's forbidden is short and
+That condition resolves to a hard endpoint allowlist, and for five of the six sockets the
+guarantee behind it is **structural rather than procedural**: Cheesy Arena's `HandleNotifiers`
+never calls `Read()`, so those endpoints *cannot* process anything we send. The sixth,
+`/displays/field_monitor/websocket`, has a read loop behind a `?fta=true` gate; it is the only
+source of robot-link status, so we keep it and never set `fta` or send a frame, enforced by test. What's forbidden is short and
 specific: `/match_play/*` (abort match), `/panels/scoring/*` (game-piece scoring),
 `/panels/referee/*`, and every `/setup/*`. The remaining interference vector is the *host*, not
 the API, so nothing of ours runs on the FMS machine. Spec and a printable FTA sign-off sheet:

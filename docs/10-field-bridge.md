@@ -18,6 +18,20 @@ So any handler whose body is `ws.HandleNotifiers(...)` is **incapable of process
 send.** Not "won't," *can't*. We could fire arbitrary frames at it all weekend and nothing would
 be read. That is a far stronger guarantee than a code review of our own client.
 
+**Five of our six sockets are like that. One is not**, and an earlier version of this document
+said all six were. `/displays/field_monitor/websocket` runs `HandleNotifiers` in a goroutine and
+then enters its own read loop, which accepts `updateTeamNotes` and writes an FTA note onto a team
+record via `Database.UpdateTeam`. It is gated on `?fta=true` **and** `userIsAdmin`, and
+`userIsAdmin` returns true unconditionally when no admin password is set, which is the normal
+state at an offseason. So the query parameter is effectively the whole gate.
+
+We keep the endpoint, because it is the only source of `arenaStatus` and therefore the only way
+the desk knows a robot has lost its link. What changes is the honesty of the claim: on that one
+socket the guarantee is **ours**, not the arena's. We never set `fta`, and we never send an
+application frame on any socket. The client builds every query string itself rather than taking
+one from a caller, so `fta` cannot be smuggled in through a path, and there is no send path in the
+file at all. Two tests pin both properties, and they fail if either is broken.
+
 Command-capable handlers are the ones with a read loop, and they are exactly the ones that can hurt
 the event:
 
@@ -34,14 +48,14 @@ the event:
 Hard-coded in the client. Not a config file, not a convention: a constant, with a unit test that
 fails if anything else appears.
 
-**Allowed (WebSocket, all `HandleNotifiers`-only, verified):**
+**Allowed (WebSocket). All `HandleNotifiers`-only except `field_monitor`, noted below:**
 
 | Endpoint | Gives us |
 | --- | --- |
 | `/api/arena/websocket` | `matchTiming`, `matchLoad`, `matchTime` |
 | `/displays/audience/websocket` | `realtimeScore`, `scorePosted`, `lowerThird`, `audienceDisplayMode`, `allianceSelection`, `playSound`, `matchLoad`, `matchTime` |
 | `/displays/queueing/websocket` | queueing + `eventStatus` |
-| `/displays/field_monitor/websocket` | `arenaStatus`: station health, robot comms. Powers the "what happened to 846?" replay marker |
+| `/displays/field_monitor/websocket` | `arenaStatus`: station health, robot comms. Powers the "what happened to 846?" replay marker. **Has a read loop** (`updateTeamNotes`, behind `?fta=true`); we never set `fta` and never send a frame |
 | `/displays/rankings/websocket` | live rankings |
 | `/displays/bracket/websocket` | playoff bracket state |
 
@@ -73,10 +87,19 @@ whole safety argument.
    method. `POST /setup/db/clear/matches` is one typo away from ending the event; make it
    unreachable rather than merely unwise.
 3. **Path allowlist checked at call time**, against the constant above. Reject and log, don't warn.
-4. **Reserved `displayId`, coordinated with the scorekeeper.** This is now the top *real* risk:
-   registering with an ID a genuine audience display uses could reconfigure that display. Agree
-   `contentdesk1` through `contentdesk4` (or whatever they prefer) in advance, and always pass it
-   explicitly. Connecting without one makes Cheesy allocate an ID and redirect.
+4. **Reserved `displayId` prefix, coordinated with the scorekeeper.** Registering with an ID a
+   genuine audience display uses could reconfigure that display: `RegisterDisplay` overwrites the
+   stored configuration for that ID, `Type` included, and the arena's own display client navigates
+   itself when the configuration it receives names a different URL. Agree `contentdesk1` through
+   `contentdesk4` (or whatever they prefer) in advance, and always pass it explicitly. Connecting
+   without one makes Cheesy allocate an ID and redirect.
+
+   Each socket gets its **own** suffixed ID (`contentdesk1-audience`, `-queueing`, `-fieldmon`,
+   `-rankings`, `-bracket`). Sharing one ID across the five made the desk overwrite its own
+   registration five times over, so the scorekeeper's `/setup/displays` page, the page they open
+   when a screen goes missing, showed a single row flickering between five types with a connection
+   count of five. Suffixing also shrinks the collision target from one guessable string to five odd
+   ones, and Cheesy only ever auto-assigns numeric IDs, so nothing it hands out can land on them.
 5. **Connection budget:** one WS per allowed endpoint, one concurrent HTTP request. The schedule
    and rankings poll every 60s, plus one deferred refresh about 1.5s after a posted score so the
    side screens are not a minute behind the room. There is no faster polling mode.
@@ -131,9 +154,18 @@ whatever fits. The only line is the allowlist above.
 > **What:** one host, one Ethernet cable, into a port you designate on the Cheesy Arena network.
 > **Purpose:** read match data to drive broadcast graphics and replay.
 >
-> **Guarantee: structural, not procedural.** We connect only to Cheesy Arena endpoints whose
-> handlers are `HandleNotifiers`-only. That function never calls `Read()`, so those endpoints
-> cannot process anything we send, by construction.
+> **Guarantee: structural for five of six endpoints.** Five of the six websockets we open have
+> `HandleNotifiers`-only handlers. That function never calls `Read()`, so those endpoints cannot
+> process anything we send, by construction.
+>
+> **The exception, stated plainly:** `/displays/field_monitor/websocket` does have a read loop.
+> It accepts one command, `updateTeamNotes`, which writes an FTA note onto a team record. It is
+> gated on `?fta=true`, and that gate is weaker than it looks, because Cheesy treats every user
+> as an admin when no admin password is set. We use this endpoint because it is the only source
+> of robot-link status. **We never set `fta`, and we never send an application frame on any
+> socket.** Both are enforced by tests in our code, not by convention. If you would rather we did
+> not open it at all, say so: we lose the dropped-robot replay marker and the station-health
+> strip, and nothing else.
 >
 > **We never connect to:** `/match_play/*` (start/abort match), `/panels/scoring/*` (game-piece
 > scoring), `/panels/referee/*` (fouls/cards), `/alliance_selection/*`, or any `/setup/*`.
@@ -143,8 +175,10 @@ whatever fits. The only line is the allowlist above.
 > and `GET` on `/api/matches`, `/api/rankings`, `/api/alliances`, `/api/teams/*/avatar`, `/api/bracket/svg`,
 > `/api/sponsor_slides`.
 >
-> **Display registration:** we register as display ID `________` (agreed with the scorekeeper) so
-> we can't collide with a real audience display. Listener only.
+> **Display registration:** we register as display IDs `________-audience`, `-queueing`,
+> `-fieldmon`, `-rankings` and `-bracket`, from one agreed prefix (agreed with the scorekeeper) so
+> we can't collide with a real audience display or with ourselves. One id per socket, because
+> registering overwrites that id's configuration. Listener only.
 >
 > **Load:** one websocket per endpoint, one HTTP request at a time, 60s polling plus one extra
 > refresh ~1.5s after a score posts, exponential backoff capped at 60s on failure.

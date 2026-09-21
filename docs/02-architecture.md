@@ -170,9 +170,11 @@ CalGames 2026 runs Cheesy Arena with an approved field bridge. The operating rul
 is fine as long as it can't interfere with Cheesy Arena controlling the field*, which resolves to a
 hard endpoint allowlist. Read [10-field-bridge.md](10-field-bridge.md) before writing a line of
 this adapter. Short version: connect only to handlers whose body is `ws.HandleNotifiers(...)`,
-because that function never calls `Read()` and therefore **cannot process anything we send**. Never
-touch `/match_play/*` (abort match), `/panels/scoring/*` (game-piece scoring), `/panels/referee/*`,
-or `/setup/*`.
+because that function never calls `Read()` and therefore **cannot process anything we send**. The
+one exception we allow is `/displays/field_monitor/websocket`, which does have a read loop: it is
+the only source of robot-link status, and the rule there is that we never set `fta` and never send
+a frame. Never touch `/match_play/*` (abort match), `/panels/scoring/*` (game-piece scoring),
+`/panels/referee/*`, or `/setup/*`.
 
 **WebSocket subscriptions** (register with a scorekeeper-agreed `displayId`):
 

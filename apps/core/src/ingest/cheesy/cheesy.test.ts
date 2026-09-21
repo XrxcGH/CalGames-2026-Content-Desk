@@ -1139,3 +1139,105 @@ test('the posted score carries the committed bonuses, not the last live frame', 
     'G206 on the review page takes all three, and the badges have to follow');
   assert.equal(bus.state.score.red.total, 210, 'and the official total still lands');
 });
+
+test('the one socket that CAN read from us is never asked to', async () => {
+  /*
+   * Five of the six allowlisted sockets are HandleNotifiers-only and cannot
+   * process anything the desk sends. /displays/field_monitor/websocket is not
+   * one of them: it runs HandleNotifiers in a goroutine and then enters its
+   * own read loop, which accepts an `updateTeamNotes` command that sets
+   * Team.FtaNotes and calls Database.UpdateTeam. That is a write into the
+   * event database from a socket on the allowlist.
+   *
+   * The arena's gate is `?fta=true` AND userIsAdmin, and userIsAdmin returns
+   * true unconditionally when AdminPassword is empty, which is the normal
+   * state at an offseason. So the query parameter is effectively the whole
+   * gate, and the desk not setting it is the invariant. It used to be a
+   * comment claiming all six sockets were safe by construction. It is a test
+   * now, because it is ours to keep rather than the arena's to enforce.
+   */
+  const seen: string[] = [];
+  const server = createServer();
+  const { WebSocketServer } = await import('ws');
+  const wss = new WebSocketServer({ server });
+  wss.on('connection', (_sock, req) => { seen.push(req.url ?? ''); });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const client = new CheesyClient({
+    host: `127.0.0.1:${port}`, displayId: 'contentdesk1', onEvent: () => {},
+  });
+  try {
+    client.connect();
+    for (let i = 0; i < 80 && seen.length < ALLOWED_SOCKETS.length; i++) {
+      await new Promise(r => setTimeout(r, 25));
+    }
+
+    const monitor = seen.find(u => u.startsWith('/displays/field_monitor/'));
+    assert.ok(monitor, 'the field monitor socket is opened: it is the only arenaStatus source');
+    assert.equal(/\bfta=/i.test(monitor), false,
+      'fta is never set, on any socket, ever');
+    for (const url of seen) {
+      assert.equal(/\bfta=/i.test(url), false, `fta appears in ${url}`);
+    }
+  } finally {
+    client.close();
+    wss.close();
+    await new Promise(r => server.close(r));
+  }
+});
+
+test('each display socket registers under its own id, because registering is a write', async () => {
+  /*
+   * Each connection calls arena.RegisterDisplay, which looks up Displays[id]
+   * and overwrites that display's whole configuration, Type included, then
+   * notifies every subscriber. Sharing one id across five sockets meant the
+   * desk fought with itself: the scorekeeper's /setup/displays page, which is
+   * what they open when a screen goes missing, showed one row whose type
+   * flickered between five values with a connection count of five.
+   *
+   * The sharper reason is collision. A browser registered under the same id
+   * subscribes to that display's notifier, and the arena's own client
+   * navigates on a displayConfiguration whose URL differs, so a real audience
+   * projector sharing the id would have been driven to /displays/rankings
+   * mid-match by the desk's rankings socket.
+   */
+  const seen: string[] = [];
+  const server = createServer();
+  const { WebSocketServer } = await import('ws');
+  const wss = new WebSocketServer({ server });
+  wss.on('connection', (_sock, req) => { seen.push(req.url ?? ''); });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const client = new CheesyClient({
+    host: `127.0.0.1:${port}`, displayId: 'contentdesk1', onEvent: () => {},
+  });
+  try {
+    client.connect();
+    for (let i = 0; i < 80 && seen.length < ALLOWED_SOCKETS.length; i++) {
+      await new Promise(r => setTimeout(r, 25));
+    }
+
+    const ids = seen
+      .map(u => new URLSearchParams(u.slice(u.indexOf('?') + 1)).get('displayId'))
+      .filter((v): v is string => !!v);
+    assert.equal(ids.length, 5, 'the five display sockets carry an id');
+    assert.equal(new Set(ids).size, 5, 'and no two of them are the same');
+    for (const id of ids) {
+      assert.ok(id.startsWith('contentdesk1-'),
+        `${id} should still be recognisably this desk's`);
+    }
+    // The arena only ever auto-assigns numeric ids, so nothing it hands out
+    // can land on one of these.
+    for (const id of ids) assert.equal(/^\d+$/.test(id), false, id);
+
+    const bare = seen.find(u => u.startsWith('/api/arena/'));
+    assert.ok(bare && !bare.includes('displayId'),
+      'the arena socket is not a display and takes no id');
+  } finally {
+    client.close();
+    wss.close();
+    await new Promise(r => server.close(r));
+  }
+});

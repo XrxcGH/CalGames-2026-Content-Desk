@@ -184,9 +184,11 @@ back row of the gym**. Nothing new ships Friday.
 | 2 | Field bridge | **Approved.** Any software is fine as long as it can't interfere with Cheesy Arena controlling the field |
 | 2b | Registering as a display | **In scope.** Unlocks live score, `score.delta`, and `arenaStatus` |
 
-Rule 2 resolves to a hard endpoint allowlist, and the guarantee is structural rather than
-procedural: `HandleNotifiers` never calls `Read()`, so display endpoints *cannot* process anything
-we send. The forbidden list is short and specific: `/match_play/*` (abort match),
+Rule 2 resolves to a hard endpoint allowlist. For five of the six sockets the guarantee is
+structural rather than procedural: `HandleNotifiers` never calls `Read()`, so those endpoints
+*cannot* process anything we send. The sixth, `/displays/field_monitor/websocket`, does have a
+read loop behind a `?fta=true` gate; we keep it because it is the only source of robot-link
+status, and we never set `fta` or send a frame, which tests enforce. The forbidden list is short and specific: `/match_play/*` (abort match),
 `/panels/scoring/*` (game-piece scoring), `/panels/referee/*`, `/setup/*`. Full spec and the FTA
 sign-off sheet: [10-field-bridge.md](10-field-bridge.md).
 
@@ -209,7 +211,7 @@ process that also runs the arena loop and PLC I/O, so nothing of ours ever runs 
 | --- | --- | --- | --- |
 | **Venue power outage** | **High** (it happened in 2025 and killed the Sunday stream) | High | UPS on every production box; rolling record never stops; backup stream key pre-created and the fallback URL posted before the event |
 | **Our software interferes with field control**, a stray connection to `/match_play` or `/panels/scoring`, or resource starvation on the FMS host | Low | **Severe** (the one way this project can damage the event and our standing with WRRF) | Endpoint allowlist as a constant with a failing unit test; `GET`-only HTTP client; nothing of ours ever runs on the FMS machine; exponential backoff with jitter; rehearsed kill switch. See [10-field-bridge.md](10-field-bridge.md) |
-| `displayId` collision reconfigures a real audience display | Low | Medium | Reserved ID agreed with the scorekeeper in writing, always passed explicitly |
+| `displayId` collision reconfigures a real audience display | Low | Medium | Reserved ID prefix agreed with the scorekeeper in writing, always passed explicitly, and one suffixed ID per socket so the five registrations cannot overwrite each other |
 | Venue internet is poor or absent | Medium | Low to Medium | Cache team lists, avatars, and Statbotics data locally on Friday. Nothing on the critical path needs internet except the stream itself |
 | Too few robot photos | **High** | Low | Tier-3 fallback (gold team number on a purple plinth) must look deliberate. Ship the screen with zero photos and improve it live |
 | Volunteer crew smaller than planned | High | Medium | Minimum viable crew is 3. Every surface must be operable after 20 minutes of training |
