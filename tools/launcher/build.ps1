@@ -232,7 +232,11 @@ using System.Reflection;
 
 $cscArgs = @(
     '-nologo',
-    '-target:exe',
+    # winexe, not exe: a console application gets a black window that stays on
+    # the desk laptop for the whole event, and closing it stops the show. The
+    # launcher attaches to a parent console when it is started from one, so
+    # running it from PowerShell still prints everything.
+    '-target:winexe',
     '-platform:anycpu',
     '-optimize+',
     '-warnaserror-',

@@ -73,9 +73,40 @@ internal static class Launcher
     private static string _logDir;
     private static readonly object ConsoleLock = new object();
 
+    /*
+     * No console of our own.
+     *
+     * This is built as a Windows application rather than a console one, so
+     * double-clicking it opens no black window. That window was a live hazard:
+     * it sat on the desk laptop all weekend looking like leftover clutter, and
+     * closing it stops the show. Somebody tidying the taskbar between matches,
+     * or a volunteer who thinks they are closing a finished install step,
+     * takes the broadcast down with one click. Nothing about the window said
+     * otherwise, and the handbook's answer was to ask people to leave it open.
+     *
+     * The information it carried has somewhere better to be: the browser opens
+     * on the desk's own index page, which lists every screen and is the thing
+     * they actually need, and every line still goes to desk-log.txt.
+     *
+     * AttachConsole(-1) keeps the other audience honest: run this from an
+     * existing PowerShell or cmd window on purpose and it attaches to that
+     * window and prints exactly as it always did. Only the double-click path
+     * is silent. When there IS no console, a failure raises a message box,
+     * because the one thing worse than a window nobody wanted is a program
+     * that fails and says nothing at all.
+     */
+    private const int ATTACH_PARENT_PROCESS = -1;
+    private static bool _silent;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(int processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
     private static int Main(string[] rawArgs)
     {
-        Console.Title = AppTitle;
+        _silent = !AttachConsole(ATTACH_PARENT_PROCESS);
+        if (!_silent) { try { Console.Title = AppTitle; } catch { } }
         // Node prints box-drawing characters and the desk banner uses them.
         try { Console.OutputEncoding = Encoding.UTF8; } catch { }
         ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
@@ -214,20 +245,24 @@ internal static class Launcher
             if (!File.Exists(copy) || new FileInfo(copy).Length != new FileInfo(exe).Length)
                 File.Copy(exe, copy, true);
 
+            // `start` and then exit, rather than running the exe from here:
+            // this cmd window would otherwise stay open for the life of the
+            // show, which is the window being removed. It flashes and closes,
+            // and the desk is left running with no window at all.
             string cmd =
                 "@echo off\r\n" +
-                "title " + AppTitle + "\r\n" +
                 "cd /d \"%~dp0\"\r\n" +
-                "\"%~dp0START-DESK.exe\" /dir:\"%~dp0.\" %*\r\n";
+                "start \"\" \"%~dp0START-DESK.exe\" /dir:\"%~dp0.\" %*\r\n" +
+                "exit\r\n";
             File.WriteAllText(Path.Combine(target, "START-DESK.cmd"), cmd);
 
             // The practice route for someone who has never typed a flag:
             // double-click this instead of START-DESK.cmd.
             string demo =
                 "@echo off\r\n" +
-                "title " + AppTitle + " (practice)\r\n" +
                 "cd /d \"%~dp0\"\r\n" +
-                "\"%~dp0START-DESK.exe\" /dir:\"%~dp0.\" /demo %*\r\n";
+                "start \"\" \"%~dp0START-DESK.exe\" /dir:\"%~dp0.\" /demo %*\r\n" +
+                "exit\r\n";
             File.WriteAllText(Path.Combine(target, "START-PRACTICE.cmd"), demo);
         }
         catch
@@ -1019,6 +1054,25 @@ internal static class Launcher
         Console.WriteLine("  Event PIN for the control screens: " + _opt.Pin);
         Console.WriteLine("  Audience screens need no PIN.");
         Console.WriteLine();
+        /*
+         * How to stop it, written down in the two places somebody will look:
+         * here, and desk-log.txt. There is deliberately no one-click stop. The
+         * whole reason this runs without a window is that stopping the show
+         * must take more than one careless click, so the two ways out are a
+         * deliberate trip to Task Manager or a command somebody has to type.
+         */
+        Console.WriteLine("  TO STOP THE DESK, when the event is over:");
+        Console.WriteLine("      Task Manager (Ctrl+Shift+Esc), find \"" + AppTitle + "\",");
+        Console.WriteLine("      select it and press End task.");
+        Console.WriteLine("  Or open PowerShell and type:");
+        WriteColor(ConsoleColor.Cyan, "      Stop-Process -Name CalGamesContentDesk -Force");
+        Console.WriteLine();
+        Console.WriteLine("  There is no window to close, on purpose: closing one by accident");
+        Console.WriteLine("  would take the broadcast off air.");
+        Console.WriteLine();
+        WriteLog("READY on http://" + (lan ?? "localhost") + ":" + port + "/  PIN " + _opt.Pin);
+        WriteLog("To stop: Task Manager -> " + AppTitle + " -> End task, "
+            + "or PowerShell: Stop-Process -Name CalGamesContentDesk -Force");
         if (_opt.Demo)
         {
             Console.WriteLine("  Mode:    practice, showing a pretend match on a loop");
@@ -1052,7 +1106,14 @@ internal static class Launcher
     private static void Ok(string msg) { WriteColor(ConsoleColor.Green, "        " + msg); }
     private static void Detail(string msg) { WriteColor(ConsoleColor.DarkGray, "        " + msg); }
     private static void Warn(string msg) { WriteColor(ConsoleColor.Yellow, "        " + msg); }
-    private static void Fail(string msg) { WriteColor(ConsoleColor.Red, "  " + msg); }
+    /// Every call site is a reason the desk is not running, so on the silent
+    /// double-click path each one also raises the message box. Without this a
+    /// failed start was a program that flashed nothing and vanished.
+    private static void Fail(string msg)
+    {
+        WriteColor(ConsoleColor.Red, "  " + msg);
+        ShowFatal(msg);
+    }
 
     private static void Relay(string line)
     {
@@ -1079,17 +1140,43 @@ internal static class Launcher
     {
         lock (ConsoleLock)
         {
+            // Console.ForegroundColor throws with no console attached, and this
+            // runs from the very first banner line.
+            if (_silent) { try { Console.WriteLine(s); } catch { } return; }
             ConsoleColor was = Console.ForegroundColor;
             try { Console.ForegroundColor = c; Console.WriteLine(s); }
-            finally { Console.ForegroundColor = was; }
+            finally { try { Console.ForegroundColor = was; } catch { } }
         }
     }
 
     private static void Hold()
     {
         if (_opt != null && _opt.NoWait) return;
+        // With no console there is no window to hold open and no key to press:
+        // waiting here would be an invisible twenty-second hang, and then the
+        // process would vanish with the reason still only in the log.
+        if (_silent) return;
         Console.WriteLine("  Press any key to close this window.");
         try { Console.ReadKey(true); } catch { Thread.Sleep(20000); }
+    }
+
+    /// A failure the operator has to see, on the double-click path where there
+    /// is no window to print it in.
+    private static void ShowFatal(string headline)
+    {
+        WriteLog("FATAL: " + headline);
+        if (!_silent) return;
+        try
+        {
+            MessageBox(IntPtr.Zero,
+                headline
+                  + Environment.NewLine + Environment.NewLine
+                  + "The full startup log is at:" + Environment.NewLine + LogPath()
+                  + Environment.NewLine + Environment.NewLine
+                  + "Nothing is running. It is safe to try again.",
+                AppTitle, 0x10 /* MB_ICONERROR */);
+        }
+        catch { }
     }
 
     /// Next to the desk's own files once we know where those are, so the crew

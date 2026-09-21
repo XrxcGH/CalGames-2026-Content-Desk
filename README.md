@@ -37,11 +37,12 @@ You do not need a terminal, and you do not need to install anything. You need on
 (how: [docs/13-deployment.md](docs/13-deployment.md)).
 
 1. Copy the exe onto the machine. Anywhere is fine.
-2. Double-click it. A window opens and prints four numbered steps as it works.
-3. Wait for the yellow **READY**. The first run takes about a minute; after that, seconds.
-4. The window prints an address like `http://10.0.100.23:8720/` and opens it in a browser.
-   That page lists every screen, and the window shows the PIN (a four-digit door code) that
-   the control screens ask for.
+2. Double-click it. Nothing appears on screen: it unpacks, finds Node, looks for the field
+   and starts the desk, with no window to close by accident.
+3. Wait about a minute on the first run, seconds after that.
+4. Your browser opens on an address like `http://10.0.100.23:8720/`. That page lists every
+   screen. The PIN the control screens ask for, and everything the launcher did, are in
+   `desk-log.txt` in the desk folder.
 
 Just trying it out at a kitchen table, with no field to connect to? The launcher notices there
 is no field and asks; press **D** and every screen plays a pretend match. After the first run
@@ -49,8 +50,14 @@ the desk lives in `Downloads\CalGames2026-ContentDesk`, and two files there run 
 double-click: **START-PRACTICE.cmd** for the pretend match, **START-DESK.cmd** for the real
 thing.
 
-Leave the launcher window open; closing it stops the desk. Pit monitors, updating, and what to
-do when something goes wrong are all in [docs/13-deployment.md](docs/13-deployment.md).
+To stop the desk when the event is over: Task Manager, **CalGames 2026 Content Desk**, End
+task. Or in PowerShell, `Stop-Process -Name CalGamesContentDesk -Force`. There is deliberately
+no one-click stop, because the launcher used to have one, in the shape of a window with an X
+on it. Run the launcher from a PowerShell window on purpose and it attaches to that window and
+prints everything, as it always did.
+
+Pit monitors, updating, and what to do when something goes wrong are all in
+[docs/13-deployment.md](docs/13-deployment.md).
 
 The rest of this README is for people building or changing the desk.
 

@@ -221,16 +221,36 @@ If the awards code is the one that slips, that is the expensive one. `/s/awards`
 opens its sign-in box for anyone on the venue Wi-Fi, so a default awards code
 means the whole building can read the winners before the ceremony.
 
-The numbers will be different at your event. Use what your window prints, not
+The numbers will be different at your event. Use what your browser shows, not
 what is printed here.
 
-### Step 4: Leave the window open
+### Step 4: There is no window, and that is deliberate
 
-Closing the window stops the desk and every screen in the building goes blank.
-Minimise it, push it to a second monitor, but do not close it.
+Nothing stays on screen after the desk starts. Your browser opens on the page
+listing every screen, and that is the whole interface. There is no black
+window sitting on the taskbar.
 
-To stop the desk deliberately, close the window or press **Ctrl-C** in it.
-Either one shuts down cleanly and releases the address so the next start works.
+That is on purpose. A window that runs the show is a window somebody closes:
+it looks like leftover clutter from an install that already finished, and one
+click on the X takes the broadcast off air in the middle of a match. Asking
+people to leave it open is not a control.
+
+**If you want to see what it is doing**, open `desk-log.txt` in the desk
+folder. Everything the old window printed is in there, including the address
+and the PIN.
+
+**To stop the desk when the event is over**, either:
+
+- Open Task Manager (**Ctrl+Shift+Esc**), find **CalGames 2026 Content Desk**,
+  select it, and press **End task**. Or
+- Open PowerShell and type:
+
+```
+Stop-Process -Name CalGamesContentDesk -Force
+```
+
+Either one takes the desk down cleanly and releases the address, so the next
+start works. Both take more than one careless click, which is the point.
 
 ### If it will not start
 

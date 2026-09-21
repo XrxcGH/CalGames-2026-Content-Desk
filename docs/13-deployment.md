@@ -17,7 +17,7 @@ Four steps, printed as it goes so nobody is watching a blank window wondering wh
 | 1 | Unpacks the desk into `Downloads\CalGames2026-ContentDesk` | Nothing else on the machine is touched |
 | 2 | Finds Node, or installs a private copy | Needs no admin rights, no PATH change, no installer |
 | 3 | Scans the local network for Cheesy Arena | Not finding it is fine; the desk runs in manual mode |
-| 4 | Starts the desk and prints the address | Prints the reason and holds the window open |
+| 4 | Starts the desk and opens a browser at the address | Raises a message box naming the reason and the log |
 
 It then opens a browser at the desk's index page, which lists every screen.
 
@@ -73,13 +73,25 @@ picks the field back up.
 
 ### Stopping it
 
-Close the launcher window, or press Ctrl-C in it. Either one stops the desk properly: the event
-log is flushed and the port is released, so the next double-click starts cleanly.
+There is no window to close, on purpose. The launcher is built as a Windows application rather
+than a console one, so a double-click leaves nothing on screen. A window that runs the show is a
+window somebody closes: on a desk laptop it reads as leftover clutter from an install that has
+already finished, and one click takes the broadcast off air mid-match. "Leave it open" is a
+request, not a control.
 
-That is worth stating because it used to be false. Closing the window with the X button left the
-desk running with no window attached, still holding port 8720, and the next launch died with "port
-already in use" with nothing on screen to explain it. The desk is now tied to the launcher window
-three ways, so it comes down with the window even if the launcher itself is killed outright:
+Two ways to stop it, both of which take more than one careless click:
+
+- Task Manager (Ctrl+Shift+Esc), find **CalGames 2026 Content Desk**, End task.
+- PowerShell: `Stop-Process -Name CalGamesContentDesk -Force`
+
+Either one stops the desk properly: the event log is flushed and the port is released, so the next
+double-click starts cleanly. Running the launcher FROM a PowerShell or cmd window still attaches to
+that window and prints everything, and Ctrl-C there works as it always did.
+
+The teardown is worth stating because it used to be false. Closing the window with the X button left
+the desk running with no window attached, still holding port 8720, and the next launch died with
+"port already in use" with nothing on screen to explain it. The desk is tied to the launcher three
+ways, so it comes down even when the launcher is killed outright from Task Manager:
 
 | Layer | What it covers |
 | --- | --- |
@@ -235,7 +247,8 @@ README.
 | "The Node download does not match its published checksum" | The download was corrupted or intercepted | Try a different network. Do not work around it |
 | "This is 32-bit Windows" | The bundled Node cannot run here | Use a 64-bit machine |
 | A phone on the venue Wi-Fi cannot reach the desk | Client isolation, or the firewall | See below |
-| The window closed instantly | A crash before the console could be read | Read `desk-log.txt` in the desk folder |
+| A message box naming a failure | The desk did not start; the box names the reason | Read `desk-log.txt` in the desk folder |
+| Double-clicked it and nothing happened | Expected: there is no window. The browser should open | If no browser opened, read `desk-log.txt` |
 
 Everything the desk printed is in `desk-log.txt` next to its files, which is the first thing to
 ask for when somebody reports a problem over the radio.
