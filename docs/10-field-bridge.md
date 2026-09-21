@@ -259,4 +259,17 @@ Good for catching a regression in September without waiting on the next chance a
       finalize with a fourth pick, and everything on the desk that names the whole alliance (the
       selection board, the result card, the awards graphic) quietly falls back to the on-field
       three. Correct, but not what the event decided.
+- [ ] **Confirm `CompanionAddress` and `BlackmagicAddresses` are blank on the arena's
+      `/setup/settings`.** If `CompanionAddress` is set, and it is easy to inherit from a config
+      copied off another event's arena machine, Cheesy opens a TCP connection to Bitfocus Companion
+      and sends a button press at match preview, overlay, match start, teleop start, endgame, match
+      end, final score, alliance selection and abort. Companion is exactly what an AV crew already
+      runs to drive an ATEM, so that is a second automation system cutting the same show as the
+      desk's cue engine, with no shared state and no way for either to see the other. If the event
+      genuinely wants it, agree which Companion pages it presses and keep the desk off them.
+      `BlackmagicAddresses` makes the arena dial TCP 9993 and send `record`/`stop` around each
+      match; an ATEM Mini Extreme ISO does not speak that protocol, so this one only bites if there
+      is a HyperDeck in the rack.
+- [ ] **Confirm "Mute match sounds" is unticked** on the scorekeeper's match play page. Ticked, the
+      buzzer and the endgame warning vanish from the PA, the stream and the VOD for that match.
 - [ ] Rehearse the kill switch.

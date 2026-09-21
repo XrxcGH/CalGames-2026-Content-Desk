@@ -179,7 +179,7 @@ When it is ready the window prints something like:
 
 ```
 READY
-    http://10.0.100.23:8720/
+    http://172.22.0.23:8720/
     PIN 0864
 ```
 
@@ -386,7 +386,7 @@ This is the important one. It is the scoreboard.
 
 | Field | Value |
 | --- | --- |
-| **URL** | `http://10.0.100.23:8720/s/program` (use *your* address) |
+| **URL** | `http://172.22.0.23:8720/s/program` (use *your* address) |
 | **Width** | `1920` |
 | **Height** | `1080` |
 | **Use custom frame rate** | leave unticked |

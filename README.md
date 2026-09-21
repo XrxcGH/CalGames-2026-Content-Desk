@@ -40,7 +40,7 @@ You do not need a terminal, and you do not need to install anything. You need on
 2. Double-click it. Nothing appears on screen: it unpacks, finds Node, looks for the field
    and starts the desk, with no window to close by accident.
 3. Wait about a minute on the first run, seconds after that.
-4. Your browser opens on an address like `http://10.0.100.23:8720/`. That page lists every
+4. Your browser opens on an address like `http://172.22.0.23:8720/`. That page lists every
    screen. The PIN the control screens ask for, and everything the launcher did, are in
    `desk-log.txt` in the desk folder.
 

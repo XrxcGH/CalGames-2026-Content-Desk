@@ -97,7 +97,7 @@ function eccOf(text: string): { full: number[]; ecLen: number } {
 }
 
 const CASES = [
-  'http://10.0.100.23:8720/s/next',
+  'http://172.22.0.23:8720/s/next',
   'http://192.168.1.172:8720/s/quiz',
   'HELLO',
   'http://localhost:8720/s/next',

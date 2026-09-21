@@ -146,7 +146,7 @@ export interface ServerOpts {
   awards?: Awards | null;
   /** Recognition and info slides, plus the moderated shout-out queue. */
   slides?: Slides | null;
-  /** LAN-reachable base URL, e.g. "http://10.0.100.23:8720", for QR codes. */
+  /** LAN-reachable base URL, e.g. "http://172.22.0.23:8720", for QR codes. */
   lanBase?: string | null;
   /** Desk-editable event content, overlaid on config.json. */
   content?: EventContent | null;

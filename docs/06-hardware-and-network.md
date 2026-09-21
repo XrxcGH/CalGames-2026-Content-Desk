@@ -18,10 +18,17 @@ live on that network.**
                         └─────────┬──────────┘  · publishes to production only
                                   │
    ┌──────────────────────────────▼────────────────────────────────────────┐
-   │            PRODUCTION LAN  10.20.0.0/24  (content desk owns)          │
+   │           PRODUCTION LAN  172.22.0.0/24  (content desk owns)         │
    │  core · replay · OBS · ATEM · telestrator AP · consoles · side screens│
    └───────────────────────────────────────────────────────────────────────┘
 ```
+
+**Why 172.22 and not 10.20:** Cheesy Arena gives every driver station the subnet
+`10.<teamId/100>.<teamId%100>.0/24`, so team 2000's field VLAN is *exactly* `10.20.0.0/24`. Using
+that for the production LAN would put the same /24 directly connected on both of the bridge's
+NICs, which is the one topology that makes "IP forwarding is off, it is a consumer not a router"
+hard to demonstrate to an FTA who is right to ask. The field switch also null-routes all of
+`10.0.0.0/8`, so treat the whole block as FMS's.
 
 Rules:
 
@@ -100,9 +107,19 @@ rules enforce this:
    source name (e.g. `Cheesy audience display`). The desk sweeps every scene at connect and once a
    minute, and switches those sources off. This is deliberate: keep the naming convention.
 2. **On the ATEM DSK**, only one fill is ever keyed: ours. The Cheesy audience display machine
-   feeds the *venue projector* (the field's own screen), never the stream chain.
-3. **The scorekeeper keeps the audience display in "Blank" mode** on any machine that IS in the
-   stream chain. Put it on the FTA checklist ([10-field-bridge.md](10-field-bridge.md)).
+   feeds the *venue projector* (the field's own screen), **never** the stream chain. This rule is
+   absolute, because the scorekeeper cannot soften it for you: see below.
+3. **Do not rely on "Blank" mode.** An earlier version of this rule asked the scorekeeper to keep
+   the audience display blanked on any machine in the stream chain. That is not a promise anybody
+   can keep. Cheesy Arena sets the audience display to `match` *unconditionally* inside its
+   StartMatch handler, on every single match, and only returns it to blank three seconds after the
+   buzzer. So a machine in the chain shows the arena's scorebug over ours from the first match of
+   the day, however careful the scorekeeper is. If a machine in the chain genuinely has to show
+   something from the field, point it at `/displays/logo` or `/displays/webpage`, neither of which
+   the match-start handler touches.
+
+   The OBS-side defence (source names containing `cheesy` are switched off automatically) still
+   holds and is unaffected. It cannot help an ATEM input, which is why rule 2 is the real one.
 
 **Cable discipline:** HDMI over 25ft is unreliable. Use HDMI-over-Cat6 extenders or SDI converters
 for the field camera runs. Label every cable at both ends on Friday. This advice is boring and it
@@ -120,9 +137,24 @@ venue console runs **two mixes**, and the music source is physically absent from
 | **Event Spotify playlist** (the DJ machine) | Yes | **Never** |
 | MC / GA / emcee mics | Yes | Yes |
 | Desk mics (commentary/analysis), ducked under the announcer | Optional | Yes |
-| Match sounds from the Audience Display machine (charge, endgame, buzzer) | Yes | Yes |
+| Match sounds from the Audience Display machine (charge, endgame, buzzer) | Yes* | Yes* |
 | Field ambience mic (crowd + robots) | n/a | Yes |
 | Console game audio (arcade) | Yes | **Never** (see [05-arcade.md](05-arcade.md)) |
+
+\* **Two ways match sounds go silent on BOTH buses**, neither of which this table can prevent,
+because the audio is a browser playing files on the audience display machine:
+
+- The scorekeeper's match play page has a **Mute match sounds** checkbox, sent with `startMatch`.
+  Ticked, the buzzer and the endgame warning vanish from the PA, the stream and the archived VOD
+  for that match. It resets only when the match is reset, so it can be left on by accident.
+- Chrome will not autoplay audio in a page nobody has interacted with. A kiosk browser opened
+  full-screen on that machine, with nobody ever clicking inside it, has every sound silently
+  refused for the whole day.
+
+**So the Friday AV check has to prove it, not assume it:** open the audience display, **click once
+inside the page**, then fire a test sound from the arena's `/setup/field_testing` and listen for it
+on both buses. "Mute match sounds unticked" is on the scorekeeper checklist in
+[10-field-bridge.md](10-field-bridge.md).
 
 Rules that make it hold up all weekend:
 

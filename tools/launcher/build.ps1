@@ -159,7 +159,7 @@ Double-click START-DESK.cmd to run the desk for real.
 Double-click START-PRACTICE.cmd to try it with a pretend match instead.
 
 Either way, a window opens and after a minute it prints READY with an
-address like http://10.0.100.23:8720/
+address like http://172.22.0.23:8720/
 Type that address into any pit monitor, laptop, or phone on the same
 network to see the screens. Leave the window open: closing it stops
 the desk.

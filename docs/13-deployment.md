@@ -62,7 +62,8 @@ first that replies with Cheesy Arena's JSON. Somebody's dev server on 8080 does 
 ### Friday, when the AV rack goes in
 
 1. Copy the exe onto the desk laptop. Double-click it.
-2. Note the address it prints. It looks like `http://10.0.100.23:8720/`.
+2. Note the address it prints. It looks like `http://172.22.0.23:8720/` (whatever the desk's own
+   production LAN hands out; it will not be a field address).
 3. Open that address on every pit monitor and pick a screen from the **On a pit monitor** group.
 4. Point OBS at `/s/program` as a Browser Source, 1920×1080.
 
