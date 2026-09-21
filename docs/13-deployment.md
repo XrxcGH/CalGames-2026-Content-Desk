@@ -213,6 +213,7 @@ These exist for the lead, not for the volunteer. The volunteer double-clicks.
 | `/cheesy-host:10.0.100.5:8080` | Skip the scan and use this address |
 | `/no-cheesy` | Do not look for the field at all |
 | `/demo` | Practice mode: a pretend match on a loop, no field needed |
+| `/display-id:name` | How this desk names itself to Cheesy Arena (default `contentdesk1`). Agree it with the scorekeeper: docs/10 calls a display-ID collision the top real risk of the bridge, and until now the launcher could not set it |
 | `/no-browser` | Do not open a browser window |
 | `/no-wait` | Do not pause before closing the window |
 

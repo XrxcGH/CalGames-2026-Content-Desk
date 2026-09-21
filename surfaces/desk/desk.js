@@ -137,11 +137,20 @@ function paintLiveState(s) {
         : ' The render surface is up.'));
   }
 
-  // The panel: a reload must not claim an empty desk under a full graphic.
-  if (!onAir.length && (s.panel?.people?.length ?? 0) > 0) {
-    setText($('panelHint'),
-      `ON AIR NOW: ${s.panel.people.map(p => p.name).join(', ')}. `
-      + 'Tick names and press Put on air to replace them.');
+  /*
+   * The panel: a reload, or a second console, must not claim an empty desk
+   * under a full graphic.
+   *
+   * This wrote the truth into the hint and left the box above it still
+   * reading "Nobody on air. Tick a name.", so the panel contradicted itself.
+   * paintOnAir knows how to say it properly now; it just has to be told that
+   * the state moved, because otherwise it only ever runs on a local action
+   * and a second console never repaints at all.
+   */
+  const livePanel = (s.panel?.people ?? []).map(p => p.name).join(', ');
+  if (!onAir.length && livePanel !== lastLivePanel) {
+    lastLivePanel = livePanel;
+    paintOnAir();
   }
 
   // The event timer's hint lives with the ticker below, not here: this
@@ -925,9 +934,33 @@ function keepingFocus(box, keyAttr, rebuild) {
   if (target) target.focus();
 }
 
+/** What another console has on air, so the repaint only runs when it moves. */
+let lastLivePanel = null;
+
 function paintOnAir() {
   const box = $('panelOnAir');
   if (!onAir.length) {
+    /*
+     * "Nobody on air" is only true of THIS console.
+     *
+     * `onAir` is page-local and never seeded from the desk, so a second
+     * console opened mid-show starts empty while four analysts are live. The
+     * box said nobody was on while the hint under it correctly listed them,
+     * so the panel contradicted itself, and the first Put on air from the new
+     * console replaced everyone who was up with whatever that operator had
+     * ticked. A third volunteer arriving during an analysis segment is the
+     * normal way this happens, not an edge case.
+     */
+    const live = desk.state?.panel?.people ?? [];
+    if (live.length) {
+      const names = live.map(p => p.name).filter(Boolean).join(', ');
+      box.innerHTML = '<div class="empty"></div>';
+      box.firstChild.textContent = `On air now, put up from another console: ${names}. `
+        + 'Ticking names here and pressing Put on air replaces all of them.';
+      $('panelHint').textContent = 'This console has nobody ticked. What you tick here '
+        + 'REPLACES what is on air, it does not add to it.';
+      return;
+    }
     box.innerHTML = '<div class="empty">Nobody on air. Tick a name.</div>';
     $('panelHint').textContent = 'Tick a name to put them on. Six maximum.';
     return;

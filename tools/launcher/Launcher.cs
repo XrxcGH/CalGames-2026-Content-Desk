@@ -461,6 +461,9 @@ internal static class Launcher
         }
 
         Ok("found Cheesy Arena at " + found);
+        // Printed so it can be copied onto the FTA's sheet, which is what
+        // docs/10 asks the crew to do with it.
+        Detail("this desk registers with the field as: " + _opt.DisplayId);
         return found;
     }
 
@@ -534,11 +537,42 @@ internal static class Launcher
     /// take minutes; this takes seconds.
     private static string ScanForField(List<string> candidates)
     {
+        /*
+         * The field's own address first, ALONE, and stop there if it answers.
+         *
+         * docs/13 already promises this ("tried first ... and it turns the
+         * whole scan into a single request") and the code did not do it: every
+         * candidate was fanned out at once and the HTTP check ran only after
+         * all of them had finished or the 25-second deadline passed. At a venue
+         * that is roughly 500 addresses, because the machine is usually on the
+         * field VLAN and the production VLAN, so a desk restarted during a
+         * match put a 500-address port sweep onto the field network at 96-way
+         * concurrency while a match was live. The FTA signed off on a bridge
+         * that reads two endpoints; a port scan is not that, and nothing in
+         * the log said it had happened.
+         *
+         * In the case that actually matters, the field is at its default
+         * address and this returns after one connect and one GET.
+         */
+        if (candidates.Count > 0 && LooksLikeCheesy(candidates[0]))
+        {
+            Detail("field answered at " + candidates[0] + ", no scan needed");
+            return candidates[0] + ":" + FieldPort;
+        }
+
+        Detail("no answer at " + (candidates.Count > 0 ? candidates[0] : "the default address")
+            + "; sweeping " + candidates.Count + " address(es) on port " + FieldPort);
+
         var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Deliberately not disposed. If the scan hits its deadline the probes
         // behind it are still in flight, and disposing this out from under them
         // turns a slow network into a pile of exceptions on background threads.
-        var gate = new SemaphoreSlim(96);
+        //
+        // 16, not 96. This only runs when the field is NOT where it should be,
+        // which at an event means something is already wrong; 96 simultaneous
+        // connects into a network in that state is the launcher making it
+        // worse. Sixteen still covers a /24 well inside the deadline.
+        var gate = new SemaphoreSlim(16);
 
         var tasks = candidates.Select(ip => Task.Run(async () =>
         {
@@ -668,7 +702,13 @@ internal static class Launcher
         args.Append("--experimental-strip-types ");
         args.Append("\"").Append(entry).Append("\" ");
         args.Append("--port ").Append(port);
-        if (fieldHost != null) args.Append(" --cheesy --cheesy-host ").Append(fieldHost);
+        if (fieldHost != null)
+        {
+            args.Append(" --cheesy --cheesy-host ").Append(fieldHost);
+            // Always explicit, never left to the desk's own default: see
+            // Options.DisplayId, and docs/10 on display-ID collisions.
+            args.Append(" --display-id ").Append(_opt.DisplayId);
+        }
         if (_opt.Demo) args.Append(" --demo");
         if (_opt.Rehearsal) args.Append(" --rehearsal");
         // Layer 1 of tying the desk to this window: see TieToThisWindow below.
@@ -1267,6 +1307,8 @@ internal static class Launcher
         Console.WriteLine("    /port:8720             serve on a different port");
         Console.WriteLine("    /dir:D:\\desk           install somewhere other than Downloads");
         Console.WriteLine("    /cheesy-host:ip:8080   skip the scan, use this field address");
+        Console.WriteLine("    /display-id:name       how this desk names itself to the field");
+        Console.WriteLine("                           (default contentdesk1; agree it with the scorekeeper)");
         Console.WriteLine("    /no-cheesy             do not look for the field at all");
         Console.WriteLine("    /demo                  practice mode: a pretend match on a loop, no field needed");
         Console.WriteLine("    /rehearsal             practising by hand: keeps the practice out of the day's history");
@@ -1282,6 +1324,19 @@ internal static class Launcher
         public int Port = DefaultPort;
         public string CheesyHost;
         public bool NoCheesy;
+        /*
+         * How this desk introduces itself to Cheesy Arena.
+         *
+         * docs/10 calls a display-ID collision "the top real risk" of the
+         * bridge, because registering with an ID a genuine audience display
+         * already uses can reconfigure that display, and tells the crew to
+         * agree the ID with the scorekeeper and always pass it explicitly.
+         * Through the launcher, which is the only path a volunteer actually
+         * uses, that was unreachable: nothing appended --display-id and the
+         * desk fell through to its hardcoded default, so every desk at every
+         * event announced itself as the same name.
+         */
+        public string DisplayId = "contentdesk1";
         public bool Demo;
         /// A practice run the crew drives BY HAND on the event machine. The
         /// desk rebuilds the day from the day's log at boot, so an untagged
@@ -1312,6 +1367,7 @@ internal static class Launcher
                 else if (lower.StartsWith("/pin:", StringComparison.Ordinal)) o.Pin = a.Substring(5);
                 else if (lower.StartsWith("/dir:", StringComparison.Ordinal)) o.InstallDir = a.Substring(5);
                 else if (lower.StartsWith("/cheesy-host:", StringComparison.Ordinal)) o.CheesyHost = a.Substring(13);
+                else if (lower.StartsWith("/display-id:", StringComparison.Ordinal)) o.DisplayId = a.Substring(12);
                 else if (lower.StartsWith("/port:", StringComparison.Ordinal))
                 {
                     int p;
