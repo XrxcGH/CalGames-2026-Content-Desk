@@ -225,10 +225,20 @@ async function showKiosk(screen) {
   document.title = `${screen.name} · CalGames 2026`;
   $('stage').hidden = false;
 
-  // The overlay itself. `key=alpha` keeps it transparent so the feed shows
-  // through; the side screen and trivia draw their own background and are
-  // unaffected by it.
-  $('fg').src = `/s/${screen.id}?key=alpha`;
+  /*
+   * The overlay itself. `key=alpha` keeps it transparent so the feed shows
+   * through; the side screen and trivia draw their own background and are
+   * unaffected by it.
+   *
+   * `kiosk=1` is for the pages that are ALSO phone pages. "When do we play?"
+   * is built for a hand at arm's length: 560px wide with 13 to 24px type. On
+   * a pit monitor that is a narrow column of small text in the middle of a
+   * 1920x1080 screen, read from across a room, next to a chooser that
+   * promised every screen "fills the screen and looks after itself". The flag
+   * lets the page answer with room-scale type; a page that ignores it renders
+   * exactly as before.
+   */
+  $('fg').src = `/s/${screen.id}?key=alpha&kiosk=1`;
 
   if (!screen.feed) return;                    // draws its own background
 

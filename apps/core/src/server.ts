@@ -7,7 +7,7 @@
 
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -1955,6 +1955,33 @@ export function startServer(opts: ServerOpts) {
           return json(res, 200, await media.ingest(team, await readBody(req)));
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
+        }
+      }
+
+      /*
+       * What is already on disk.
+       *
+       * The cards console kept its "Recent cards" list in a page variable, so
+       * a reload, a crash or a second operator on another laptop saw an empty
+       * panel while the files sat in rec/cards. The page's own copy said the
+       * cards "land here", and the only way back to one was knowing the URL
+       * scheme and typing it. Newest first, which is the order somebody
+       * posting them wants.
+       */
+      if (path === '/api/cards' && req.method !== 'POST') {
+        const dir = join(root, 'rec', 'cards');
+        try {
+          const names = (await readdir(dir)).filter(n => n.toLowerCase().endsWith('.png'));
+          const rows = await Promise.all(names.map(async name => {
+            let savedAt = 0;
+            try { savedAt = (await stat(join(dir, name))).mtimeMs; } catch { /* raced */ }
+            return { name: name.replace(/\.png$/i, ''), url: `/cards/${name}`, savedAt };
+          }));
+          rows.sort((a, b) => b.savedAt - a.savedAt);
+          return json(res, 200, rows.slice(0, 50));
+        } catch {
+          // No directory yet just means nothing has been saved.
+          return json(res, 200, []);
         }
       }
 

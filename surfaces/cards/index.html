@@ -181,12 +181,36 @@ $('applyFooter').onclick = () => {
   say('Footer applied.');
 };
 
-function addHistory(name, url) {
-  history.unshift({ name, url });
-  while (history.length > 10) history.pop();
+function paintHistory() {
+  if (!history.length) return;
   $('history').innerHTML = history.map(h =>
     `<div><b>${escapeHtml(h.name)}</b><a href="${h.url}" target="_blank">open</a></div>`).join('');
 }
+
+function addHistory(name, url) {
+  // Drop any older entry for the same name: saving a corrected card for the
+  // same match should replace its row, not sit above an identical one.
+  const i = history.findIndex(h => h.name === name);
+  if (i >= 0) history.splice(i, 1);
+  history.unshift({ name, url });
+  while (history.length > 10) history.pop();
+  paintHistory();
+}
+
+/*
+ * What is already on the desk.
+ *
+ * This list lived only in a page variable, so a reload, a crash, or a second
+ * operator on another laptop saw an empty panel while the files sat in
+ * rec/cards. The panel's own copy says saved cards "land here", and the only
+ * route back to one was knowing the URL scheme and typing it by hand.
+ */
+fetch('/api/cards')
+  .then(r => (r.ok ? r.json() : []))
+  .then(rows => {
+    for (const row of rows.slice(0, 10).reverse()) addHistory(row.name, row.url);
+  })
+  .catch(() => { /* nothing saved yet, or signed out: the panel just stays empty */ });
 
 // Auto-build when the score posts: the whole point is that it's ready without
 // anyone remembering to make it.

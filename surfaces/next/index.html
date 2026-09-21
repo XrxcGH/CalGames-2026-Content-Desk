@@ -24,6 +24,23 @@ html {
   min-height: 100%;
 }
 html, body { height: 100%; }
+/*
+ * Pit-monitor mode, set by /s/watch when this page is mounted as a kiosk.
+ *
+ * Everything below is sized for a phone at arm's length. On a 1920x1080 pit
+ * TV read from across a room it was a 560px column of 13 to 24px text with
+ * two thirds of the screen empty. One scale factor on the root, so every
+ * length on the page grows together rather than each one being re-tuned, and
+ * a wider column so the match rows use the space.
+ */
+:root[data-kiosk="1"] { font-size: 24px; }
+:root[data-kiosk="1"] body { max-width: 1500px; padding: 40px 48px; gap: 28px; }
+:root[data-kiosk="1"] h1 { font-size: 48px; }
+:root[data-kiosk="1"] .sub { font-size: 26px; }
+:root[data-kiosk="1"] .m-name { font-size: 46px; }
+:root[data-kiosk="1"] .m-eta { font-size: 30px; }
+:root[data-kiosk="1"] .m-teams { font-size: 30px; }
+:root[data-kiosk="1"] .al-sep { width: 5px; }
 body {
   background: transparent;
   background-repeat: repeat, no-repeat;
@@ -149,6 +166,11 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 
 <script type="module">
 const $ = id => document.getElementById(id);
+// Room scale when /s/watch mounts this on a pit monitor. See the
+// :root[data-kiosk="1"] block above; on a phone this attribute is never set.
+if (new URLSearchParams(location.search).get('kiosk') === '1') {
+  document.documentElement.dataset.kiosk = '1';
+}
 // The 5s poll below repaints every cycle whether or not anything changed.
 // Guard the aria-live regions with these so a screen reader announces a
 // real change, not the same status line every 5 seconds.
