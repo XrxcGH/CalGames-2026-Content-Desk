@@ -37,13 +37,21 @@ export interface Cue {
   /** What the producer sees when deciding whether to trust it. */
   does: string;
   /**
-   * True when `run` calls `ctx.scene`, so the cue cannot do its job with OBS
-   * away. The desk greys out "Run now" for these and only these: it used to
-   * grey out ALL of them whenever OBS was disconnected, including the three
-   * music cues and the end game chip, which never touch OBS at all. A desk
-   * running the show on the venue projectors with no stream had show
-   * automation it could not run by hand, under a notice that said why in
-   * terms that were not true of the button it was greying out.
+   * True when `run` calls `ctx.scene`, so this cue ALSO cuts a camera.
+   *
+   * Not "cannot run without OBS". `ctx.scene` degrades on purpose: it emits
+   * `scene.change` on the bus whatever happens and only reaches the switcher
+   * `if (this.#obs?.connected)`, under the comment "A missing OBS is not a
+   * failure. The graphics still switch; only the camera cut is lost." Four of
+   * these seven cues emit their `screen.change` (the graphic the projectors
+   * and the overlay render) before they ever call `scene`.
+   *
+   * So no cue fails with OBS away, and the desk must not disable any of them.
+   * It first disabled all eleven, then, briefly, these seven; both were the
+   * same mistake, which is taking "talks to OBS" for "needs OBS". The flag is
+   * kept because the distinction is still worth SAYING: with OBS down these
+   * cues will switch the graphics and not the camera, and the person on the
+   * switcher has to cover that cut by hand.
    *
    * Declared rather than sniffed, and kept honest by a test that reads each
    * `run` back and fails if the two disagree.
@@ -57,7 +65,7 @@ export interface CueStatus {
   id: string;
   name: string;
   does: string;
-  /** See Cue.needsObs: whether "Run now" can work with OBS disconnected. */
+  /** See Cue.needsObs: this cue also cuts an OBS scene when OBS is connected. */
   needsObs: boolean;
   autopilot: boolean;
   firedAt: number | null;

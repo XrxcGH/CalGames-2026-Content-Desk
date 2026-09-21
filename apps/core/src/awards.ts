@@ -154,10 +154,31 @@ export class Awards {
   /** The award on screen, and the winner being held back for the reveal. */
   #live: { id: string; title: string; winner: string; team: number | null } | null = null;
 
-  constructor(root: string, bus: EventBus, list: unknown[] = []) {
+  /**
+   * @param opts.rehearsal  Practice mode: stage winners in a file of their own.
+   *
+   * Without this the practice ceremony destroyed the real ceremony. `reveal()`
+   * deletes a winner from `#staged` and saves, because the file is meant to
+   * empty itself as the awards are presented. `--rehearsal` set the event log
+   * aside and nothing else, so a desk manager rehearsing Show, Reveal, Clear
+   * on Saturday afternoon deleted every winner the Judge Advisor had loaded,
+   * from a file no log replay can rebuild, while README.md and the handbook
+   * both promised "everything behaves exactly as it does on the day; only the
+   * log is set aside".
+   *
+   * A separate file rather than a read-only pass over the real one, because a
+   * rehearsal is run on the real screens: loading the real winners in order to
+   * practise revealing them would put them on the projector in front of whoever
+   * is in the gym, which is the one thing this whole module exists to prevent.
+   * Practice starts with an empty book, the desk manager stages a fake winner,
+   * and the real book is not opened at all.
+   */
+  constructor(root: string, bus: EventBus, list: unknown[] = [],
+              opts: { rehearsal?: boolean } = {}) {
     this.#bus = bus;
     this.#dir = join(root, 'data');
-    this.#file = join(this.#dir, 'awards-staged.json');
+    this.#file = join(this.#dir,
+      opts.rehearsal ? 'awards-staged.rehearsal.json' : 'awards-staged.json');
     this.#list = (Array.isArray(list) ? list : []).flatMap(raw => {
       const item = raw as Record<string, unknown> | null;
       const id = clean(item?.['id'], 40);
@@ -194,7 +215,30 @@ export class Awards {
     }
   }
 
-  async #save(): Promise<void> {
+  /** The tail of the write queue. Never rejects; see #save. */
+  #writing: Promise<void> = Promise.resolve();
+
+  /**
+   * One writer at a time, for the same reason EventContent serialises its own.
+   *
+   * #writeNow stages through a temp file with a FIXED name and renames it into
+   * place, which is atomic against a reader and not against another writer.
+   * `reveal()` calls this as `void this.#save()` and the ceremony runs one
+   * award after another, so two saves overlap whenever the desk moves quickly:
+   * the first rename consumes the temp file and the second fails ENOENT, or
+   * the `size === 0` branch races a write and leaves `{"staged": {}}` on disk.
+   * Both failures are swallowed into a console warning, on the file holding
+   * the winners.
+   */
+  #save(): Promise<void> {
+    this.#writing = this.#writing.then(
+      () => this.#writeNow(),
+      () => this.#writeNow(),   // a broken link must not stop the queue
+    );
+    return this.#writing;
+  }
+
+  async #writeNow(): Promise<void> {
     try {
       if (this.#staged.size === 0) {
         // An empty file named "staged winners" is still an invitation to go

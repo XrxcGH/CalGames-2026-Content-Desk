@@ -107,6 +107,19 @@ process.on('uncaughtException', err => {
 const bus = new EventBus();
 const media = new MediaLibrary(join(ROOT, 'media'));
 
+/*
+ * Practice mode, decided once and read by everything that must not leave a
+ * mark on the real event.
+ *
+ * It started life inside the log-opening try block, which is the only thing it
+ * was used for. It is not only about the log: the Judge Advisor's staged
+ * winners live in a file of their own that no log replay rebuilds, and a
+ * practised reveal deletes from it. Anything else that persists across a
+ * restart belongs on this list too.
+ */
+const rehearsalTag = has('demo') || has('replay') || has('rehearsal')
+  ? 'rehearsal' : undefined;
+
 try { await media.scan(); } catch (err) {
   console.warn('[media] scan failed, robot cutouts unavailable:', (err as Error).message);
 }
@@ -123,8 +136,6 @@ try {
   // replayed them. A practice award reveal is the worst of them: it marks
   // that award presented, to a team that did not win it, on the checklist
   // the crew walks during the one segment that cannot be re-run.
-  const rehearsalTag = has('demo') || has('replay') || has('rehearsal')
-    ? 'rehearsal' : undefined;
   await bus.openLog(logPathFor(join(ROOT, 'data', 'events'), new Date(), rehearsalTag));
   if (rehearsalTag) {
     console.log('[bus] rehearsal session: logging to a .rehearsal file the ' +
@@ -556,7 +567,11 @@ if (config.rundown.segments.length) {
 // The awards ceremony: titles and definitions from config, the reveal from a
 // button, and the winner held out of the bus until the moment it happens on
 // stage. See awards.ts for why that last part is load-bearing.
-const awards = new Awards(ROOT, bus, config.awards.list);
+// `rehearsalTag` is not only about the log: the staged-winner book is a
+// separate file that no log replay rebuilds, and a practised reveal deletes
+// from it. See the Awards constructor.
+const awards = new Awards(ROOT, bus, config.awards.list,
+  { rehearsal: !!rehearsalTag });
 awards.attach();
 await awards.load();
 // The JA edits the award list from their own page; every change lands in
@@ -645,11 +660,17 @@ const vitals = new Vitals({
 
 // A match video is queued when the score is posted, not at the buzzer: the
 // cut needs the score-reveal timestamp to know where its second part starts.
-// Not in demo mode OR replay mode: simulated and replayed matches look exactly
-// like field data here, and autoQueueMatches defaults on, so either would
-// otherwise queue bogus "Qualification N" uploads. A replayed log restamps
-// event times to now, so the cut bounds even look plausible.
-if (config.publish.autoQueueMatches && !has('demo') && !has('replay')) {
+// Not in any rehearsal mode: simulated, replayed and hand-driven practice
+// matches look exactly like field data here, and autoQueueMatches defaults on,
+// so any of them would otherwise queue bogus "Qualification N" uploads. A
+// replayed log restamps event times to now, so the cut bounds even look
+// plausible.
+//
+// --rehearsal was missing from this guard, which made practice worse than
+// doing nothing: the queue refuses a second item with the same label, so a
+// practised "Qualification 12" on Saturday morning meant the REAL
+// Qualification 12 was silently never queued and its video was lost.
+if (config.publish.autoQueueMatches && !rehearsalTag) {
   bus.subscribe(ev => {
     if (ev.type !== 'match.score_posted') return;
     void publish.queueMatch().then(item => {
@@ -665,7 +686,7 @@ if (config.publish.autoQueueMatches && !has('demo') && !has('replay')) {
 // matches: a replayed set_end carries its original-day startedAt in the
 // payload (payloads are not restamped), so the cut range would span from the
 // recording day to now.
-if (config.publish.autoQueueArcade && !has('demo') && !has('replay')) {
+if (config.publish.autoQueueArcade && !rehearsalTag) {
   bus.subscribe(ev => {
     if (ev.type !== 'arcade.set_end') return;
     const set = (ev.payload as {

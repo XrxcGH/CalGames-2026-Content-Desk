@@ -44,7 +44,20 @@
    strip on the top edge, and that is a deliberate acceptance: the
    round-over-chip stack is 103px on its own, and every further pixel is the
    game's own picture. */
-:root { --strip-h: 160px; }
+:root {
+  --strip-h: 160px;
+  /* What the strip actually occupies: the 10px action-safe pad, the 160px of
+     content, and the 3px gold border. Everything that hangs BELOW the strip
+     measures from here, not from --strip-h.
+     This distinction is the whole reason the padding broke things when it was
+     first added: --strip-h has always meant the CONTENT box (which is why the
+     round tab sat at `--strip-h + 3px`, adding the border by hand), so a 10px
+     pad grew the strip's outer edge to 173 while the GP panel and the up-next
+     chip stayed anchored to 176 and 180. Their clearance fell from 13px and
+     17px to 3px and 7px, and the strip's gold border and the GP panel's gold
+     cap read as one smeared band. */
+  --strip-outer: calc(var(--strip-h) + 10px + 3px);
+}
 /* The set card runs across the TOP of the frame, not the bottom: Mario Kart
    and Smash both draw their own HUD (coins, lap, position, damage) along the
    bottom of the capture, and covering it referees the game blind. */
@@ -128,7 +141,7 @@
      longer fit the old 330. */
   /* --safe-x, not 24px: at 24 the panel's own edge sat 1.25% from the frame
      edge and a 3.5% crop took the points column off the right of it. */
-  position: absolute; right: var(--safe-x); top: calc(var(--strip-h) + 16px); width: 520px;
+  position: absolute; right: var(--safe-x); top: calc(var(--strip-outer) + 13px); width: 520px;
   background-color: var(--cg-purple);
   background-image: var(--tex-perf); background-size: var(--tex-perf-size);
   clip-path: var(--chamfer); --ch: 12px;
@@ -174,7 +187,7 @@
    as well as its own or it would still be on screen after the strip has gone.
    Its resting transform is the centering one, which must be preserved. */
 .ffa-tab { transform: translateX(-50%); }
-.ffa-tab[data-off] { transform: translate(-50%, calc(-100% - var(--strip-h))); }
+.ffa-tab[data-off] { transform: translate(-50%, calc(-100% - var(--strip-outer))); }
 /* Inset from the right edge, so it must travel its own width plus the inset.
    The inset is --safe-x now, and this has to travel the same distance or the
    panel parks with a sliver of itself still on frame. */
@@ -206,7 +219,7 @@
 #upNext {
   /* --safe-x, not 24px: the chip carries the next set's team numbers, and at
      24 its first characters were inside the 67.2px action-safe line. */
-  position: absolute; left: var(--safe-x); top: calc(var(--strip-h) + 20px);
+  position: absolute; left: var(--safe-x); top: calc(var(--strip-outer) + 17px);
   /* Always laid out, never display:none: it has to be able to slide away, and
      an element that is display:none has nowhere to slide from. */
   display: inline-flex;
@@ -225,6 +238,10 @@
   background-size: var(--tex-perf-size);
   border-bottom: var(--rule);
   min-height: var(--strip-h);
+  /* The same action-safe clearance .ar-card takes. Without it the two strips
+     render 10px apart, so switching a set from two players to three moved the
+     strip's bottom edge and every panel hanging off it. */
+  padding-top: 10px;
 }
 .ffa-cell {
   position: relative;
@@ -260,7 +277,7 @@
   /* Starts exactly on the strip's outer edge: the strip plus its 3px gold
      border. The tab is itself a gold shell, so meeting the band flush reads as
      one continuous edge. Guessing 6px for that border left a 3px white seam. */
-  top: calc(var(--strip-h) + 3px); z-index: 4;
+  top: var(--strip-outer); z-index: 4;
   padding: 6px 24px 10px;
   background: var(--cg-gold);
   --ch: 14px;

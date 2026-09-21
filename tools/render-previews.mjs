@@ -20,7 +20,7 @@
 
 import { spawn } from 'node:child_process';
 import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -580,15 +580,41 @@ function recoverAbandoned(files) {
   for (const file of files) {
     const backup = `${file}.preview-backup`;
     if (!existsSync(backup)) continue;
-    if (existsSync(file)) {
-      // Both present: the live file won, so the copy is just litter.
+
+    if (!existsSync(file)) {
+      copyFileSync(backup, file);
+      rmSync(backup, { force: true });
+      console.log(`[previews] put back ${basename(file)} from a render that was `
+        + 'killed before it could tidy up');
+      continue;
+    }
+
+    /*
+     * Both present. Only a byte-identical copy is litter.
+     *
+     * Treating "the live file exists" as "the live file won" was wrong, and
+     * wrong in the case that actually happens. Three of the five snapshotted
+     * files are never deleted by a render at all, they are only written to, so
+     * after a hard kill the live file ALWAYS exists and holds the fixtures
+     * this render posted into it. Deleting the backup then threw away the
+     * event's real data and printed nothing: a killed run on Saturday morning
+     * left a fixture "Qualification 12" in the publish queue, and the queue
+     * refuses a second item with that label, so the real Qualification 12
+     * would never be queued and its video would be lost.
+     *
+     * When they differ, the backup is the older and more trustworthy of the
+     * two, so it is kept and reported rather than restored silently: this runs
+     * before a render, and overwriting whatever the operator has been doing
+     * since would be its own kind of data loss.
+     */
+    if (readFileSync(backup).equals(readFileSync(file))) {
       rmSync(backup, { force: true });
       continue;
     }
-    copyFileSync(backup, file);
-    rmSync(backup, { force: true });
-    console.log(`[previews] put back ${basename(file)} from a render that was `
-      + 'killed before it could tidy up');
+    console.warn(`[previews] ${basename(file)} differs from the copy a killed `
+      + 'render left behind. Keeping both. The copy is '
+      + `${basename(backup)}; if this machine ran previews and was interrupted, `
+      + 'that copy is the event data and the live file holds render fixtures.');
   }
 }
 

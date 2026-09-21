@@ -422,6 +422,10 @@ $('loadMatch').onclick = () => {
   if (!displayName || !red.length || !blue.length) {
     setText($('loadHint'), 'Type the match name and both alliances. The grey text is an '
       + 'example, not a match: loading it would put those teams on every screen.');
+    // Register it, or the refusal inherits the countdown an earlier load
+    // started and can be wiped seconds after it appears: the operator looks
+    // back at a filled-in box and a blank hint and believes the match loaded.
+    noteLoadHint();
     return;
   }
   emit('match.loaded', { id: `m${Date.now()}`, displayName, red, blue });
@@ -438,12 +442,22 @@ $('loadMatch').onclick = () => {
   const held = !!desk.state?.screenHold && desk.state.screen !== 'overview';
   const teams = `red ${red.map(t => t.number).join(' ')} against blue `
     + `${blue.map(t => t.number).join(' ')}`;
+  /*
+   * "Press Auto to bring it up" was wrong, which is worse than saying nothing.
+   * `screen.change` with `auto` only clears the hold; the reducer's own
+   * comment says "'auto' is not a screen: it hands control back and leaves
+   * whatever is on air alone until the next lifecycle event moves it". The
+   * next lifecycle event was match.loaded, and it has already fired, so
+   * pressing Auto releases the hold, lights the Auto chip, and leaves the
+   * arcade bumper on every screen in the venue while the operator starts
+   * talking over an overview nobody can see. Press Pre-match.
+   */
   setText($('loadHint'), held
     ? `${displayName} is loaded, ${teams}. It is NOT on the program screen: you are `
       + `holding ${SCREEN_LABEL[desk.state.screen] ?? desk.state.screen}. `
-      + 'Press Auto, or the screen you want, to bring it up.'
+      + 'Press Pre-match to put the overview up.'
     : `${displayName} is loaded and on the program screen: ${teams}.`);
-  loadHintAt = Date.now();
+  noteLoadHint();
 };
 
 /*
@@ -452,10 +466,13 @@ $('loadMatch').onclick = () => {
  * It named a specific match and stood there until something else happened to
  * write this element: two matches later the console was still reporting the
  * first one as "loaded and on the program screen", which by then was a
- * sentence about nothing. paintLiveState clears it once it is stale.
+ * sentence about nothing. Every path that writes #loadHint must call
+ * noteLoadHint(), including the refusal: a message that did not start the
+ * clock gets retired on somebody else's.
  */
 let loadHintAt = 0;
 const LOAD_HINT_MS = 45_000;
+const noteLoadHint = () => { loadHintAt = Date.now(); };
 setInterval(() => {
   if (loadHintAt && Date.now() - loadHintAt > LOAD_HINT_MS) {
     loadHintAt = 0;
@@ -1231,8 +1248,20 @@ function vitalsNotAnswering() {
   setText($('vitalsWord'), `not answering${ago}`);
   $('vitalsMirror').dataset.l = 'unknown';
   setText($('vitalsMirrorText'), 'doors check: not answering');
-  // The rows below are the last thing it said, not the current state.
+  /*
+   * The rows below are the last thing it said, not the current state. Dimming
+   * them is not enough on its own: a 50% opacity says nothing to a screen
+   * reader and nothing on the printed sheet, and this panel's own rule is that
+   * a level is never carried by colour alone. An operator arrowing through the
+   * rows would hear "Announcer mic, OK" and report the building healthy while
+   * the check had been dead for ten minutes. The banner is a role="status", so
+   * the death of the check is announced once, in words.
+   */
   $('vitals').dataset.stale = 'true';
+  $('vitalsStale').hidden = false;
+  $('vitalsStale').textContent = 'These rows are the last answer the check gave'
+    + `${ago ? ago.replace(', last answered', ', from') : ''}, not the state of the `
+    + 'building now. Press Run the check.';
 }
 
 async function loadVitals(manual = false) {
@@ -1243,6 +1272,7 @@ async function loadVitals(manual = false) {
     vitalsMisses = 0;
     vitalsLastOk = Date.now();
     delete $('vitals').dataset.stale;
+    $('vitalsStale').hidden = true;
     const verdict = VITAL_VERDICT[r.worst] ?? r.worst;
     $('vitalsDot').dataset.l = r.worst;
     setText($('vitalsWord'), verdict);
@@ -1692,12 +1722,24 @@ function paintAwards() {
       tick.checked = awardPicked === a.id;
       tick.onchange = () => {
         awardPicked = a.id;
-        // The list and the custom box are two ways to say the same thing, so
-        // choosing one clears the other. They used to be able to hold
-        // conflicting answers at once, which Show could only refuse.
-        if ($('awCustomTitle').value || $('awCustomDesc').value) {
+        /*
+         * The list and the custom box are two ways to say the same thing, so
+         * choosing one clears the other. They used to be able to hold
+         * conflicting answers at once, which Show could only refuse.
+         *
+         * Say so when it costs the operator something. The other direction
+         * (typing in the box, which drops the list pick) has always written
+         * #awHint; this one silently binned a title and a definition somebody
+         * had just typed for an off-book award, with the hall waiting, and
+         * with no way to get the wording back. Clicking a radio to check the
+         * running order is a reasonable thing to do mid-ceremony.
+         */
+        const typed = $('awCustomTitle').value || $('awCustomDesc').value;
+        if (typed) {
           $('awCustomTitle').value = '';
           $('awCustomDesc').value = '';
+          $('awHint').textContent = `Using "${a.title}" from the list. The custom `
+            + 'award you had typed has been cleared.';
         }
       };
       const who = document.createElement('span');
@@ -2000,9 +2042,20 @@ let cueSig = '';
  */
 let cueNoteHeldUntil = 0;
 
-/** Say something back, and keep it on screen long enough to be read. */
+/**
+ * Say something back, and keep it on screen long enough to be read.
+ *
+ * Writes directly rather than through setText. #cueNote is aria-live, and
+ * setText skips an identical string, so pressing Run now twice in a row put
+ * "ran it" up once and said nothing the second time: no flicker for a sighted
+ * operator, no announcement for a screen reader, and the standing count is
+ * suppressed for four seconds so nothing breaks the tie either. The honest
+ * reading of a silent console is that the press missed, so it gets pressed
+ * again, and the sting plays twice over the announcer. Re-assigning the same
+ * string is the point: it is what makes it be said again.
+ */
 function cueSay(msg) {
-  setText($('cueNote'), `· ${msg}`);
+  $('cueNote').textContent = `· ${msg}`;
   cueNoteHeldUntil = Date.now() + 4000;
   setTimeout(() => { cueSig = ''; void loadCues(); }, 4100);
 }
@@ -2062,8 +2115,17 @@ function paintCues({ available, obs, cues = [] }) {
    * could not fire by hand, and a reason printed underneath that was false of
    * all four. The engine now says which cues need it (see Cue.needsObs).
    */
+  /*
+   * With OBS away, every cue still runs. `ctx.scene` emits the scene change on
+   * the bus whatever happens and only reaches the switcher when OBS is
+   * connected, so the graphics still switch and only the camera cut is lost.
+   * This panel disabled all eleven Run now buttons, then briefly the seven
+   * that cut a scene; both were the same mistake, reading "talks to OBS" as
+   * "needs OBS". Nothing is disabled now. The count is still worth saying,
+   * because somebody has to cover those cuts by hand.
+   */
   const obsDown = !!(obs && obs.attached && !obs.connected);
-  const blocked = obsDown ? cues.filter(c => c.needsObs).length : 0;
+  const cutting = obsDown ? cues.filter(c => c.needsObs).length : 0;
 
   /*
    * Where the keyboard was, so it can be put back.
@@ -2123,11 +2185,10 @@ function paintCues({ available, obs, cues = [] }) {
     const fire = document.createElement('button');
     fire.className = 'btn';
     fire.textContent = 'Run now';
-    const stuck = obsDown && c.needsObs;
-    fire.title = stuck
-      ? `${c.name} cuts an OBS scene, and OBS is not connected.`
+    fire.title = obsDown && c.needsObs
+      ? `Run ${c.name} once, right now. OBS is not connected, so the graphics `
+        + 'switch and the camera cut does not: take that cut by hand.'
       : `Run ${c.name} once, right now, whatever it is set to.`;
-    fire.disabled = stuck;
     fire.dataset.cue = c.id;
     fire.dataset.act = 'fire';
     fire.onclick = () => void cueAction(c.id, 'fire');
@@ -2137,21 +2198,30 @@ function paintCues({ available, obs, cues = [] }) {
   }));
 
   if (restore) {
-    const back = box.querySelector(
-      `[data-cue="${CSS.escape(restore.cue)}"][data-act="${restore.act}"]`);
-    // Not if it came back disabled: focusing a disabled button silently does
-    // nothing, which is the same dead keyboard by another route.
-    if (back && !back.disabled) back.focus();
+    const esc = window.CSS && CSS.escape ? CSS.escape(restore.cue) : restore.cue;
+    const row = box.querySelector(`[data-cue="${esc}"]`)?.closest('.cue');
+    /*
+     * Land somewhere, always. An earlier version skipped the focus when the
+     * asked-for button came back disabled, which produced exactly the dead
+     * keyboard this block exists to prevent: replaceChildren has already
+     * destroyed the focused node, so activeElement is <body> and the next Tab
+     * restarts twenty sections above the panel. Fall through to the other
+     * control on the same row, then to the row itself.
+     */
+    const target = box.querySelector(`[data-cue="${esc}"][data-act="${restore.act}"]:not([disabled])`)
+      ?? row?.querySelector('button:not([disabled])')
+      ?? box.querySelector('button:not([disabled])');
+    if (target) target.focus();
   }
 
-  if (blocked) {
+  if (cutting) {
     const warn = document.createElement('p');
     warn.className = 'hint';
     warn.style.padding = '8px';
-    warn.textContent = `OBS is not connected, so Run now is off for the ${blocked} `
-      + `cue${blocked === 1 ? '' : 's'} that cut a scene. The rest still run by hand, `
-      + 'and arming works for all of them: a cue armed now starts working the '
-      + 'moment OBS comes back.';
+    warn.textContent = 'OBS is not connected. Every cue still runs and the graphics '
+      + `still switch; the ${cutting} cue${cutting === 1 ? '' : 's'} that also cut a `
+      + 'camera will not move it, so take those cuts in the switcher by hand until '
+      + 'OBS is back.';
     box.append(warn);
   }
 }

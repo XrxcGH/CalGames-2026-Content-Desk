@@ -300,19 +300,6 @@
 .bar-rp .rp { background: rgba(0, 0, 0, .30); box-shadow: none; color: rgba(255, 255, 255, .72); }
 .bar-rp .rp[data-earned="true"] { background: var(--cg-green-hi); color: var(--cg-white); }
 
-/* The same 18px lift the alliance columns take, so this column's stack stays
-   level with the team numbers (both centre on y=993, measured).
-
-   KNOWN, and a decision rather than an oversight: the clock plus the phase
-   chip is a 130px stack (64 + 10 + 56) in a 159px bar whose top is y=921, so
-   only 121px of it can sit above the 3.5% action-safe line at y=1042. The
-   chip's bottom lands at y=1058, 22px off frame. It cannot be fixed from
-   here: lifting this column alone breaks the alignment above, and shrinking
-   the chip to fit puts it under the project's own 28px broadcast type floor,
-   which the test card measures against. Clearing it properly needs the bar
-   about 16px taller, which moves --bar-h and everything positioned off it
-   (the lower third sits at calc(var(--bar-h) + 28px)). The team numbers, the
-   critical content, do clear it at 38.3px. */
 /* 38px, not 18, and the gap and the chip's leading come down with it.
    Everything in this bar has to finish above the 3.5% action-safe line at
    y=1042.2, and as shipped nothing did: the phase chip ended at 1058 in

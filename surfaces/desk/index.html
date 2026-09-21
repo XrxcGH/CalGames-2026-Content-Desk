@@ -223,7 +223,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
    the verdict above them already says "not answering". Dimmed rather than
    cleared: the last known state is still the most useful thing on the panel
    when the check itself is the thing that broke. */
-#vitals[data-stale="true"] { opacity: .5; }
+/* Dimmed, but not compounding: an "off" row already carries its own .5, and
+   the two multiplied to .25, which is barely on the screen at all. The words
+   in #vitalsStale are what actually carries this state; see desk.js. */
+#vitals[data-stale="true"] .v { opacity: .55; }
+#vitals[data-stale="true"] .v[data-l="off"] { opacity: .55; }
 #vitals .v { display: grid; grid-template-columns: 14px 118px 1fr auto; gap: 10px;
   align-items: baseline; padding: 6px 8px; margin-bottom: 4px; font-size: 13px;
   background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 6px; }
@@ -877,6 +881,10 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 <section id="vitalsSection">
         <h2>Doors check <span class="vdot" id="vitalsDot" aria-hidden="true"></span>
           <span id="vitalsWord">not run yet</span></h2>
+        <!-- Said in words, and announced once, because dimming the rows is
+             invisible to a screen reader and to the printed sheet. -->
+        <p class="hint" id="vitalsStale" role="status" hidden
+          style="color:var(--st-warn-text,var(--st-warn));font-weight:600"></p>
         <p class="hint">Everything the desk can check about itself. The point is the
           failures nothing else complains about: a muted announcer mic, a disk that
           will fill during playoffs, a stream dropping frames.</p>

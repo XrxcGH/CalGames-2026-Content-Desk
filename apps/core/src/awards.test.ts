@@ -584,3 +584,70 @@ test('a peer that is not physically adjacent is still the one that moves', async
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a practice ceremony cannot touch the real staged winners', async () => {
+  /*
+   * The handbook and README both promise that a rehearsal changes nothing but
+   * the log: "everything behaves exactly as it does on the day; only the log
+   * is set aside". The staged-winner book is NOT the log. It is a separate
+   * file that no replay rebuilds, and reveal() deletes from it as each award
+   * is presented, which is correct on the day and catastrophic in practice.
+   *
+   * So the desk manager rehearses Show, Reveal, Clear on Saturday afternoon,
+   * exactly as the Friday checklist tells them to, and every winner the Judge
+   * Advisor loaded that morning is gone. The JA may be unreachable by the
+   * ceremony; that is the whole reason the file exists.
+   */
+  const dir = await scratch();
+  try {
+    const LIST = [
+      { id: 'directors', title: "Directors' Award", description: 'x.', day: 'Saturday' },
+      { id: 'spirit', title: 'Spirit Award', description: 'y.', day: 'Saturday' },
+    ];
+
+    // The JA loads winners on the real desk, as judging concludes.
+    const real = new Awards(dir, new EventBus(), LIST);
+    real.attach();
+    await real.load();
+    await real.stage('directors', { winner: 'The Funky Monkeys', team: 846 });
+    await real.stage('spirit', { winner: 'Space Cookies', team: 1868 });
+
+    // The desk manager practises the whole ceremony, in rehearsal mode.
+    const practice = new Awards(dir, new EventBus(), LIST, { rehearsal: true });
+    practice.attach();
+    await practice.load();
+    assert.equal(practice.snapshot(true).list.filter(a => a.staged).length, 0,
+      'practice opens an empty book: rehearsing on the real screens must not '
+      + 'put a real winner on the projector');
+    await practice.stage('directors', { winner: 'Practice Team', team: 1 });
+    await practice.stage('spirit', { winner: 'Another Practice Team', team: 2 });
+
+    // The practice winners go in a book of their own, named so that nothing
+    // and nobody confuses it with the real one.
+    const { readdir } = await import('node:fs/promises');
+    const during = await readdir(join(dir, 'data'));
+    assert.ok(during.includes('awards-staged.json'),
+      'the real book is untouched while practice runs');
+    assert.ok(during.some(f => /rehearsal/.test(f) && f !== 'awards-staged.json'),
+      'and the practice winners are somewhere else entirely');
+
+    for (const id of ['directors', 'spirit']) {
+      practice.show({ id });
+      practice.reveal();
+      practice.clear();
+    }
+
+    // Doors. The desk restarts normally.
+    const afterDoors = new Awards(dir, new EventBus(), LIST);
+    afterDoors.attach();
+    await afterDoors.load();
+    const staged = afterDoors.snapshot(true).list.filter(a => a.staged);
+    assert.equal(staged.length, 2,
+      'both winners survive the rehearsal');
+    assert.equal(staged.find(a => a.id === 'directors')?.staged?.winner,
+      'The Funky Monkeys', 'and they are the JA’s winners, not the practice one');
+    assert.equal(staged.find(a => a.id === 'spirit')?.staged?.winner, 'Space Cookies');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
