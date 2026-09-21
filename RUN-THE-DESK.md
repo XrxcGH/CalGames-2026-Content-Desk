@@ -200,6 +200,12 @@ red, and every row also spells its level out as a word (**OK**, **WARNING**,
 **FAILED**, **UNKNOWN**, **OFF**), so the printed sheet carries the verdicts
 and nobody has to tell the colours apart.
 
+If the verdict ever reads **not answering**, the check itself has stopped
+running, and the rows underneath go faint because they are the last thing it
+managed to say rather than the state of the building now. Press **Run the
+check**. If it stays that way the desk window has probably closed; chapter 2
+starts it again.
+
 Run it **at doors**, meaning when the audience is let in, not five minutes
 before the first match.
 
@@ -538,6 +544,11 @@ Two different things, deliberately.
   **stays up until you press Hide card**: only the automatic *Field timeout*
   card clears itself. The Delay card section tells you on screen whenever one
   is live, and the jump strip has a **Delay card** chip to get back to it.
+  The five buttons cover almost everything. If you type your own, keep it
+  short: the card holds about ninety characters, the box stops you at that,
+  and it counts the last thirty down beside the field so you can see the end
+  coming. Fill in **Back in** and the time appears on its own line under the
+  message, which is the part the hall actually wants.
 - **Safety message**: covers every screen in the building, and stays until you
   clear it. This is for an evacuation or a hold. It is not for a long queue.
 
@@ -624,6 +635,35 @@ digits readable from the far end of the gym; turn one side-screen TV to face
 the field and the drive teams have their setup clock. It clears itself the
 moment the match starts. The label and minutes boxes run any other countdown:
 meeting starts, doors, end of lunch.
+
+### Show automation
+
+Near the top of the console, under **Show automation**, is a list of cues. A
+cue is the desk doing one thing by itself: cutting to the field when the match
+arms, dropping the music when the announcer opens up, putting the score up
+when a result posts.
+
+**Every cue ships switched off, and that is the right way to start.** An off
+cue still watches the show and counts what it *would* have done, so the row
+tells you things like *off, would have run 4x*. Run a few matches by hand,
+read those counts, and arm the ones that were right every time. There is no
+prize for arming them all on Saturday morning.
+
+- **Arm** lets one cue run by itself from then on. **Turn off** stops it.
+- **Run now** fires a cue once, by hand, whatever it is set to.
+- **Arm every cue** does the whole list at once, and asks first.
+
+You can always take anything by hand afterwards. Autopilot never cuts away
+from the field in the middle of a match.
+
+If OBS is not connected, the cues that cut an OBS scene grey out their **Run
+now** and the panel says how many. The rest, the music cues and the end game
+chip, keep working: they never touch OBS. Arming works for all of them either
+way, and an armed cue starts working the moment OBS comes back.
+
+If a cue fails, its row says so in words and keeps saying so until it next
+succeeds. That row is the only place a failed cue is reported, which is the
+other reason to read this panel between matches.
 
 ### Event settings: names, sponsors, and the run of show
 
