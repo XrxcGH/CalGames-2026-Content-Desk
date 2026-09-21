@@ -50,7 +50,22 @@ const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.mp4': 'video/mp4',
+  '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.ico': 'image/x-icon',
+  /*
+   * The house audio library. Every type the clip sniffer accepts, because a
+   * file it accepts on upload has to be playable afterwards.
+   *
+   * There were none of these, so every walk-up and stinger was served as
+   * application/octet-stream. Chrome usually sniffs its way past that; Safari
+   * does not reliably, and an iPad is a machine somebody at this event will
+   * point at /s/house. The failure mode is the worst kind: the clip uploads,
+   * the library lists it, the desk fires it during an alliance introduction,
+   * and the room gets silence.
+   */
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg', '.flac': 'audio/flac', '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac', '.opus': 'audio/ogg',
 };
 
 /** Surfaces, grouped the way an operator thinks about them. */

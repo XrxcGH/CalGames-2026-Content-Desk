@@ -133,6 +133,26 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
     <p class="hint">Walk-ups live in <span class="mono">media/audio/walkups</span>, named for the
       team: <span class="mono">254.mp3</span>, or <span class="mono">254 - Song.mp3</span> to show
       the title. Drop files in and they appear here.</p>
+
+    <!--
+      Or add them from here.
+
+      The upload route has existed all along and nothing reached it: no page,
+      no button, no mention in the handbook or the README. The only documented
+      way to add a walk-up was to have the desk machine in front of you and a
+      file manager open, which rules out the person actually holding the music:
+      the volunteer at the PA with the songs on their own laptop or phone.
+    -->
+    <div class="row" style="margin-top:12px;align-items:center;gap:10px;flex-wrap:wrap">
+      <label class="hint" for="upKind">Add a clip</label>
+      <select id="upKind">
+        <option value="walkup">Walk-up (named for a team)</option>
+        <option value="stinger">Stinger</option>
+      </select>
+      <input type="file" id="upFile" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.opus">
+      <button class="btn" id="upGo">Upload</button>
+    </div>
+    <p class="hint" id="upNote" role="status"></p>
   </section>
 </main>
 
@@ -198,6 +218,43 @@ const playerId = 'hp' + Math.random().toString(36).slice(2, 10);
 let armed = false;
 let lastToken = null;
 let snap = null;
+
+/*
+ * Adding a clip from this page.
+ *
+ * The file keeps its own name, because the name IS the metadata: the library
+ * parses the leading number as the team and the rest as the title, which is
+ * what the handbook tells people to do when they drop files in by hand. So a
+ * file called "254 - Centerfield.mp3" behaves identically whichever way it
+ * arrives.
+ */
+$('upGo').onclick = async () => {
+  const file = $('upFile').files[0];
+  if (!file) { $('upNote').textContent = 'Pick a file first.'; return; }
+  const kind = $('upKind').value;
+  if (kind === 'walkup' && !/^\s*\d{1,5}(\D|$)/.test(file.name)) {
+    $('upNote').textContent = `"${file.name}" does not start with a team number, so nothing `
+      + 'would know whose walk-up it is. Rename it like "254 - Song.mp3" and try again.';
+    return;
+  }
+  $('upGo').disabled = true;
+  $('upNote').textContent = `Uploading ${file.name}...`;
+  try {
+    const res = await fetch(`/api/audio/clips/${kind}/${encodeURIComponent(file.name)}`, {
+      method: 'POST', body: file,
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    $('upNote').textContent = body.team
+      ? `Added: team ${body.team}, "${body.label || 'walk-up'}".`
+      : `Added: "${body.label || body.id}".`;
+    $('upFile').value = '';
+  } catch (err) {
+    $('upNote').textContent = err.message;
+  } finally {
+    $('upGo').disabled = false;
+  }
+};
 
 const audio = new Audio();
 audio.preload = 'auto';
