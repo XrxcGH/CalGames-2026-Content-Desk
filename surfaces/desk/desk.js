@@ -425,11 +425,43 @@ $('loadMatch').onclick = () => {
     return;
   }
   emit('match.loaded', { id: `m${Date.now()}`, displayName, red, blue });
-  // What went out, in the numbers that are now on the overview, because
-  // loading takes the program screen and nothing else here says so.
-  setText($('loadHint'), `${displayName} is loaded and on the program screen: red `
-    + `${red.map(t => t.number).join(' ')} against blue ${blue.map(t => t.number).join(' ')}.`);
+  /*
+   * What went out, in the numbers now on the overview.
+   *
+   * "and on the program screen" was said unconditionally, and it is not
+   * unconditionally true: a manual screen take engages a hold, and the
+   * reducer lets a hold sit over an automatic screen change. So loading a
+   * match while holding the arcade screen loaded the match and moved nothing,
+   * while this line said it was on program. The operator then explains an
+   * overview to a room that is looking at something else.
+   */
+  const held = !!desk.state?.screenHold && desk.state.screen !== 'overview';
+  const teams = `red ${red.map(t => t.number).join(' ')} against blue `
+    + `${blue.map(t => t.number).join(' ')}`;
+  setText($('loadHint'), held
+    ? `${displayName} is loaded, ${teams}. It is NOT on the program screen: you are `
+      + `holding ${SCREEN_LABEL[desk.state.screen] ?? desk.state.screen}. `
+      + 'Press Auto, or the screen you want, to bring it up.'
+    : `${displayName} is loaded and on the program screen: ${teams}.`);
+  loadHintAt = Date.now();
 };
+
+/*
+ * When the load hint was written, so it can retire.
+ *
+ * It named a specific match and stood there until something else happened to
+ * write this element: two matches later the console was still reporting the
+ * first one as "loaded and on the program screen", which by then was a
+ * sentence about nothing. paintLiveState clears it once it is stale.
+ */
+let loadHintAt = 0;
+const LOAD_HINT_MS = 45_000;
+setInterval(() => {
+  if (loadHintAt && Date.now() - loadHintAt > LOAD_HINT_MS) {
+    loadHintAt = 0;
+    setText($('loadHint'), '');
+  }
+}, 5000);
 
 // ---- telestrator -----------------------------------------------------------
 // The placeholder is a sample, not a default. It used to be the fallback, so
@@ -460,7 +492,23 @@ $('teleSend').onclick = () => {
   showTeleState();
   teleFrame(frame);
 };
-$('teleLive').onclick = () => { showTeleState(); teleFrame(desk.state?.telestrator?.frame ?? null); };
+/*
+ * Show again puts the render back after Hide, which is what its tooltip says
+ * and what it now does. It used to re-send the whole frame event with
+ * `analyst` read from the box on THIS console, which is empty almost always:
+ * the normal path is the replay console pushing a frame, and the analyst's
+ * name rides along with it. So the button whose label is "Show again" and
+ * whose tooltip promises the frame and the ink are left alone wiped the name
+ * off the on-air ANALYSIS chip. A name typed here still wins; blank means
+ * "leave what is up", not "clear it".
+ */
+$('teleLive').onclick = () => {
+  showTeleState();
+  emit('telestrator.frame', {
+    analyst: $('analyst').value.trim() || desk.state?.telestrator?.analyst || '',
+    frame: desk.state?.telestrator?.frame ?? null,
+  });
+};
 $('teleClear').onclick = () => { showTeleState(); emit('telestrator.clear'); };
 $('teleHide').onclick = () => { showTeleState(); emit('telestrator.hide'); };
 
@@ -1159,11 +1207,42 @@ const VITAL_VERDICT = {
 // worse than one they have to shut by hand.
 let vitalsOpened = false;
 
-async function loadVitals() {
+/*
+ * The check stopped answering, so say so where the verdict is.
+ *
+ * A failed fetch used to return quietly, which left the last verdict standing
+ * in the page header, reading "doors check: all good" in green, for as long
+ * as the desk stayed up. That readout exists precisely so nobody has to open
+ * the fold to know the state of the building, and a stale green is worse than
+ * no readout: it is the one that stops people looking.
+ *
+ * One missed poll is not news on a thirty-second timer, so the background
+ * poll waits for a second consecutive failure. A press of Run the check is
+ * somebody asking right now, and gets the answer right now.
+ */
+let vitalsMisses = 0;
+let vitalsLastOk = 0;
+function vitalsNotAnswering() {
+  // Only once it is worth saying: "last answered 0 min ago" is noise, and on
+  // a thirty-second poll it is what the first failure would always print.
+  const mins = vitalsLastOk ? Math.floor((Date.now() - vitalsLastOk) / 60_000) : 0;
+  const ago = mins >= 1 ? `, last answered ${mins} min ago` : '';
+  $('vitalsDot').dataset.l = 'unknown';
+  setText($('vitalsWord'), `not answering${ago}`);
+  $('vitalsMirror').dataset.l = 'unknown';
+  setText($('vitalsMirrorText'), 'doors check: not answering');
+  // The rows below are the last thing it said, not the current state.
+  $('vitals').dataset.stale = 'true';
+}
+
+async function loadVitals(manual = false) {
   try {
     const res = await fetch('/api/vitals');
-    if (!res.ok) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const r = await res.json();
+    vitalsMisses = 0;
+    vitalsLastOk = Date.now();
+    delete $('vitals').dataset.stale;
     const verdict = VITAL_VERDICT[r.worst] ?? r.worst;
     $('vitalsDot').dataset.l = r.worst;
     setText($('vitalsWord'), verdict);
@@ -1199,10 +1278,13 @@ async function loadVitals() {
       }
       return row;
     }));
-  } catch { /* transient */ }
+  } catch {
+    vitalsMisses++;
+    if (manual || vitalsMisses >= 2) vitalsNotAnswering();
+  }
 }
 
-$('vitalsCheck').onclick = loadVitals;
+$('vitalsCheck').onclick = () => void loadVitals(true);
 // Every way in opens the fold on the way past. An anchor pointing inside a
 // closed <details> scrolls to a section the browser is not showing, so the
 // jump strip and the header mirror would both look broken.

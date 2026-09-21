@@ -233,7 +233,7 @@
    that selector weighs exactly what `.bar-side` and `.bar-center` weigh, so
    it was settled by source order, and .bar-center's shorthand further down
    the file quietly took the lift back off the clock. */
-.bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px 18px; }
+.bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px 38px; }
 .bar-side--red  { padding-left: var(--safe-x);  background: var(--alliance-red);  border-right: var(--rule); }
 .bar-side--blue { padding-right: var(--safe-x); background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; }
 
@@ -313,7 +313,22 @@
    about 16px taller, which moves --bar-h and everything positioned off it
    (the lower third sits at calc(var(--bar-h) + 28px)). The team numbers, the
    critical content, do clear it at 38.3px. */
-.bar-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 0 12px 18px; }
+/* 38px, not 18, and the gap and the chip's leading come down with it.
+   Everything in this bar has to finish above the 3.5% action-safe line at
+   y=1042.2, and as shipped nothing did: the phase chip ended at 1058 in
+   EVERY match, and a four-team playoff alliance put its fourth team number
+   at 1050.1. The bar's own fill may bleed to the frame edge; its text may
+   not, because that margin is the part an overscanning TV in a gym is
+   entitled to eat.
+
+   The height came out of the chip's leading rather than the bar. A 28px
+   label was sitting in a 56px box, nearly all of it line-height, so the one
+   change that bought the whole budget also changed nothing anybody can see:
+   the chip's text is still 28px, the broadcast floor. Measured after: worst
+   case 1040.1, 2.1px clear, with the clock still starting at y=928. */
+.bar-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 0 12px 38px; }
+/* See above: the chip's box was line-height, not type. */
+.bar-center .phase { line-height: 1; }
 .clock {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
   font-weight: 900; font-size: var(--t-clock); line-height: 1;

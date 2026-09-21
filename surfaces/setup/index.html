@@ -252,12 +252,27 @@ function restoreFocus(box) {
   const chips = box.querySelectorAll('.setrow');
   if (!chips.length) { $(ADD_FOR[box.id])?.focus(); return; }
   const chip = chips[Math.min(Math.max(row, 0), chips.length - 1)];
-  // The asked-for control may have become disabled by the move itself (Up on
-  // what is now the first row), so fall back to a neighbour on the same row
-  // rather than dropping focus after all.
+  /*
+   * The asked-for control may have become disabled by the move itself: Up on
+   * what is now the first row. Falling back to "the next enabled control in
+   * this row" put the keyboard on the wrong button twice over.
+   *
+   * The row is laid out inputs, Up, Down, Remove. When Up goes disabled the
+   * next enabled control is DOWN, so an operator who pressed Up until the
+   * item reached the top was left sitting on the button that puts it back,
+   * with nothing on screen saying the focus had moved. Press again, as you
+   * would to keep going, and the move is undone. In a one-item list both
+   * arrows are disabled and the next enabled control is REMOVE, so the same
+   * reflex deletes the row.
+   *
+   * Land on the row's first field instead. It cannot destroy anything, it is
+   * on the item that just moved, and a screen reader reads that item's name
+   * out, which is the confirmation the move otherwise never gets.
+   */
   const target = chip.querySelector(`[data-ctl="${ctl}"]:not([disabled])`)
-    ?? chip.querySelector('[data-ctl]:not([disabled])')
-    ?? box.querySelector('[data-ctl]:not([disabled])');
+    ?? chip.querySelector('input, select, textarea')
+    ?? chip.querySelector('[data-ctl]:not([disabled]):not([data-ctl="kill"])')
+    ?? $(ADD_FOR[box.id]);
   target?.focus();
 }
 

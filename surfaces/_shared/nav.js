@@ -155,6 +155,23 @@ export function mountNav(current, opts = {}) {
     document.documentElement.style.setProperty('--opnav-h', `${nav.offsetHeight}px`);
   setNavHeight();
   window.addEventListener('resize', setNavHeight);
+  /*
+   * And whenever the strip changes height for any reason other than the
+   * window changing size. The refusal note is a row of its own (flex-basis
+   * 100%), so showing one grows the strip by about 30px and hiding it six
+   * seconds later shrinks it back, with nothing republishing the variable
+   * either way: the desk's jump strip is sticky at top: var(--opnav-h), so
+   * for those six seconds it sat underneath the nav strip, covering its own
+   * first row of links. That happens exactly when the desk has restarted and
+   * the operator is being told to reload, which is the worst possible moment
+   * to move the furniture.
+   *
+   * An observer rather than a call at each site: the strip has several ways
+   * to change shape and the next one added should not have to remember.
+   */
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(setNavHeight).observe(nav);
+  }
 
   if (!withScreens) return nav;
 

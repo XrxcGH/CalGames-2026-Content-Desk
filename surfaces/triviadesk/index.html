@@ -230,7 +230,25 @@ const LETTERS = ['A', 'B', 'C', 'D'];
  * guard the desk console's setText and the audience trivia page already use.
  */
 const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
-const say = (m, err = false) => { setText($('status'), m); $('status').toggleAttribute('data-err', err); };
+/*
+ * Deliberately NOT diff-guarded, unlike setText above.
+ *
+ * The guard exists because the poll repaints every two seconds and an
+ * aria-live region whose children are replaced re-announces even when the
+ * string is identical. Nothing polled ever reaches this function: every
+ * caller is a button the host just pressed, or the error from one. Guarding
+ * it therefore only ever suppressed the reply to a REPEATED action, which is
+ * the case where the host most needs one. Press Reveal, press it again
+ * because nothing appeared to happen, and the console stays silent both
+ * times, on the one panel run by the least-trained volunteer in the room.
+ *
+ * Re-assigning the same string is the point: it is what makes a screen
+ * reader say it again.
+ */
+const say = (m, err = false) => {
+  $('status').textContent = m;
+  $('status').toggleAttribute('data-err', err);
+};
 
 async function post(action, body) {
   const res = await fetch(`/api/trivia/${action}`, {
@@ -378,8 +396,21 @@ $('advance').onclick = async () => {
   const phase = lastSnap?.phase ?? 'idle';
   try {
     if (phase === 'open') {
-      await post('reveal');
-      say('Revealed. Read it out.');
+      /*
+       * Say the answer, do not just paint it. #optLines carries the green
+       * row and the "Correct" tag, and it is deliberately not an aria-live
+       * region: it is a rebuilt list with a tally that moves on every poll,
+       * and announcing the whole thing twice a second is noise. The effect
+       * was that this console told the host to read out an answer it had
+       * never told them. The status line is the one place the panel speaks,
+       * so the answer belongs in it.
+       */
+      const snap = await post('reveal');
+      const q = snap?.question;
+      const right = q && q.answer !== null && q.answer !== undefined
+        ? `${LETTERS[q.answer]}. ${q.options[q.answer]}`
+        : null;
+      say(right ? `Revealed. The answer is ${right}. Read it out.` : 'Revealed. Read it out.');
     } else if (phase === 'revealed') {
       await post('next');
       say('On to the next one. Overlay shows standings.');

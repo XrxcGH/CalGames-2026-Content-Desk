@@ -219,6 +219,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 .vdot[data-l="ok"] { background: var(--st-ok); }
 .vdot[data-l="warn"] { background: var(--st-warn); }
 .vdot[data-l="fail"] { background: var(--st-bad); }
+/* Stale rows are the last thing the check said, not the current state, and
+   the verdict above them already says "not answering". Dimmed rather than
+   cleared: the last known state is still the most useful thing on the panel
+   when the check itself is the thing that broke. */
+#vitals[data-stale="true"] { opacity: .5; }
 #vitals .v { display: grid; grid-template-columns: 14px 118px 1fr auto; gap: 10px;
   align-items: baseline; padding: 6px 8px; margin-bottom: 4px; font-size: 13px;
   background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 6px; }

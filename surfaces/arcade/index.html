@@ -27,12 +27,23 @@
    a display cropping 3.5% (LED processors and projector overscan both do it,
    and /s/watch?screen=arcade is an advertised pit-TV kiosk, so this is not
    stream-only) the round label went entirely and the names were cut off at
-   the eyes. Centring means every 2px of strip height buys the top of the
-   stack 1px, so 160px puts the round label at y=39 and the names at y=44.5,
-   both clear, and leaves the game chip ending at y=132 inside the strip.
-   Title-safe 54px is out of reach for a strip on the top edge: the
-   round-over-chip stack is 103px on its own, so clearing 54 would need 163px+
-   of strip, and every pixel of that is the game's own picture. */
+   the eyes.
+
+   Centring is also why raising --strip-h alone did not finish the job. Every
+   2px of strip height buys the top of the stack only 1px, and the estimate
+   that 160px would put the round label at y=39 was optimistic: measured on
+   the rendered strip it lands at y=30.8, still 7px inside the action-safe
+   line, with the game chip and the player names comfortably clear. Growing
+   the strip until centring lifted that one element would have cost 14px of
+   the game's picture to move it 7.
+
+   So the clearance is bought directly, as padding on the top edge, where it
+   costs what it moves and no more: padding-top 10px puts the round label's
+   glyph tops at y=40.8, 3px clear, the names at y=74 and the chip at y=88.8.
+   The strip finishes 173px tall. Title-safe 54px remains out of reach for a
+   strip on the top edge, and that is a deliberate acceptance: the
+   round-over-chip stack is 103px on its own, and every further pixel is the
+   game's own picture. */
 :root { --strip-h: 160px; }
 /* The set card runs across the TOP of the frame, not the bottom: Mario Kart
    and Smash both draw their own HUD (coins, lap, position, damage) along the
@@ -48,6 +59,9 @@
   background-size: var(--tex-perf-size);
   border-bottom: var(--rule);
   min-height: var(--strip-h);
+  /* The action-safe clearance, bought where it costs what it moves. See the
+     arithmetic above the --strip-h declaration. */
+  padding-top: 10px;
 }
 
 /* The fill bleeds to the frame edge; the ink does not. A flat 20px put the
