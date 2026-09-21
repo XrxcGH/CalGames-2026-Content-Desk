@@ -225,6 +225,43 @@ async function saveSetup(section, value, msgId, okText) {
 }
 
 /**
+ * Where focus goes after a rebuild.
+ *
+ * Up, Down and Remove all repaint the whole list, which destroys the very
+ * button that was just pressed, and focus on a removed element falls back to
+ * <body>. A content lead moving a sponsor three places up by keyboard had to
+ * tab from the top of the page after every single press. The codebase already
+ * treats this as a bug elsewhere (the trivia round picker: "killing keyboard
+ * focus on a round button within two seconds of landing on it"; the arcade
+ * console: "dropping keyboard focus to the body forty times a set"), so this
+ * is that fix for the settings page.
+ *
+ * The request names the control by list, row and kind rather than by element,
+ * because the element it refers to does not exist yet when the request is
+ * made. It follows the ITEM: Up on row 3 asks for Up on row 2, because that
+ * is where the thing the operator is moving has gone.
+ */
+let pendingFocus = null;
+// Where focus lands when a list empties out and its row controls are gone.
+const ADD_FOR = { setSpRows: 'setSpAdd', setRdRows: 'setRdAdd', setAxRows: 'setAxAdd' };
+
+function restoreFocus(box) {
+  if (!pendingFocus || pendingFocus.boxId !== box.id) return;
+  const { row, ctl } = pendingFocus;
+  pendingFocus = null;
+  const chips = box.querySelectorAll('.setrow');
+  if (!chips.length) { $(ADD_FOR[box.id])?.focus(); return; }
+  const chip = chips[Math.min(Math.max(row, 0), chips.length - 1)];
+  // The asked-for control may have become disabled by the move itself (Up on
+  // what is now the first row), so fall back to a neighbour on the same row
+  // rather than dropping focus after all.
+  const target = chip.querySelector(`[data-ctl="${ctl}"]:not([disabled])`)
+    ?? chip.querySelector('[data-ctl]:not([disabled])')
+    ?? box.querySelector('[data-ctl]:not([disabled])');
+  target?.focus();
+}
+
+/**
  * One editor for all three lists. Each item renders as a sunken chip of
  * inputs bound straight to the draft object; Save posts the whole draft and
  * repaints from what the server actually stored.
@@ -262,27 +299,38 @@ function paintRowEditor(box, items, fields, noun) {
 
     const up = document.createElement('button');
     up.className = 'btn';
+    up.dataset.ctl = 'up';
     up.append(iconEl('chevron-up'), ' Up');
     up.disabled = i === 0;
     up.setAttribute('aria-label', `Move ${noun} ${i + 1} up`);
     up.onclick = () => {
       [items[i - 1], items[i]] = [items[i], items[i - 1]];
+      pendingFocus = { boxId: box.id, row: i - 1, ctl: 'up' };
       paintSetupRows();
     };
     const down = document.createElement('button');
     down.className = 'btn';
+    down.dataset.ctl = 'down';
     down.append(iconEl('chevron-down'), ' Down');
     down.disabled = i === items.length - 1;
     down.setAttribute('aria-label', `Move ${noun} ${i + 1} down`);
     down.onclick = () => {
       [items[i], items[i + 1]] = [items[i + 1], items[i]];
+      pendingFocus = { boxId: box.id, row: i + 1, ctl: 'down' };
       paintSetupRows();
     };
     const kill = document.createElement('button');
     kill.className = 'btn kill';
+    kill.dataset.ctl = 'kill';
     kill.textContent = 'Remove';
     kill.setAttribute('aria-label', `Remove ${noun} ${i + 1}`);
-    kill.onclick = () => { items.splice(i, 1); paintSetupRows(); };
+    // Nothing moved up into this slot when the last row is the one removed,
+    // so restoreFocus clamps to whatever row now sits at the end.
+    kill.onclick = () => {
+      items.splice(i, 1);
+      pendingFocus = { boxId: box.id, row: i, ctl: 'kill' };
+      paintSetupRows();
+    };
     line.append(up, down, kill);
     chip.append(line);
     return chip;
@@ -290,6 +338,7 @@ function paintRowEditor(box, items, fields, noun) {
   if (!items.length) {
     box.innerHTML = `<p class="hint" style="padding:4px 0 8px">None yet. Add the first ${noun} below.</p>`;
   }
+  restoreFocus(box);
 }
 
 function paintSetupRows() {

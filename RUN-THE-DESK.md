@@ -123,10 +123,30 @@ on the whiteboard:
 | Awards code | The Judge Advisor | `/s/awards`, winner entry and the reveal | `1357` |
 | Settings code | The content lead | `/s/setup`, the event's content | `4567` |
 
-The defaults exist so a practice run works out of the box. **Change all
-three before the event** (`REMOTE_PIN`, and `awards.pin` / `setup.pin` in
-`config.json`): anyone with a copy of this handbook knows the defaults, and
-the desk warns about each one still in use at startup.
+The defaults exist so a practice run works out of the box. **Change all three
+before the event.** Anyone holding this handbook knows them, and the desk
+prints a warning in its own window about every one still in use.
+
+Changing them is the content desk lead's job on Friday, not the field tech's
+on Saturday morning. The desk PIN has a launcher option; the other two do
+not, and come from a file instead:
+
+| Code | How the lead changes it |
+| --- | --- |
+| Desk PIN | Add `/pin:4726` when starting: `START-DESK.cmd /pin:4726`, or `CalGamesContentDesk.exe /pin:4726` on the very first run |
+| Awards code | `awards.pin` in `config.json` |
+| Settings code | `setup.pin` in `config.json` |
+
+**There is no `config.json` until somebody makes one.** In the desk folder
+(`Downloads\CalGames2026-ContentDesk`, unless the lead picked somewhere
+else), there is a file called `config.example.json`. Copy it, name the copy
+`config.json`, open it in Notepad, and change the two `"pin"` values: one
+under `"setup"`, one under `"awards"`. Save. Restart the desk. Re-running the
+launcher later never overwrites that file, so the codes survive an update.
+
+If the awards code is the one that slips, that is the expensive one. `/s/awards`
+opens its sign-in box for anyone on the venue Wi-Fi, so a default awards code
+means the whole building can read the winners before the ceremony.
 
 The numbers will be different at your event. Use what your window prints, not
 what is printed here.
@@ -170,26 +190,51 @@ Open the desk address in a browser on the desk laptop. You get an index page
 listing every screen. Open **Desk console** (`/s/desk`). It asks for the PIN
 once.
 
-In the desk console's right column, inside the fold named **Setup & end of
-day**, is the **doors check**. It answers one question: *is this thing
-ready?* Everything on it is green, amber, or red.
+The desk console's header carries the **doors check** verdict at all times,
+next to the link light: *all good*, *needs a look*, or *something is broken*.
+Click it, or the **Doors check** chip in the jump strip, and it takes you to
+the check itself and opens the fold it lives in.
+
+It answers one question: *is this thing ready?* Every row is green, amber or
+red, and every row also spells its level out as a word (**OK**, **WARNING**,
+**FAILED**, **UNKNOWN**, **OFF**), so the printed sheet carries the verdicts
+and nobody has to tell the colours apart.
 
 Run it **at doors**, meaning when the audience is let in, not five minutes
 before the first match.
 
-| Check | What red means | What to do |
+This is every row it can show, in the words the screen uses. **Stream health**
+only appears once OBS is connected:
+
+| Check | What it means when it is not green | What to do |
 | --- | --- | --- |
-| **Field** | The desk cannot see the scoring system | Chapter 9 |
+| **Field bridge** | The desk cannot see the scoring system | Chapter 9 |
 | **OBS** | The desk cannot drive the camera switching | Chapter 4 |
+| **Stream health** | OBS is dropping frames on the way out: amber past one in a hundred, red past five | The uplink is struggling. Tell the content desk lead now, not when it gets worse |
 | **Recording** | Nothing is being recorded, so there will be no replays or videos | Check the capture device is plugged in |
-| **Disk** | Less than two hours of recording space | Free up space or change disks now, not at lunch |
+| **Disk** | Running out of room: amber under five hours of recording left, red under two | Free up space or change disks now, not at lunch |
 | **Publishing** | YouTube is not set up | Videos will not upload. Talk to the content desk lead |
 | **Microphones** | A mic is muted in OBS | Unmute it |
-| **House audio** | The music machine is not connected | Chapter 10 |
+| **House audio** | The music machine is not connected, or two machines are both armed | Chapter 10 |
+| **Coverage** | A match has been played and no video was ever queued for it | Tell the content desk lead before the recording rolls off the disk |
+| **Access codes** | At least one of the three codes is still the shipped default. It names which | Read the two paragraphs below. Do not skip this one |
 
-**Amber is not red.** Amber means "this will work, but you should know". A
-missing Blue Alliance key is amber: videos still upload, they just do not get
-linked.
+A row can also be **grayed out**, which means that part is switched off rather
+than broken: no field connection asked for, no recording running, no stream
+started yet. At a real event most of them should not be gray by the time the
+doors open.
+
+**Amber is not red.** Amber usually means "this will work, but you should
+know". A missing Blue Alliance key is amber: videos still upload, they just do
+not get linked.
+
+**Access codes is the one amber you do not shrug at.** If it is amber and the
+words *awards code* are in it, go and find the content desk lead. The shipped
+awards code is printed in this handbook and in the public code, and the Judge
+Advisor's page opens its sign-in box for anyone on the venue Wi-Fi. That amber
+means the building can read the winners before the ceremony. Chapter 2, step 3
+says how to change it. It needs a restart, so it is a doors job, not a
+four-o'clock job.
 
 Everything red on this list will be noticed by somebody in the audience within
 an hour. That is the entire point of running it early.
@@ -382,9 +427,11 @@ whatever the display does to them, it does to the score bar.
 
 `/s/watch?screen=program` shows the overlay on top of a live picture of the
 field. That picture comes from a setting the content desk lead fills in on
-the desk console: **Event setup, then Screens and stream, then Field feed
-URL**. If it is blank you get the overlay on the CalGames backdrop instead,
-which looks intentional and is fine.
+the event settings page, not on the desk console: `ADDRESS/s/setup`, then
+**Screens and stream**, then **Field feed URL**. That page takes the
+**settings code**, which is not the desk PIN (chapter 6, Event settings). If
+the box is blank you get the overlay on the CalGames backdrop instead, which
+looks intentional and is fine.
 
 ---
 
@@ -487,8 +534,10 @@ Press **Hide** when they get up.
 
 Two different things, deliberately.
 
-- **Status card**: "Field delay", "Back in ten minutes". Explains a pause.
-  Retires itself.
+- **Status card**: "Field delay", "Back in ten minutes". Explains a pause. It
+  **stays up until you press Hide card**: only the automatic *Field timeout*
+  card clears itself. The Delay card section tells you on screen whenever one
+  is live, and the jump strip has a **Delay card** chip to get back to it.
 - **Safety message**: covers every screen in the building, and stays until you
   clear it. This is for an evacuation or a hold. It is not for a long queue.
 
@@ -861,6 +910,7 @@ Replace `ADDRESS` with what the desk window printed.
 | Screen | URL | Notes |
 | --- | --- | --- |
 | Pick a screen | `ADDRESS/s/watch` | Hand this to anyone setting up a monitor |
+| Screen test card | `ADDRESS/s/testcard` | Full-screen it on a TV, projector or LED wall before you trust it. Chapter 5 |
 | Side screen | `ADDRESS/s/side` | Venue TVs, full screen. Never an OBS source |
 | When do we play? | `ADDRESS/s/next` | Parents, on their own phones |
 | Trivia play | `ADDRESS/s/quiz` | The crowd's phones |

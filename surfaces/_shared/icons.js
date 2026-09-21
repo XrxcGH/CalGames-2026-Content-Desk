@@ -1,5 +1,12 @@
 /**
- * The Lucide icon set (lucide.dev, ISC license), inlined.
+ * The Lucide icon set (lucide.dev), inlined.
+ *
+ * Copyright (c) 2026 Lucide Icons and Contributors. ISC license.
+ * Icons derived from Feather: Copyright (c) 2013-present Cole Bemis, MIT.
+ * The full permission notices are in NOTICE at the repo root. The path data
+ * below is upstream artwork, redistributed as source rather than pulled as a
+ * dependency, so the attribution travels with the file that carries it: this
+ * one ships inside the packaged desk, where NOTICE is easy to miss.
  *
  * The desk has no build step, no icon font, and no other icon source: any
  * icon on any surface comes from this file, as Lucide path data wrapped in

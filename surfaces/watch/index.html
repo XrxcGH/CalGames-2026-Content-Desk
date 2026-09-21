@@ -130,10 +130,28 @@ a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; 
  *
  * `feed` marks the ones that are transparent overlays and therefore want the
  * field picture behind them. The rest already draw their own background.
+ *
+ * THE SAME FIVE ROWS EXIST IN apps/core/src/server.ts, in the SURFACES table
+ * under group 'On a pit monitor', because the desk's home page lists them and
+ * this chooser is what that page links to. The two must say the same words:
+ * a volunteer reads the index, clicks through, and lands here. They had
+ * already drifted on the program row ("Program" against "Program, with the
+ * field feed", and a blurb missing the ", without OBS" clause that answers
+ * the actual question somebody with a spare monitor has), which is what the
+ * other four rows being byte-identical was quietly setting up. Edit both.
+ *
+ * Not fetched from the server on purpose: this page is a pit TV's whole
+ * experience, it renders the chooser before any network call, and a list
+ * that arrives asynchronously is one more thing that can fail in a room
+ * nobody is watching.
+ *
+ * PIT_SCREENS, not SCREENS: the shared client exports a SCREENS that means
+ * PROGRAM screens, and one name for two different lists is how the wrong one
+ * gets imported.
  */
-const SCREENS = [
-  { id: 'program', name: 'Program', feed: true,
-    blurb: 'The broadcast picture: field feed with the live overlay on top. What the stream shows.' },
+const PIT_SCREENS = [
+  { id: 'program', name: 'Program, with the field feed', feed: true,
+    blurb: 'The broadcast picture: field feed with the live overlay on top. What the stream shows, without OBS.' },
   { id: 'side', name: 'Side screen', feed: false,
     blurb: 'On deck and rankings, rotating. Built to be read from across the room.' },
   { id: 'arcade', name: 'Arcade', feed: true,
@@ -151,14 +169,14 @@ const $ = id => document.getElementById(id);
 if (!want) {
   showMenu();
 } else {
-  const screen = SCREENS.find(s => s.id === want) ?? SCREENS[0];
+  const screen = PIT_SCREENS.find(s => s.id === want) ?? PIT_SCREENS[0];
   showKiosk(screen);
 }
 
 function showMenu() {
   $('menu').hidden = false;
   document.title = 'Watch · CalGames 2026';
-  $('grid').innerHTML = SCREENS.map(s => `
+  $('grid').innerHTML = PIT_SCREENS.map(s => `
     <a class="card" href="?screen=${s.id}">
       <b>${s.name}</b>
       <span>${s.blurb}</span>

@@ -1,9 +1,21 @@
 node_modules/
 dist/
 
-# Event logs, one NDJSON per session. Keep the ones worth replaying.
+# Event logs, one NDJSON per session. Every one of them, with no named
+# exception: a log is the verbatim record of a day, and the payloads are
+# people. panel.show carries full names and roles, lower_third.show carries
+# the name that went on air, trivia.updated carries every crowd player's
+# chosen name and team, award.presented carries the winner, and card.call
+# carries a team number next to a free-text penalty reason.
+#
+# There used to be a "!data/events/sample.ndjson" line here, un-ignoring one
+# log by exact filename against a replay command the docs had spelled out.
+# No such file was ever committed, so the line only ever sat waiting for the
+# obvious move: copy a real session to that name to make the documented
+# command work, and ship the whole event with it. If a committed sample is
+# ever wanted, generate a synthetic one from `npm start -- --demo` and put it
+# somewhere that is meant to be committed; never re-open this door.
 data/events/*.ndjson
-!data/events/sample.ndjson
 
 # Runtime state: queued uploads, local file paths, video ids.
 data/publish-queue.json
@@ -34,6 +46,18 @@ data/event-content.json.tmp
 # specific to it; a fresh clone starts empty and fills itself again.
 data/profiles.json
 data/profiles.json.tmp
+
+# Caption sidecars a volunteer captioner drops in by hand, picked up by the
+# publish queue (publish/captions.ts). A caption file is a word-for-word
+# transcript of what was said on air: names, teams, whatever was read out.
+# As event-specific as everything else named here, and it was the one
+# desk-read directory under data/ with no rule at all.
+#
+# Named one by one, like its neighbours, because the tidier-looking
+# "data/* plus negations" cannot work: git will not re-include a file whose
+# parent directory is excluded. The cost of naming is that a NEW file under
+# data/ is committable until somebody adds it here. Add it here.
+data/captions/
 
 # Team media library. Robot cutouts are large and event-specific. The manifest
 # lives in memory, rebuilt from each team's meta.json on boot.

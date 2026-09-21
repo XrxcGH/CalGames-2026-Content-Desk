@@ -62,16 +62,24 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 input[type="range"]:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 4px; }
 
 .steps { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-button { cursor: pointer; border: 0; padding: 10px 14px; clip-path: var(--chamfer); --ch: 8px;
-  background: var(--surface-sunken); color: var(--text);
-  font-family: var(--font-cond); font-weight: 700; font-size: 14px;
-  letter-spacing: .08em; text-transform: uppercase; }
-button:hover { background: var(--btn-hover); }
-/* Inset: every button here is chamfer-clipped, and a ring drawn outside the
-   clip renders as nothing. */
-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -5px; }
-button.key { background: var(--accent); color: var(--cg-black); }
-button[disabled] { opacity: .45; cursor: not-allowed; }
+/* The shared .btn / .btn--go primitives, not a local element rule.
+ *
+ * This page used to style bare `button` with its own geometry (--ch: 8px
+ * against tokens' 9px, .08em tracking against .1em, weight 700 against 600)
+ * and name its primary `.key`: a third word for one concept, after .btn--go
+ * on the consoles and .btn-go on the audience pages. So the ref's "Grab
+ * frame" was a slightly different shape and weight from every other primary
+ * in the building, and a maintainer adding a button here reached the local
+ * rule instead of the design system.
+ *
+ * Styling the ELEMENT also caught things that are not buttons in spirit: the
+ * marker rows below had to spend four declarations undoing it. They no
+ * longer do.
+ *
+ * Only the sizing stays local: seven step buttons have to fit on one row
+ * above the fold, which is the whole reason the viewer is height-capped.
+ */
+.btn { font-size: 14px; padding: 10px 14px; }
 /* Background, color and border come from the shared console field rule in
    tokens.css; only the sizing is local. */
 select { padding: 9px 12px; font-family: var(--font-cond); font-size: 14px; }
@@ -81,9 +89,18 @@ select { padding: 9px 12px; font-family: var(--font-cond); font-size: 14px; }
    columns wrapped the phase word into the 68px clock column. */
 .mark { display: grid; grid-template-columns: 68px 76px 1fr auto; gap: 12px; align-items: center;
   text-align: left; width: 100%; background: var(--surface-sunken);
-  padding: 9px 12px; clip-path: var(--chamfer); --ch: 8px;
-  font-family: inherit; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  border: 0; cursor: pointer; color: var(--text); font: inherit;
+  padding: 9px 12px; clip-path: var(--chamfer); --ch: 8px; }
 .mark:hover { background: var(--btn-hover); }
+/* Chamfer-clipped, so the ring goes INSET: clip-path clips painting, and a
+   ring drawn outside the shape is silently invisible. This has to outweigh
+   the fleet-wide console rule in tokens.css, which sets a +2px offset on
+   every :focus-visible and would produce nothing at all here. tokens.css
+   does the same for .btn, which is why the step buttons above need no rule
+   of their own. */
+:root[data-surface="console"] .mark:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: -5px;
+}
 .mark .c { font-family: var(--font-num); font-weight: 900; color: var(--accent); font-size: 17px; }
 .mark .l { font-size: 15px; }
 .mark .k { font-family: var(--font-cond); font-size: 14px; letter-spacing: .1em;
@@ -131,13 +148,13 @@ kbd { font-family: var(--font-num); background: var(--surface-sunken); padding: 
     <div class="steps">
       <!-- "sec", not "s": these buttons uppercase in the condensed face, and a
            lone uppercase S reads as a 5 ("−0.2 S" becomes "−0.25"). -->
-      <button data-step="-1">&minus;1 sec</button>
-      <button data-step="-0.2">&minus;0.2 sec</button>
-      <button data-step="-0.0333">&minus;1 frame</button>
-      <button class="key" id="grab">Grab frame</button>
-      <button data-step="0.0333">+1 frame</button>
-      <button data-step="0.2">+0.2 sec</button>
-      <button data-step="1">+1 sec</button>
+      <button class="btn" data-step="-1">&minus;1 sec</button>
+      <button class="btn" data-step="-0.2">&minus;0.2 sec</button>
+      <button class="btn" data-step="-0.0333">&minus;1 frame</button>
+      <button class="btn btn--go" id="grab">Grab frame</button>
+      <button class="btn" data-step="0.0333">+1 frame</button>
+      <button class="btn" data-step="0.2">+0.2 sec</button>
+      <button class="btn" data-step="1">+1 sec</button>
     </div>
     <p class="err" id="err" aria-live="polite"></p>
   </section>

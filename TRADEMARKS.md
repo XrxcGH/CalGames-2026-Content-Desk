@@ -34,7 +34,8 @@ fork with confidence instead of guessing.
 
 | Thing | Status |
 | --- | --- |
-| Everything under `apps/`, `surfaces/`, `packages/`, `tools/` | Apache 2.0. Fork away |
+| Everything under `apps/`, `surfaces/`, `packages/`, `tools/` | Apache 2.0. Fork away, with the one carve-out below |
+| `surfaces/_shared/icons.js` | Ours except the Lucide path data it vendors, which is ISC (the Feather-derived icons MIT). Keep the notices in [NOTICE](NOTICE) with any copy |
 | `docs/` | Apache 2.0, same as the code |
 | The names "CalGames", "WRRF", "Western Region Robotics Forum" | WRRF's marks. Not licensed here |
 | WRRF and CalGames logos, if any are added to this repo later | WRRF's. Not licensed here |

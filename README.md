@@ -83,15 +83,22 @@ That's the whole architecture. Everything else is adapters and CSS.
 | [docs/12-community-research.md](docs/12-community-research.md) | What the FRC community complains about, mapped against this desk: the sourced gap list |
 | [docs/13-deployment.md](docs/13-deployment.md) | The volunteer launcher: one exe that unpacks the desk, installs a private Node, finds the field, and starts everything |
 | [docs/14-gap-research.md](docs/14-gap-research.md) | What it takes to run the whole event program, and to become a standard other events can adopt: the ranked, sourced roadmap |
+| [docs/15-committee-brainstorm.md](docs/15-committee-brainstorm.md) | The CalGames planning committee's brainstorm sheet, row by row: built, desk-adjacent, or not a desk job |
 | [packages/theme/tokens.css](packages/theme/tokens.css) | Design tokens + motion system, shared by every surface |
 | [prototypes/overlay.html](prototypes/overlay.html) | Runnable proof-of-concept |
 
 ## See it without installing it
 
-[previews/](previews/) holds a render of every screen, one PNG per page, plus
+[previews/](previews/) holds a render of nearly every screen, plus
 [previews/index.html](previews/index.html) as a contact sheet. They are real
 renders of the real surfaces driven through the real event bus, not mockups,
 so they cannot quietly drift from the code.
+
+Two surfaces are not in there: the Judge Advisor's awards page (`/s/awards`)
+and the pit-monitor picker (`/s/watch`). The `PAGES` list in
+[tools/render-previews.mjs](tools/render-previews.mjs) is what decides, and
+neither has an entry yet. If you add one, the harness already knows how to
+sign a page in: that is the `auth: true` flag the console entries use.
 
 ```powershell
 npm run previews
@@ -168,6 +175,10 @@ built without a field. Drop it to run on desk input alone.
 | Pit monitor kiosk | `/s/watch` | Venue pit TVs: a full-screen browser wrapping any of the open screens (`?screen=side`, `?screen=program`, ...) |
 | Phone remote | `/s/remote` | Run the show from a phone: screens, match lifecycle, marks, cue arming |
 | House audio player | `/s/house` | Opens on the music machine: plays walk-ups and stingers, drives the playlist. Never in OBS, and it refuses to run there |
+| Judge Advisor: awards | `/s/awards` | The JA's own page. Build the ceremony list and stage each winner, behind the awards code rather than the desk PIN |
+| Event settings | `/s/setup` | The content lead's page, behind the settings code: event name, sponsors, run of show, RP thresholds, accessibility services |
+| Shout-outs | `/s/gp` | Phone page: anyone in the stands submits a Gracious Professionalism moment. Nothing reaches a screen until the desk approves it |
+| Screen test card | `/s/testcard` | Full-screen on any display being installed: crop marks, the broadcast safe areas, a stretch circle, gray ramps, and a live clock |
 
 The index page at `/` lists every surface with a one-line description. Start there.
 
@@ -201,10 +212,13 @@ teams are taken, and Cheesy Arena's own pick clock. The **explainer loop** runs 
 answers what nobody ever says out loud, like what fuel is and why a losing alliance is
 celebrating. Both are in the screen dropdown on the desk.
 
-Replay a recorded event log instead of running live:
+Replay a recorded event log instead of running live. Every run of the desk
+writes one to `data/events/`, named for the moment it started; those logs are
+gitignored and none is committed, so use a filename from your own folder
+rather than the shape of one:
 
 ```powershell
-npm run replay -- data/events/2026-10-17-09-14-02.ndjson 4
+npm run replay -- data/events/2026-09-20-14-31-07.ndjson 4
 ```
 
 ```powershell
@@ -270,29 +284,56 @@ The desk runs on the venue network, and at an event that network has a few hundr
 it. The trivia QR code puts the desk's address on a projector in front of the whole gym, so
 "nobody will find it" was never a real answer.
 
-| | Surfaces | Needs the PIN |
-| --- | --- | --- |
-| **Open** | `/s/program` `/s/side` `/s/tele` `/s/arcade` `/s/trivia` `/s/quiz` `/s/next` `/s/watch` | no |
-| **Gated** | `/s/desk` `/s/replay` `/s/draw` `/s/media` `/s/arcadedesk` `/s/triviadesk` `/s/talent` `/s/var` `/s/cards` `/s/remote` | yes |
+There are **three codes, not one**, because three different people need three different
+amounts of the desk.
 
-An OBS Browser Source cannot type a PIN and a spectator should not have to, so the overlays,
-the venue TVs, the two audience phone pages, and the pit monitor kiosk (`/s/watch`, which only
-wraps screens that are already open) stay open, along with exactly the reads they need. Joining
-and answering trivia stay open too: that is the game. Everything else that *changes* something
-requires the PIN, over HTTP and over the websocket alike.
+| Tier | Surfaces | Opens with |
+| --- | --- | --- |
+| **Open** | `/s/program` `/s/side` `/s/tele` `/s/arcade` `/s/trivia` `/s/quiz` `/s/next` `/s/watch` `/s/gp` `/s/testcard` | nothing |
+| **Desk PIN** | `/s/desk` `/s/replay` `/s/draw` `/s/media` `/s/arcadedesk` `/s/triviadesk` `/s/talent` `/s/var` `/s/cards` `/s/remote` `/s/house` | `REMOTE_PIN` |
+| **Its own code** | `/s/awards` (the Judge Advisor) | `awards.pin`, or `JA_PIN` |
+| | `/s/setup` (the content lead) | `setup.pin`, or `SETUP_PIN` |
+
+Those ten, plus `/s/awards` and `/s/setup` for the narrower reason below, are `OPEN_SURFACES` in
+[apps/core/src/access.ts](apps/core/src/access.ts). For the ten, the reasoning is all the same
+reasoning: an OBS Browser Source cannot type a PIN and a spectator
+should not have to, so the overlays, the venue TVs, the audience phone pages, the shout-out form,
+the AV crew's test pattern, and the pit monitor kiosk (`/s/watch`, which only wraps screens that
+are already open) stay open, along with exactly the reads they need. Joining and answering trivia
+stay open too: that is the game. Everything else that *changes* something requires a code, over
+HTTP and over the websocket alike.
+
+`/s/awards` and `/s/setup` are in that open list for a narrower reason, and it is worth being
+precise about it: the **page** loads without the desk PIN, because neither the Judge Advisor nor
+the content lead holds the desk PIN. Each page is a sign-in shell, and every read and every
+write behind it needs the session that its own unlock creates. Setting either code to an
+explicitly empty string collapses that tier onto the desk PIN, which is the right shape for a
+small event where the producer is also the Judge Advisor.
 
 The rule is an allowlist in both directions, so an endpoint added later is private until
 somebody opens it deliberately. That is the safe direction for a mistake to fall.
 
-**The gate is on by default.** Out of the box the PIN is `0864`. That default is printed in
-this repo, so treat it as public and set your own before the event:
+**All three gates are on by default,** and all three defaults are printed in this repo. Treat
+them as public and set your own before the event:
+
+| Code | Default | Set it with |
+| --- | --- | --- |
+| Desk PIN | `0864` | `REMOTE_PIN`, or the launcher's `/pin:` |
+| Awards code | `1357` | `JA_PIN`, or `awards.pin` in `config.json` |
+| Settings code | `4567` | `SETUP_PIN`, or `setup.pin` in `config.json` |
 
 ```powershell
-$env:REMOTE_PIN = "4726"; npm start -- --demo
+$env:REMOTE_PIN = "4726"; $env:JA_PIN = "9210"; $env:SETUP_PIN = "3388"; npm start -- --demo
 ```
 
-(The launcher takes `/pin:4726` instead, and has no way to turn the gate off at all. See
-[docs/13-deployment.md](docs/13-deployment.md).)
+The awards default is the one that matters most. `/s/awards` is open to load, so anyone on the
+venue Wi-Fi can reach the sign-in shell, and `1357` is in this repo and in the printed handbook:
+left alone, it hands the staged winners to the gym before the ceremony. The doors check in the
+desk console says so, in amber, under **Access codes**.
+
+(The launcher takes `/pin:4726` for the desk PIN, and has no way to turn that gate off at all.
+It has no option for the other two: those come from `config.json` in the desk folder, or from
+the environment it inherits. See [docs/13-deployment.md](docs/13-deployment.md).)
 
 Sign in once at `/signin` and the session lasts the day. The PIN is only ever read from a POST
 body, never a query string, because a query string ends up in the server log and the browser
@@ -345,9 +386,12 @@ Copy [config.example.json](config.example.json) to `config.json` (gitignored bec
 credentials) and fill it in. `npm run auth:youtube` walks through getting a YouTube refresh token.
 Only credentials and machine wiring actually live in the file: the content half of the event
 (name and year, award list, sponsors, run of show, accessibility services, the RP thresholds)
-is edited from the desk itself, in the desk console's **Event setup** fold and on the Judge
-Advisor's own awards page, and lands in `data/event-content.json`, which overrides the file
-from then on. config.json seeds the first run; nobody edits JSON mid-event.
+is edited from the running desk, on two pages that are not the desk console: `/s/setup` behind
+the settings code for everything except the awards, and the Judge Advisor's own `/s/awards`
+behind the awards code for those. Both land in `data/event-content.json`, which overrides the
+file from then on. The desk console links out to `/s/setup` from its **Setup & end of day**
+fold; it does not hold those controls itself, and the second credential is the point.
+config.json seeds the first run; nobody edits JSON mid-event.
 Everything at the event queues itself: matches when the score posts, practice included
 (`publish.autoQueuePractice` turns just the automatic practice path off; TBA gets no link
 because it has no practice keys), arcade sets when they end, and everything else as a two-tap

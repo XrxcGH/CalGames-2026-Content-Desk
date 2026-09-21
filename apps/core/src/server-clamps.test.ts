@@ -18,6 +18,7 @@ import { MediaLibrary } from './media.ts';
 import { startServer } from './server.ts';
 import { DEFAULTS } from './config.ts';
 import { EventContent } from './content.ts';
+import { Awards } from './awards.ts';
 
 // The gate deliberately OFF (the documented escape hatch): these tests are
 // about what an ALREADY-AUTHORIZED session may do, not about the door.
@@ -229,6 +230,50 @@ test('the open urls route never echoes a credential embedded in the field feed',
     assert.equal(urls.fieldStream.includes('admin'), false, 'nor the username');
     assert.match(urls.fieldStream, /10\.0\.0\.9/, 'the host itself still passes through');
   } finally {
+    delete process.env['SETUP_PIN'];
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a secondary tier can lock itself again', async () => {
+  // The Judge Advisor's page holds every winner for the afternoon and the
+  // session lives sixteen hours, so without this a JA who unlocked after
+  // lunch and set the laptop down left the winners one reload away.
+  process.env['JA_PIN'] = '2468';
+  process.env['SETUP_PIN'] = '';
+  const dir = await mkdtemp(join(tmpdir(), 'cg-signout-'));
+  const bus = new EventBus();
+  const server = startServer({
+    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 5, host: '127.0.0.1',
+    config: structuredClone(DEFAULTS), content: new EventContent(dir),
+    awards: new Awards(dir, bus, [{ id: 'directors', title: "Directors' Award" }]),
+  });
+  const base = `http://127.0.0.1:${PORT + 5}`;
+  try {
+    const auth = await fetch(`${base}/api/awards/auth`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: '2468' }),
+    });
+    assert.equal(auth.status, 200);
+    const cookie = (auth.headers.get('set-cookie') ?? '').split(';')[0]!;
+
+    // Unlocked: the full view is readable.
+    const open = await fetch(`${base}/api/awards`, { headers: { cookie } })
+      .then(r => r.json()) as { locked: boolean };
+    assert.equal(open.locked, false);
+
+    // Sign out, and the browser is told to drop the cookie immediately.
+    const out = await fetch(`${base}/api/awards/signout`, { method: 'POST' });
+    assert.equal(out.status, 200);
+    assert.match(out.headers.get('set-cookie') ?? '', /ja_auth=;/);
+    assert.match(out.headers.get('set-cookie') ?? '', /Max-Age=0/);
+
+    // Signing out with no session at all still succeeds: the Lock button
+    // must not report a failure for having succeeded.
+    assert.equal((await fetch(`${base}/api/awards/signout`, { method: 'POST' })).status, 200);
+  } finally {
+    delete process.env['JA_PIN'];
     delete process.env['SETUP_PIN'];
     server.close();
     await rm(dir, { recursive: true, force: true });

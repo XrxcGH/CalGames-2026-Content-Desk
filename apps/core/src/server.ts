@@ -444,6 +444,14 @@ export function startServer(opts: ServerOpts) {
   const PIN_HEADER = 'x-desk-pin';
 
   /**
+   * The crowd trivia player id, carried the same way and for the same reason.
+   * It is not the desk PIN and it opens nothing on the desk, but trivia's own
+   * model calls it "the only credential answer() checks", so it earns the same
+   * treatment: out of the request line, out of the access logs.
+   */
+  const PLAYER_HEADER = 'x-trivia-player';
+
+  /**
    * The Judge Advisor tier.
    *
    * A second code, held by the JA and nobody on the desk crew, gating the
@@ -945,6 +953,23 @@ export function startServer(opts: ServerOpts) {
         return json(res, 200, { ok: true });
       }
 
+      /*
+       * Lock the awards page again.
+       *
+       * The session lives sixteen hours, so a Judge Advisor who unlocked the
+       * page after lunch and put the laptop down left every winner one reload
+       * away from anyone who picked it up. Max-Age=0 expires this browser's
+       * cookie; the process-wide token is untouched, so other people holding
+       * the code stay signed in. Answers ok even when there was no session to
+       * close, because the page's Lock button must not report a failure for
+       * having succeeded.
+       */
+      if (path === '/api/awards/signout' && req.method === 'POST') {
+        res.setHeader('Set-Cookie',
+          `${JA_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+        return json(res, 200, { ok: true });
+      }
+
       // The settings door: same lockout, same delay, same cookie mechanics
       // as the JA door above.
       if (path === '/api/setup/auth' && req.method === 'POST') {
@@ -974,6 +999,13 @@ export function startServer(opts: ServerOpts) {
         noteAuthPass(addr, 'setup');
         res.setHeader('Set-Cookie',
           `${SETUP_COOKIE}=${SETUP_SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
+        return json(res, 200, { ok: true });
+      }
+
+      // Same shape as the awards door above: close your own session.
+      if (path === '/api/setup/signout' && req.method === 'POST') {
+        res.setHeader('Set-Cookie',
+          `${SETUP_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
         return json(res, 200, { ok: true });
       }
 
@@ -1009,7 +1041,8 @@ export function startServer(opts: ServerOpts) {
         try {
           const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
             { action?: string; id?: string; title?: string; description?: string;
-              blurb?: string; day?: string; winner?: string; team?: number };
+              blurb?: string; day?: string; delta?: number;
+              winner?: string; team?: number };
           switch (body.action) {
             case 'show':
               awards.show(body);
@@ -1032,6 +1065,10 @@ export function startServer(opts: ServerOpts) {
             case 'remove':
               await awards.remove(String(body.id ?? ''));
               return json(res, 200, { ok: true });
+            case 'reorder':
+              return json(res, 200, {
+                list: awards.reorder(String(body.id ?? ''), Number(body.delta) || 0),
+              });
             default: return json(res, 404, { error: 'Unknown award action.' });
           }
         } catch (err) {
@@ -1207,7 +1244,25 @@ export function startServer(opts: ServerOpts) {
         return json(res, 200, {
           event: config.event,
           game: config.game,
-          kiosk: config.kiosk,
+          // The same strip /api/urls does, one tier further in. The field feed
+          // URL can carry an IP camera's rtsp://user:pass@host, and two places
+          // promise it never surfaces here: this page's own header ("Credentials
+          // stay in the file") and the catalogue entry above ("credentials never
+          // appear here"). The settings code belongs to the content lead, who is
+          // a narrower trust tier than whoever wired the cameras, so the promise
+          // has to be true rather than nearly true.
+          //
+          // Nothing is lost by stripping. /api/urls is the ONLY reader of this
+          // value anywhere in the system and already strips it, so the
+          // credentialed form has never reached a single consumer. The field
+          // therefore round-trips credential-free when the content lead saves,
+          // which is exactly what the /api/urls comment argues for: reach a
+          // credentialed camera through a credential-free proxy, never by
+          // handing its password to another tier.
+          kiosk: {
+            ...config.kiosk,
+            fieldStreamUrl: stripUserinfo(config.kiosk?.fieldStreamUrl ?? ''),
+          },
           stream: config.stream,
           sponsors: config.sponsors,
           rundown: config.rundown,
@@ -1489,9 +1544,24 @@ export function startServer(opts: ServerOpts) {
         return json(res, 200, trivia.bank());
       }
 
+      // A player's own view. The player id is the only credential answer()
+      // checks, so it travels in a HEADER, the same shape and for the same
+      // reason as PIN_HEADER above: a query parameter writes the credential
+      // into every access log a request line passes through, and whoever holds
+      // another player's id can burn their single answer with a wrong choice.
+      //
+      // The query parameter is still read, and only for as long as the phone
+      // page sends it: surfaces/quiz/index.html polls
+      // `/api/trivia/play?player=...`, and dropping the fallback before that
+      // line moves to the header would leave a gym full of phones unable to
+      // see their own answer state. When quiz switches to the header, delete
+      // the searchParams branch with it; nothing else calls this route.
       if (path === '/api/trivia/play') {
         if (!trivia) return json(res, 503, { error: 'Trivia is not available.' });
-        return json(res, 200, trivia.playView(url.searchParams.get('player') ?? undefined));
+        const sent = req.headers[PLAYER_HEADER];
+        const player = (typeof sent === 'string' ? sent : '')
+          || url.searchParams.get('player') || undefined;
+        return json(res, 200, trivia.playView(player));
       }
 
       if (path.startsWith('/api/trivia/') && req.method === 'POST') {

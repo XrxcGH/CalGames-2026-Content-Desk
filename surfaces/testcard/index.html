@@ -24,7 +24,7 @@
    is, because revealing the real shape is its whole job. */
 html, body { height: 100%; margin: 0; }
 body {
-  background: var(--cg-black, #101014);
+  background: var(--cg-black);
   color: var(--cg-white);
   font-family: var(--font-cond);
   overflow: hidden;
@@ -96,7 +96,10 @@ body {
 }
 #sweeptrack {
   position: absolute; bottom: 14.5%; left: 20%; right: 20%; height: 10px;
-  background: var(--cg-purple-lo, #241333);
+  /* No hex fallbacks anywhere on this card: a fallback that is not the token
+     is a second, wrong answer waiting for the stylesheet to fail to load, and
+     this is the page a wall gets calibrated against. */
+  background: var(--cg-purple-lo);
 }
 #sweep { position: absolute; top: 0; bottom: 0; width: 8%; background: var(--cg-gold); }
 
@@ -146,14 +149,21 @@ body {
     <div id="detail"></div>
   </div>
 
+  <!-- The tokens themselves, never a hand-copied hex. A swatch is a target:
+       somebody dials an LED wall or a projector in against these squares, and
+       if a square is not the color the broadcast actually paints, the wall is
+       calibrated to a color nobody will ever send it. Two of these were
+       exactly that: #4B1D8C where --cg-purple is #560F6B (lighter and bluer,
+       and purple is the one the comment above cares most about), and #101014
+       where --cg-black is #000000. -->
   <div id="bars">
-    <div style="background:#4B1D8C"></div>
-    <div style="background:#F0AF00"></div>
-    <div style="background:#FFFFFF"></div>
-    <div style="background:#ED1C24"></div>
-    <div style="background:#0066B3"></div>
-    <div style="background:#0D9B74"></div>
-    <div style="background:#101014"></div>
+    <div style="background:var(--cg-purple)"></div>
+    <div style="background:var(--cg-gold)"></div>
+    <div style="background:var(--cg-white)"></div>
+    <div style="background:var(--alliance-red)"></div>
+    <div style="background:var(--alliance-blue)"></div>
+    <div style="background:var(--cg-green-hi)"></div>
+    <div style="background:var(--cg-black)"></div>
   </div>
   <div id="ramp"></div>
 

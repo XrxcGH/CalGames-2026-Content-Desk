@@ -1,6 +1,6 @@
 {
   "//": "Copy to config.json and fill in. config.json is gitignored, so never commit it.",
-  "//content": "The content sections (event, game, kiosk, stream, sponsors, awards.list, rundown, accessibility) only SEED the first run: the desk's Event setup group and the Judge Advisor's awards page edit them live, and those edits land in data/event-content.json, which overrides this file from then on. Credentials and the camera list live only here.",
+  "//content": "The content sections (event, game, kiosk, stream, sponsors, awards.list, rundown, accessibility) only SEED the first run. The content lead edits most of them live on the Event settings page (/s/setup, behind the settings code) and the Judge Advisor edits the award list on their own page (/s/awards, behind the awards code); those edits land in data/event-content.json, which overrides this file from then on. Credentials and the camera list live only here.",
 
   "event": {
     "//key": "TBA event key. CalGames 2026 is expected to be 2026cacg. Confirm on thebluealliance.com before the event.",
@@ -94,7 +94,7 @@
     "//": "The judged awards, with the definition the GA reads on air while the plate is up. The desk shows title+definition first and reveals the winner on a second press; the winner never enters any feed until that press.",
     "//pin": "The Judge Advisor's code, NOT the desk PIN. Ships as 1357; change it for the event. The awards panel locks behind it: the JA loads winners from /s/awards all day (that page needs only this code), and the desk crew cannot see, type, or reveal a winner until the JA hands this code over before the ceremony. Explicitly empty = no separate tier, desk PIN covers awards. Env var JA_PIN overrides.",
     "pin": "1357",
-    "//list": "The ceremony, in the order it is presented. \"day\" groups the two ceremonies, and the Judge Advisor page and the desk panel both group by it. \"description\" is the committee's full definition: what the GA reads aloud and what the projected deck shows. \"blurb\" is the single line the BROADCAST plate shows, because a 600 character paragraph on a 1080 frame is a wall nobody in the hall reads; leave it blank and the plate falls back to the description's first sentence.",
+    "//list": "The ceremony, in the exact order it is presented, confirmed with the event organisers. Sunday deliberately OPENS with the Founders' Award rather than closing on it; that is how CalGames runs it, so do not \"correct\" the order to match the FIRST convention of saving the top award for last. \"day\" groups the two ceremonies, and the Judge Advisor page and the desk panel both group by it. \"description\" is the committee's full definition: what the GA reads aloud and what the projected deck shows. \"blurb\" is the single line the BROADCAST plate shows, because a 600 character paragraph on a 1080 frame is a wall nobody in the hall reads; leave it blank and the plate falls back to the description's first sentence.",
     "list": [
       {
         "id": "directors",

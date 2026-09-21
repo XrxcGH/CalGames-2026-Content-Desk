@@ -145,6 +145,10 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // endpoint behind the thing it unlocks would lock everyone out. The
   // settings door gets the same treatment.
   if (path === '/api/awards/auth' || path === '/api/setup/auth') return false;
+  // Closing a door needs no credential either. Signing out only ever REDUCES
+  // access, and a session that has already expired must still be able to
+  // clear its own stale cookie.
+  if (path === '/api/awards/signout' || path === '/api/setup/signout') return false;
 
   // Anything that only reads is judged against the read list. OPTIONS belongs
   // here and NOT in a blanket exemption: this once returned false for every

@@ -41,15 +41,25 @@ h1 { margin: 0; text-align: center;
 
 label { display: block; font-family: var(--font-cond); font-weight: 600; font-size: 14px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--cg-white-dim); margin: 10px 0 6px; }
+/* The border is the field's only boundary. --cg-purple-hi measured 1.50:1
+   against the card behind it and 2.02:1 against the field's own fill, both
+   under the 3:1 floor for non-text: in gym lighting, on a phone, an
+   unfocused field was dark-on-dark and findable only by its placeholder,
+   which disappears as soon as anyone types. The muted white reads 3.36:1 on
+   the card and 4.53:1 on the fill, the same value the consoles already use. */
 input, textarea { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px;
   font-family: var(--font-display); background: var(--cg-purple-lo); color: var(--cg-white);
-  border: 2px solid var(--cg-purple-hi); }
+  border: 2px solid var(--cg-white-mute); }
 textarea { min-height: 110px; resize: vertical; }
 input::placeholder, textarea::placeholder { color: var(--cg-white-dim); }
 input:focus-visible, textarea:focus-visible {
   outline: 3px solid var(--focus-ring); outline-offset: 2px; border-color: var(--cg-gold); }
 .count { text-align: right; font-family: var(--font-num); font-size: 13px;
   color: var(--cg-white-dim); margin-top: 4px; }
+/* Said where the decision is made, under the field it is about, rather than
+   in a policy paragraph nobody reads on a phone. */
+.field-why { margin: 6px 0 0; font-family: var(--font-display); font-size: 14px;
+  line-height: 1.5; color: var(--cg-white-dim); }
 
 .btn-go { width: 100%; margin-top: 14px; padding: 15px; border: 0; cursor: pointer;
   background: var(--cg-gold); color: var(--cg-black);
@@ -61,6 +71,12 @@ input:focus-visible, textarea:focus-visible {
 .btn-go:disabled { opacity: .55; cursor: default; }
 .btn-go:focus-visible { outline: 3px solid var(--cg-black); outline-offset: -6px; }
 
+/* The literal fallback is doing the work, not decorating it. --st-bad-text
+   exists only under :root[data-surface="console"] and this page declares no
+   surface, so the bare var() was invalid at computed-value time and the
+   colour fell through to the inherited body white: the one line telling a
+   spectator their shout-out did not send looked like every other line on the
+   page. The token now lives on the base :root, so the bare var() resolves. */
 .err { color: var(--st-bad-text); font-family: var(--font-display); font-size: 15px;
   line-height: 1.5; margin-top: 10px; }
 #done { text-align: center; padding: 34px 18px; }
@@ -80,13 +96,28 @@ input:focus-visible, textarea:focus-visible {
   <h1>Shout-outs<div class="tick"></div></h1>
   <p class="sub">See somebody do a genuinely gracious thing? Tell the whole
     gym. A content desk volunteer reads every submission, and the good ones go
-    up on the screens between matches.</p>
+    up on the screens between matches, signed with the name you give below.</p>
 
   <form class="card" id="form">
-    <label for="name">Your name</label>
+    <!-- Consent has to be informed BEFORE the typing, not discovered from the
+         screen afterwards. The approved slide is built as [message, "- Name,
+         Team N"], goes to the venue TVs and the program feed, reaches OBS and
+         the stream, and is written permanently into the event log. This form
+         asked for a full name and a team number and said only that the
+         MESSAGE would go up. The profile book two directories over goes to
+         real trouble over this exact risk for on-camera students, shortening
+         them to a given name and an initial; this is the one input a
+         spectator in the stands can reach, it produces the same full name
+         plus team number burnt into the same public video, and it said
+         nothing. So it says it here, next to the field, in the plainest
+         words available. -->
+    <label for="name">Your name <span style="text-transform:none">(goes on screen)</span></label>
     <input id="name" maxlength="40" autocomplete="nickname" placeholder="Ana">
     <label for="team">Your team number <span style="text-transform:none">(optional)</span></label>
     <input id="team" inputmode="numeric" pattern="[0-9]*" placeholder="846">
+    <p class="field-why">If the desk puts your shout-out up, these two are
+      printed underneath it, on the screens in the gym and on the stream. A
+      first name on its own is plenty.</p>
     <label for="msg">Who did the gracious thing, and what was it?</label>
     <textarea id="msg" maxlength="200"
       placeholder="Team 1868 lent us their spare radio five minutes before our match"></textarea>
@@ -95,7 +126,15 @@ input:focus-visible, textarea:focus-visible {
     <p class="err" id="err" hidden aria-live="polite"></p>
   </form>
 
-  <div class="card" id="done" hidden>
+  <!-- role=status so the swap is ANNOUNCED, tabindex=-1 so focus has
+       somewhere to land. Success was the one path that only moved two hidden
+       attributes around: the button that had focus went into a hidden
+       subtree, focus fell to <body>, and nothing was in a live region, so a
+       spectator on a screen reader pressed "Send it to the desk" and got
+       silence and an apparently empty page. The failure path next door was
+       already aria-live, and the "Send another one" handler already thinks
+       about focus, so this was the only case left out. -->
+  <div class="card" id="done" hidden role="status" tabindex="-1">
     <b>Sent!</b>
     <p>A human at the content desk reads it next. If it goes up on the big
       screen, that is them agreeing with you.</p>
@@ -127,6 +166,9 @@ $('form').addEventListener('submit', async e => {
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     $('form').hidden = true;
     $('done').hidden = false;
+    // Focus follows the content, the way $('again') already moves it back to
+    // the message box on the return trip.
+    $('done').focus();
   } catch (e2) {
     err.hidden = false;
     err.textContent = e2.message;

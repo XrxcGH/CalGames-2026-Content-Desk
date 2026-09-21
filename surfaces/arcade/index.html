@@ -12,12 +12,28 @@
    alliance on this broadcast and nowhere else, and borrowing them here would
    quietly poison the association we spend all weekend building. */
 /* Strip height, shared: the round tab and the hanging panels key off it, so
-   the four stay in step if it ever changes. 120px because this surface is on
-   air and its type holds the 28px broadcast floor (tokens.css): the old
-   76px strip predates the floor, and the tallest stack (round line over the
-   game chip, measured 116px) has to clear it or the strip grows out from
-   under everything anchored below. */
-:root { --strip-h: 120px; }
+   the four stay in step if it ever changes. It answers to two things at once.
+
+   The type: this surface is on air and holds the 28px broadcast floor
+   (tokens.css), and the tallest stack (the round line over the game chip,
+   measured 116px with its padding) has to clear the strip, or the strip grows
+   out from under everything anchored below. The old 76px strip predates the
+   floor.
+
+   The action-safe line, which 120px did not answer at all. The stacks are
+   centred in the strip's content box, so at 120px (108px of box after the 6px
+   padding) the round label's glyph tops landed at y=19 and a player name's at
+   y=24.5, both inside the 3.5% action-safe line, which is 37.8px at 1080. On
+   a display cropping 3.5% (LED processors and projector overscan both do it,
+   and /s/watch?screen=arcade is an advertised pit-TV kiosk, so this is not
+   stream-only) the round label went entirely and the names were cut off at
+   the eyes. Centring means every 2px of strip height buys the top of the
+   stack 1px, so 160px puts the round label at y=39 and the names at y=44.5,
+   both clear, and leaves the game chip ending at y=132 inside the strip.
+   Title-safe 54px is out of reach for a strip on the top edge: the
+   round-over-chip stack is 103px on its own, so clearing 54 would need 163px+
+   of strip, and every pixel of that is the game's own picture. */
+:root { --strip-h: 160px; }
 /* The set card runs across the TOP of the frame, not the bottom: Mario Kart
    and Smash both draw their own HUD (coins, lap, position, damage) along the
    bottom of the capture, and covering it referees the game blind. */
@@ -34,10 +50,18 @@
   min-height: var(--strip-h);
 }
 
+/* The fill bleeds to the frame edge; the ink does not. A flat 20px put the
+   player name and the team line 1.04% from the left and right edges, well
+   inside the 67.2px action-safe line, so the same 3.5% crop that ate the
+   round label took the first characters of both names with it. Only the
+   OUTER edge moves to --safe-x: the inner edge faces the round tab in the
+   middle of the frame, and the text column beside it is min-width: 0, so the
+   76px comes out of the room a long name had to clamp in, not out of the
+   score, which still has 529px of side to sit in. */
 .ar-side { display: flex; align-items: center; gap: 16px; padding: 6px 20px; }
 .ar-side--p2 { flex-direction: row-reverse; text-align: right; }
-.ar-side--p1 { background: var(--cg-purple); border-right: var(--rule); }
-.ar-side--p2 { background: var(--cg-green-lo); border-left: var(--rule); }
+.ar-side--p1 { padding-left: var(--safe-x); background: var(--cg-purple); border-right: var(--rule); }
+.ar-side--p2 { padding-right: var(--safe-x); background: var(--cg-green-lo); border-left: var(--rule); }
 /* min-width: 0 lets the text column actually shrink inside the flex row;
    without it a long name refuses to clamp and pushes the score off the edge. */
 .ar-side > div:first-child { min-width: 0; }
@@ -88,7 +112,9 @@
      wide: the rows run at the 28px broadcast floor (this overlay is on air,
      and 17px rendered at ~11px on a 720p stream), so names plus points no
      longer fit the old 330. */
-  position: absolute; right: 24px; top: calc(var(--strip-h) + 16px); width: 520px;
+  /* --safe-x, not 24px: at 24 the panel's own edge sat 1.25% from the frame
+     edge and a 3.5% crop took the points column off the right of it. */
+  position: absolute; right: var(--safe-x); top: calc(var(--strip-h) + 16px); width: 520px;
   background-color: var(--cg-purple);
   background-image: var(--tex-perf); background-size: var(--tex-perf-size);
   clip-path: var(--chamfer); --ch: 12px;
@@ -135,10 +161,12 @@
    Its resting transform is the centering one, which must be preserved. */
 .ffa-tab { transform: translateX(-50%); }
 .ffa-tab[data-off] { transform: translate(-50%, calc(-100% - var(--strip-h))); }
-/* Inset from the right edge, so it must travel its own width plus the inset. */
-.gp[data-off] { transform: translateX(calc(100% + 24px)); opacity: .4; }
-/* Inset from the left. */
-#upNext[data-off] { transform: translateX(calc(-100% - 24px)); opacity: .4; }
+/* Inset from the right edge, so it must travel its own width plus the inset.
+   The inset is --safe-x now, and this has to travel the same distance or the
+   panel parks with a sliver of itself still on frame. */
+.gp[data-off] { transform: translateX(calc(100% + var(--safe-x))); opacity: .4; }
+/* Inset from the left, same arithmetic. */
+#upNext[data-off] { transform: translateX(calc(-100% - var(--safe-x))); opacity: .4; }
 
 @media (prefers-reduced-motion: reduce) {
   /* docs/08: every transition collapses to a state change. The box still
@@ -162,7 +190,9 @@
 .gp-pts { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 900; font-size: 28px; }
 
 #upNext {
-  position: absolute; left: 24px; top: calc(var(--strip-h) + 20px);
+  /* --safe-x, not 24px: the chip carries the next set's team numbers, and at
+     24 its first characters were inside the 67.2px action-safe line. */
+  position: absolute; left: var(--safe-x); top: calc(var(--strip-h) + 20px);
   /* Always laid out, never display:none: it has to be able to slide away, and
      an element that is display:none has nowhere to slide from. */
   display: inline-flex;

@@ -30,7 +30,13 @@ h1 { margin: 0; text-align: center;
   font-family: var(--font-cond); font-weight: 700; font-size: 22px;
   letter-spacing: .22em; text-indent: .22em; text-transform: uppercase; color: var(--cg-gold); }
 .tick { width: 180px; height: 3px; margin: 6px auto 0; background: var(--tick); }
-.sub { text-align: center; font-family: var(--font-cond); font-size: 14px;
+/* .kicker, not .sub. The four audience phone pages share a copy-pasted kit,
+   and in it `.sub` meant two different things: a tracked uppercase status
+   line here, and an ordinary body paragraph on the shout-out and Judge
+   Advisor pages. One class name that means both is the kind of drift that
+   makes the next person copy the wrong rule. This is the status line, so it
+   gets a status line's name. (/s/next still calls its own status line .sub.) */
+.kicker { text-align: center; font-family: var(--font-cond); font-size: 14px;
   letter-spacing: .12em; text-transform: uppercase; color: var(--cg-white-dim); }
 
 .card { background-color: var(--cg-purple); background-image: var(--tex-perf);
@@ -39,9 +45,17 @@ h1 { margin: 0; text-align: center;
 
 label { display: block; font-family: var(--font-cond); font-weight: 600; font-size: 14px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--cg-white-dim); margin: 10px 0 6px; }
+/* The border is the field's only boundary, and --cg-purple-hi gave it
+   1.50:1 against the card and 2.02:1 against the field's own fill, both well
+   under the 3:1 floor for non-text. On a phone in gym lighting the join
+   fields were dark-on-dark, findable only by a placeholder that vanishes on
+   the first keystroke. The muted white reads 3.36:1 on the card and 4.53:1
+   on the fill: the same value and the same reason as the console rule in
+   packages/theme/tokens.css, which this page cannot inherit because it
+   declares no data-surface. */
 input { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px;
   font-family: var(--font-display); background: var(--cg-purple-lo); color: var(--cg-white);
-  border: 2px solid var(--cg-purple-hi); }
+  border: 2px solid var(--cg-white-mute); }
 /* Chrome's default placeholder gray is under AA on the sunken purple fill. */
 input::placeholder { color: var(--cg-white-dim); }
 input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; border-color: var(--cg-gold); }
@@ -50,7 +64,12 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
   clip-path: var(--chamfer); --ch: 12px;
   background: var(--cg-gold); color: var(--cg-black);
   font-family: var(--font-cond); font-weight: 700; font-size: 17px;
-  letter-spacing: .12em; text-transform: uppercase; }
+  letter-spacing: .12em; text-transform: uppercase;
+  /* The transition is the press feedback, not decoration. This button is
+     otherwise byte-identical to the shout-out page's, which has it; without
+     it the :active scale below snaps in one frame, and on a phone that reads
+     as no response at all rather than as a press. */
+  transition: transform 90ms var(--ease-pop); }
 .btn-go:active { transform: scale(.98); }
 /* clip-path clips outline/box-shadow/filter alike, so a ring drawn OUTSIDE
    the chamfer (positive offset) is silently invisible. Drawing it inside
@@ -102,7 +121,7 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 
   <!-- join. A real form, so the phone keyboard's go/return key joins too. -->
   <form class="card" id="join">
-    <div class="sub">Play from your seat · fastest right answer wins</div>
+    <div class="kicker">Play from your seat · fastest right answer wins</div>
     <label for="name">Your name</label>
     <input id="name" maxlength="24" autocomplete="nickname" placeholder="Ana">
     <label for="team">FRC team · optional</label>
@@ -114,7 +133,7 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
   <!-- play -->
   <div id="play" hidden>
     <div class="card">
-      <div class="sub" id="cat" aria-live="polite"></div>
+      <div class="kicker" id="cat" aria-live="polite"></div>
       <p id="q" aria-live="polite">Waiting for the next question...</p>
       <div id="fuse" hidden aria-hidden="true"><div id="fuseFill"></div></div>
     </div>
@@ -267,7 +286,12 @@ async function poll() {
   if (pollInFlight) return;
   pollInFlight = true;
   try {
-    const v = await fetch(`/api/trivia/play${playerId ? `?player=${encodeURIComponent(playerId)}` : ''}`)
+    // The player id is this phone's only credential for its own score, and a
+    // query string is the one part of a request that gets written to logs and
+    // proxies verbatim. It travels as a header instead; the route still reads
+    // ?player= as a fallback for a phone that has not reloaded yet.
+    const v = await fetch('/api/trivia/play',
+      playerId ? { headers: { 'x-trivia-player': playerId } } : undefined)
       .then(r => r.json());
     // A hard reset on the desk invalidates our id, so fall back to the join card.
     if (playerId && !v.me) {

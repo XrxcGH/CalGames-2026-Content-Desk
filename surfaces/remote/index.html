@@ -42,10 +42,23 @@ h1 { margin: 0; font-size: 19px; font-variation-settings: "wdth" 118; }
 }
 .now .s { font-family: var(--font-num); font-weight: 900; font-size: 40px; line-height: 1; }
 /* Official alliance red/blue fail even the 3:1 large-text floor on the purple
-   panel (2.9:1 and 2.1:1). Lightened console-only variants, same as the desk
-   and talent views; broadcast surfaces keep the exact official hex as fills. */
-.now .s.red { color: var(--st-bad-text); }
+   panel (2.9:1 and 2.1:1), so both scores use the lightened text variants the
+   desk and talent views use; broadcast surfaces keep the exact official hex
+   as fills.
+   Red says --alliance-red-text, not --st-bad-text. The two hold the same hex,
+   but --st-bad-text is an operator-console token that is not declared on a
+   page with no data-surface, and this page has none: the var() was invalid at
+   computed-value time, colour inherited, and the red score rendered in the
+   same white as the blue one. A producer glancing at the phone mid-match had
+   nothing but left-and-right to tell the two 40px numbers apart. The alliance
+   text tokens now live on the base :root in tokens.css precisely so this page
+   resolves them. */
+.now .s.red { color: var(--alliance-red-text); }
 .now .s.blue { color: var(--alliance-blue-text); text-align: right; }
+/* Visually hidden but announced: the alliance word that sighted operators get
+   for free from position and colour. Same rule the desk console carries. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .now .mid { text-align: center; }
 .now .clk { font-family: var(--font-num); font-weight: 900; font-size: 26px; line-height: 1; color: var(--cg-gold); }
 /* Tracking adds a trailing space to every glyph, so centered tracked text
@@ -83,6 +96,11 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
 }
 .b[data-on="true"] { background: var(--cg-gold); color: var(--cg-black); }
 .b small { display: block; font-size: 13px; opacity: .75; letter-spacing: .04em; margin-top: 2px; }
+/* The cue's own sentence. Sentence case and untracked, because .b uppercases
+   and tracks everything, and "SHOW THE ALLIANCE OVERVIEW WHEN A MATCH IS
+   LOADED" is a label, not a sentence a producer reads in a hurry. */
+.b .does { text-transform: none; letter-spacing: .005em; font-size: 12px;
+  line-height: 1.35; opacity: .85; margin-top: 5px; }
 .b--go { background: var(--cg-green); }
 .b--warn { background: var(--cg-purple-hi); }
 .b--wide { grid-column: 1 / -1; }
@@ -148,28 +166,31 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
     <span class="link" id="link">connecting</span>
   </header>
 
+  <!-- The labels sit in wrappers rather than inside the score elements,
+       because the score elements have their textContent replaced on every
+       state frame and would eat them. -->
   <div class="now">
-    <div class="s red num" id="red">0</div>
+    <div>
+      <span class="sr-only">Red alliance score</span>
+      <div class="s red num" id="red">0</div>
+    </div>
     <div class="mid">
       <div class="clk num" id="clk">0:20</div>
       <div class="ph" id="phase">Pre-match</div>
     </div>
-    <div class="s blue num" id="blue">0</div>
+    <div>
+      <span class="sr-only">Blue alliance score</span>
+      <div class="s blue num" id="blue">0</div>
+    </div>
   </div>
   <div class="mname" id="mname">No match loaded</div>
 
   <section>
     <h2>Screen</h2>
-    <div class="grid">
-      <button class="b" data-screen="overview">Pre-match</button>
-      <button class="b" data-screen="match">Match</button>
-      <button class="b" data-screen="score">Final</button>
-      <button class="b b--warn" data-screen="blank">Blank</button>
-      <!-- Every take above holds the screen until Auto releases it. Without
-           this button one tap here would freeze the show's automation with no
-           way back from the phone. -->
-      <button class="b b--wide" data-screen="auto">Auto<small>follow the match</small></button>
-    </div>
+    <!-- Built from the shared SCREENS table in the script below, not typed
+         here. That table exists to stop three surfaces teaching three names
+         for one screen, and this was the third surface, still hand-typed. -->
+    <div class="grid" id="screenGrid"></div>
   </section>
 
   <section>
@@ -226,6 +247,16 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
 
   <section>
     <h2>Cues</h2>
+    <!-- A bare heading over a grid of buttons reading "On deck / off · would
+         have fired 3x" taught a first-timer nothing: not that a cue is show
+         automation, not what arming one hands over, not what the count is
+         counting. Every other section on this page that needs a line of
+         helper text has one. This one needs it most, because it is the only
+         place in the whole project where automation can be switched on. -->
+    <p class="hint" style="margin:0 4px 10px">Cues are the show's automation.
+      <b>Armed</b> means the desk does that thing by itself from now on; off
+      means it only counts the times it would have fired. This phone is the
+      only place cues can be armed: the desk console has no cue controls.</p>
     <div class="grid" id="cues"></div>
   </section>
 </div>
@@ -233,7 +264,7 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
 <div id="toast" role="status"></div>
 
 <script type="module">
-import { connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker, SCENE_LABEL } from '/shared/desk-client.js';
+import { connect, clockDisplay, clockDisplayFor, phaseFor, PHASE_LABEL, startTicker, SCENE_LABEL, SCREENS, SCREEN_LABEL } from '/shared/desk-client.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('remote');
@@ -361,11 +392,55 @@ for (const b of document.querySelectorAll('[data-emit]')) {
     toast(b.textContent.trim());
   });
 }
-for (const b of document.querySelectorAll('[data-screen]')) {
+
+// ---- screen takes ----------------------------------------------------------
+/**
+ * The five screens worth a thumb on a phone, built from the shared SCREENS
+ * table rather than typed into the markup.
+ *
+ * desk-client.js documents SCREENS as shared by "the nav strip, the desk's
+ * screen row, and the phone remote", and two of those three used it. This one
+ * kept its own hand-typed copy of the labels, which is exactly the
+ * arrangement the table was added to delete: the same page already learned
+ * the lesson for camera scenes ("two hand-kept copies drifted"). The labels
+ * happened to agree, so nothing looked wrong; the guarantee in the docstring
+ * was simply not true, and one rename at the desk would have made it visible
+ * on air.
+ */
+const PHONE_SCREENS = ['overview', 'match', 'score', 'blank', 'auto'];
+const SCREEN_STYLE = {
+  blank: { cls: 'b--warn' },
+  // Every take above holds the screen until Auto releases it. Without this
+  // button one tap here would freeze the show's automation with no way back
+  // from the phone.
+  auto: { cls: 'b--wide', sub: 'follow the match' },
+};
+$('screenGrid').replaceChildren(...PHONE_SCREENS.map(id => {
+  const label = SCREEN_LABEL[id] ?? id;
+  const style = SCREEN_STYLE[id] ?? {};
+  const b = document.createElement('button');
+  b.className = `b${style.cls ? ` ${style.cls}` : ''}`;
+  b.dataset.screen = id;
+  b.append(document.createTextNode(label));
+  if (style.sub) {
+    const small = document.createElement('small');
+    small.textContent = style.sub;
+    b.append(small);
+  }
   b.onclick = tap(() => {
-    desk.emit({ type: 'screen.change', payload: { screen: b.dataset.screen } });
-    toast(b.dataset.screen);
+    desk.emit({ type: 'screen.change', payload: { screen: id } });
+    // The LABEL on the button, not the internal id. Tapping "Pre-match"
+    // flashed "overview" and tapping "Final" flashed "score": a producer
+    // watching the field gives the toast one glance, and that glance taught
+    // them a second name for the screen they had just taken.
+    toast(label);
   });
+  return b;
+}));
+// A label typed here that SCREENS does not know would silently take nothing.
+// Say it in the console rather than at the event.
+for (const id of PHONE_SCREENS) {
+  if (!SCREENS.some(s => s.id === id)) console.warn(`[remote] no such screen: ${id}`);
 }
 
 // The Screen grid shows which one is live, the way Cameras always has: five
@@ -539,9 +614,22 @@ async function loadCues() {
       b.dataset.cue = c.id;
       b.dataset.on = String(c.autopilot);
       b.append(document.createTextNode(c.name));
+      // The sentence the server already sends, and this page used to throw
+      // away. CueStatus carries `does` for exactly this moment: engine.ts
+      // calls it "What the producer sees when deciding whether to trust it",
+      // every default cue supplies one, /api/cues returns it, and no surface
+      // in the project rendered it. Without it, arming is a coin flip on a
+      // name: "On deck" says nothing about the fact that pressing it hands
+      // the program screen and the camera cuts to the desk.
+      if (c.does) {
+        const does = document.createElement('small');
+        does.className = 'does';
+        does.textContent = c.does;
+        b.append(does);
+      }
       const small = document.createElement('small');
       small.textContent = c.autopilot
-        ? 'armed'
+        ? 'armed · runs by itself'
         : `off · would have fired ${Number(c.wouldHaveFired) || 0}×`;
       b.append(small);
       return b;

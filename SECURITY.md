@@ -36,22 +36,45 @@ In rough order of how much damage a flaw would do:
    are gitignored. `redacted()` in `apps/core/src/config.ts` exists so the
    config can reach a browser surface without the secrets; a path that leaks
    one of those values is a real vulnerability.
-3. **Control-surface access.** Operator consoles and every mutating endpoint
-   sit behind a shared event PIN (`apps/core/src/access.ts`), an allowlist in
-   both directions: anything not explicitly opened is closed. Audience-facing
-   surfaces are deliberately open and carry no credential. A way to reach a
-   gated endpoint without the PIN, or to read an unrevealed trivia answer,
-   belongs here rather than in a public issue.
-4. **Audience data.** Crowd trivia collects display names typed by people in
+3. **Pre-ceremony award winners.** The Judge Advisor stages each award's
+   winner hours before it is announced, and `data/awards-staged.json` is the
+   one file on disk holding a secret the architecture exists to keep. The
+   winner is deliberately held out of the event bus until the reveal press,
+   because every open surface reads the bus fan-out. Anything that puts a
+   winner into `/api/state`, a websocket frame, a preview render, a log line,
+   an event log, or the desk console before that press is a real
+   vulnerability, and so is any path that reads `/api/awards` with a winner
+   attached without a Judge Advisor session. See `apps/core/src/awards.ts`.
+4. **Control-surface access.** There are **three** codes, not one, resolved in
+   `apps/core/src/server.ts` and enforced by the allowlist in
+   `apps/core/src/access.ts`, which runs in both directions: anything not
+   explicitly opened is closed.
+   - The **desk PIN** (`REMOTE_PIN`) covers the operator consoles and every
+     mutating endpoint.
+   - The **awards code** (`awards.pin`, or `JA_PIN`) is the Judge Advisor's,
+     and the desk PIN alone cannot reach a winner: not to read one, not to
+     type one, not to put one on screen.
+   - The **settings code** (`setup.pin`, or `SETUP_PIN`) is the content
+     lead's, and covers `/s/setup`.
+
+   `/s/awards` and `/s/setup` are in `OPEN_SURFACES` on purpose, because
+   neither the JA nor the content lead holds the desk PIN. Only the page
+   shell is open; every read and write behind it requires that tier's own
+   session cookie. A way to reach a gated endpoint without its code, to cross
+   from one tier's session into another's, or to read an unrevealed trivia
+   answer, belongs here rather than in a public issue.
+5. **Audience data.** Crowd trivia collects display names typed by people in
    the stands, held in memory only. Anything that persists or exposes more
    than that is worth reporting.
 
 ## What is out of scope
 
-- The PIN is short, shared, and printed for volunteers. That is a deliberate
-  trade for a system run by people who arrive on the day; "the PIN can be
-  brute-forced given unlimited attempts" is answered by the rate damper in
-  `server.ts`, and "a volunteer told someone the PIN" is not a software bug.
+- All three codes are short, shared, and printed for volunteers. That is a
+  deliberate trade for a system run by people who arrive on the day; "a
+  four-digit code can be brute-forced given unlimited attempts" is answered by
+  the rate damper in `server.ts`, which keeps a separate lockout counter per
+  door and per address, so a correct desk PIN does not buy fresh guesses at
+  the awards code. "A volunteer told someone the PIN" is not a software bug.
 - The desk trusts the venue LAN it is on. It is not designed to be exposed to
   the internet, and [docs/13](docs/13-deployment.md) says so.
 - Denial of service against your own desk from your own network.

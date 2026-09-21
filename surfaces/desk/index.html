@@ -27,6 +27,11 @@ body { font-size: var(--font-ui-body); }
     box-shadow: none !important; clip-path: none !important; text-shadow: none !important; }
   #vitalsSection { position: absolute; top: 0; left: 0; width: 100%; }
   #vitalsSection .btn { display: none; }
+  /* A level is carried by a dot's fill colour, and the rule above forces
+     every fill to white: every dot printed white on white, so the sheet a
+     volunteer walks the venue with before doors carried no pass or fail
+     marks at all. The level WORD on each row is what prints. */
+  #vitalsSection .vdot, #vitalsSection .v i { display: none !important; }
 }
 
 /* Under the injected nav strip, not underneath it: nav.js publishes its
@@ -41,15 +46,35 @@ body { font-size: var(--font-ui-body); }
 .jump a:hover { color: var(--text); background: var(--btn-hover); }
 .jump a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -5px; }
 .jump a.danger { background: var(--st-bad); color: #fff; }
-/* Sections get scroll room under the sticky strip. */
-section { scroll-margin-top: 56px; }
+/* Sections get scroll room under BOTH sticky strips, measured rather than
+   guessed. A flat 56px cleared the nav strip alone, so clicking Awards or
+   Safety mid-show parked the section's own heading behind the jump strip:
+   the operator lands on a panel whose title they cannot read and has to
+   scroll back up to check they are in the right one. Both strips wrap to a
+   second row on a narrow window, which is why each publishes its height
+   (nav.js sets --opnav-h, desk.js sets --jump-h). The fallbacks are the
+   one-row heights, used only for the frames before either has measured. */
+section { scroll-margin-top: calc(var(--opnav-h, 51px) + var(--jump-h, 44px) + 10px); }
 
-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 18px; }
+/* Wraps rather than overflows: the header carries two readouts now, and on a
+   narrow laptop the link indicator has to be allowed to drop a line. */
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px;
+  margin-bottom: 18px; }
 h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
-.link { margin-left: auto; display: flex; align-items: center; gap: 8px;
+.link { display: flex; align-items: center; gap: 8px;
   font-family: var(--font-mono); font-size: 14px; color: var(--text-dim); }
 .dot { width: 10px; height: 10px; clip-path: var(--chamfer); --ch: 3px; background: var(--st-bad); }
 .dot[data-up="true"] { background: var(--st-ok); }
+/* The doors-check verdict, mirrored up here beside the link dot. The check
+   itself sits inside a fold that can stay shut all day, so the console knew
+   a mic was muted or the disk would fill during playoffs and showed it
+   nowhere anybody was looking. This is also the way in: it jumps to the
+   section and opens the fold on the way. */
+.vlink { margin-left: auto; display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 14px; color: var(--text-dim);
+  text-decoration: none; }
+.vlink:hover { color: var(--text); }
+.vlink:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
 
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
   gap: 20px; align-items: start; }
@@ -112,7 +137,13 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
 /* The tokens .btn face is --surface-raised, the same fill as this page's
    section panels, which left every button as bare floating text. The sunken
    fill gives them an edge; the nav strip's buttons use the same treatment. */
-.btn { font-size: 14px; padding: 9px 14px; background: var(--surface-sunken); }
+/* Sets the face TOKEN, never `background` itself. This page's stylesheet
+   loads after tokens.css, so a bare `background` here beat the shared
+   .btn--go modifier at equal specificity and every gold primary on the
+   busiest console in the building rendered as an ordinary grey button. The
+   token feeds tokens.css's own `background: var(--btn-face, ...)`, so the
+   desk keeps its darker resting face and the modifier still wins. */
+.btn { font-size: 14px; padding: 9px 14px; --btn-face: var(--surface-sunken); }
 .btn kbd { font-family: var(--font-mono); font-size: 13px; opacity: .6; margin-left: 7px; }
 /* A disabled button must LOOK dead (Queue before Start, Start stream with no
    OBS), or the operator reads a silent no-op as a broken console. */
@@ -181,9 +212,14 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 .vdot[data-l="ok"] { background: var(--st-ok); }
 .vdot[data-l="warn"] { background: var(--st-warn); }
 .vdot[data-l="fail"] { background: var(--st-bad); }
-#vitals .v { display: grid; grid-template-columns: 14px 118px 1fr; gap: 10px;
+#vitals .v { display: grid; grid-template-columns: 14px 118px 1fr auto; gap: 10px;
   align-items: baseline; padding: 6px 8px; margin-bottom: 4px; font-size: 13px;
   background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 6px; }
+/* The pass or fail as a WORD, in its own column. The dot said it in colour
+   alone, which an operator who cannot tell the greens from the reds could
+   not read on screen and nobody could read on the printed sheet. */
+#vitals .v .lvl { font-family: var(--font-cond); font-weight: 700; font-size: 12px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); }
 #vitals .v[data-l="off"] { opacity: .5; }
 #vitals .v i { width: 10px; height: 10px; clip-path: var(--chamfer); --ch: 3px;
   background: var(--text-dim); align-self: center; }
@@ -191,7 +227,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 #vitals .v[data-l="warn"] i { background: var(--st-warn); }
 #vitals .v[data-l="fail"] i { background: var(--st-bad); }
 #vitals .v b { font-weight: 700; }
-#vitals .v .fix { grid-column: 3; color: var(--st-warn); }
+#vitals .v .fix { grid-column: 3 / -1; color: var(--st-warn); }
 /* ---- coverage ---- */
 #covGaps .gap { display: grid; grid-template-columns: auto 1fr; gap: 10px;
   padding: 7px 10px; margin-bottom: 5px; font-size: 13px;
@@ -219,6 +255,30 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 .setrow { background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 8px;
   padding: 10px 12px; margin-bottom: 8px; }
 .setrow .row { margin-bottom: 0; }
+
+/* One cue per row: what it does, what it is set to, and the two buttons.
+   The state WORD carries the meaning, not the colour. */
+/* minmax(0, 1fr), not 1fr: a grid item's automatic minimum is its content
+   width, so inside the desk's 460px show column the description refused to
+   shrink and printed straight through the Arm button beside it. The buttons
+   drop to their own row when even that is not enough. */
+#cueList .cue { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px 8px; align-items: center; padding: 8px 10px; }
+#cueList .cue > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 1500px) {
+  #cueList .cue { grid-template-columns: 1fr 1fr; }
+  #cueList .cue > span:first-child { grid-column: 1 / -1; }
+}
+#cueList .cue + .cue { border-top: 1px solid var(--surface-sunken); }
+#cueList .cue b { display: block; }
+#cueList .cue .does { display: block; color: var(--text-dim); font-size: 13px;
+  line-height: 1.45; }
+#cueList .cue .st { display: block; font-family: var(--font-cond); font-weight: 700;
+  font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-dim); margin-top: 3px; }
+#cueList .cue .st[data-on="true"] { color: var(--st-ok); }
+#cueList .cue .st[data-err="true"] { color: var(--st-bad-text); }
+#cueList .btn { font-size: 12px; padding: 5px 10px; }
 
 /* Award list: one heading per ceremony, and the running order beside each
    title, because "which one are we on" is the question during a ceremony. */
@@ -269,17 +329,21 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
   <header>
     <h1>Desk console</h1>
     <span class="hint">Keyboard-first. This runs the show with everything else dead.</span>
+    <a class="vlink" href="#vitalsSection"><span class="vdot" id="vitalsMirror" aria-hidden="true"></span><span id="vitalsMirrorText">doors check: not run yet</span></a>
     <span class="link" role="status" aria-live="polite"><span class="dot" id="dot" aria-hidden="true"></span><span id="linkText">connecting</span></span>
   </header>
 
   <nav class="jump" aria-label="Jump to a section">
     <a href="#sec-match">Match</a>
     <a href="#sec-cameras">Cameras</a>
+    <a href="#sec-cues">Automation</a>
     <a href="#sec-audio">Audio</a>
+    <a href="#sec-status">Delay card</a>
     <a href="#sec-oncamera">On camera</a>
     <a href="#sec-slides">Slides</a>
     <a href="#sec-timer">Timer</a>
     <a href="#sec-awards">Awards</a>
+    <a href="#vitalsSection">Doors check</a>
     <a href="#emergSection" class="danger">Safety</a>
   </nav>
 
@@ -355,7 +419,22 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <div class="row" id="sceneRow"></div>
         <p class="hint">The shot, not the graphic. Screens follow the match on their own,
           so a late cut leaves the graphics right. Autopilot never cuts away from the field
-          mid-match; you always can.</p>
+          mid-match; you always can. Arm the automatic cuts in <b>Show automation</b>
+          below.</p>
+      </section>
+
+<section id="sec-cues">
+        <h2>Show automation <span class="hint" id="cueNote" aria-live="polite">·</span></h2>
+        <p class="hint">A cue is the desk doing one thing by itself: cutting to the field
+          when the match arms, ducking the music when the announcer talks. Every cue starts
+          <b>off</b>, and an off cue still counts what it <i>would</i> have done, so you can
+          watch it be right before you trust it. <b>Run now</b> fires one by hand whatever
+          its setting.</p>
+        <div class="row">
+          <button class="btn" id="cueArmAll">Arm every cue</button>
+          <button class="btn" id="cueDisarmAll">Turn every cue off</button>
+        </div>
+        <div id="cueList" class="pbook" style="max-height:340px"></div>
       </section>
 
 <section>
@@ -377,14 +456,27 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           </div>
           <span class="ah-src" id="audioSrc">Silent</span>
         </div>
+        <!-- Labels a first-timer can act on. "Duck" is a word from an audio
+             desk and reads as nothing at all; "Wake player" read as "wake the
+             /s/house player page" that the hint below names, which is the one
+             thing it does not do: it wakes the music app on the music
+             machine. A volunteer chasing a silent room pressed it and learned
+             nothing. -->
         <div class="row">
-          <button class="btn btn--go" id="audToggle">Play music</button>
-          <button class="btn" id="audPrev">Back</button>
-          <button class="btn" id="audNext">Skip</button>
-          <button class="btn" id="audDuck">Duck</button>
-          <button class="btn" id="audConsole">Game audio</button>
-          <button class="btn" id="audWake">Wake player</button>
+          <button class="btn btn--go" id="audToggle"
+            title="Starts and stops the playlist on the house speakers. The stream never hears it.">Play music</button>
+          <button class="btn" id="audPrev" title="Back to the previous song.">Back</button>
+          <button class="btn" id="audNext" title="On to the next song.">Skip</button>
+          <button class="btn" id="audDuck"
+            title="Drops the music under the announcer so the room can hear them.">Duck music</button>
+          <button class="btn" id="audConsole"
+            title="Switches the room from music to the field's own sound.">Game audio</button>
+          <button class="btn" id="audWake"
+            title="Asks the music app on the music machine to become the active device. Press it before doors to prove it answers: it does nothing to the /s/house page.">Wake the music app</button>
         </div>
+        <p class="hint"><b>Duck music</b> drops the song under the announcer, and the
+          same button puts it back up. <b>Game audio</b> hands the room over to the
+          field's own sound.</p>
         <div class="row">
           <label class="in" for="audVol" style="margin:0">Volume</label>
           <input id="audVol" type="range" min="0" max="100" step="5" style="flex:1 1 160px">
@@ -398,7 +490,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           team.</p>
       </section>
 
-<section>
+<section id="sec-status">
         <h2>Delay &amp; status card</h2>
         <p class="hint">Puts a "why we're waiting" card on program and the side screens.
           An unexplained stoppage reads as dead air; a named one reads as process.</p>
@@ -416,6 +508,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <button class="btn needs-link" id="statusShowCustom">Show custom</button>
           <button class="btn needs-link" id="statusClear">Hide card</button>
         </div>
+        <!-- The only on-air section that used to say nothing back. A card the
+             operator put up stays up until Hide card is pressed, so "Field
+             delay" rode over the program feed and the venue TVs into the next
+             match with nothing on this console admitting it. -->
+        <p class="hint" id="statusHint" aria-live="polite"></p>
       </section>
 
 <section>
@@ -477,13 +574,22 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint">The analyst draws on the frame the audience is seeing, not a
           blank sheet. The replay console's <b>Send frame to analyst</b> pushes one
           automatically; this field is the manual fallback. <b>Hide</b> kills the
-          render surface instantly without clearing the analyst's pad.</p>
+          render surface instantly without clearing the analyst's pad, and
+          <b>Show again</b> is the way back from it.</p>
+        <!-- "Send frame" and "Go live" told the operator nothing about which
+             was which, and "Go live" read as "put the telestrator on air" when
+             all it does is un-hide the render. -->
         <div class="row" style="margin-top:12px">
-          <button class="btn needs-link" id="teleSend">Send frame</button>
-          <button class="btn needs-link" id="teleLive">Go live</button>
-          <button class="btn needs-link" id="teleClear">Clear ink</button>
-          <button class="btn needs-link" id="teleHide">Hide</button>
+          <button class="btn needs-link" id="teleSend"
+            title="Freezes the image in the box above onto the analyst's pad.">Send this URL</button>
+          <button class="btn needs-link" id="teleLive"
+            title="Puts the render back after Hide. The frozen frame and the ink are left alone.">Show again</button>
+          <button class="btn needs-link" id="teleClear"
+            title="Wipes the analyst's drawing. The frozen frame stays.">Clear ink</button>
+          <button class="btn needs-link" id="teleHide"
+            title="Takes the drawing off the broadcast at once. The analyst's pad keeps working.">Hide</button>
         </div>
+        <p class="hint" id="teleHint" aria-live="polite"></p>
       </section>
     </div>
 
@@ -530,7 +636,12 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <button class="btn" id="slHide">Hide</button>
         </div>
         <label>Shout-out queue</label>
-        <p class="hint">From phones in the stands (<b>/s/gp</b>, on the side-screen QR).
+        <!-- No QR points at /s/gp: the side screens carry one code and it goes
+             to the schedule page. Promising a QR that is not in the building
+             sent operators telling the stands to scan something that took
+             them somewhere else. -->
+        <p class="hint">From phones in the stands, at <b>/s/gp</b>. No screen points
+          there yet, so the address has to be read out or put on a slide.
           Nothing goes up without your press. Approving adds it to the deck.</p>
         <div id="gpQueue" class="pbook" style="max-height:180px"></div>
         <p class="hint" id="slHint" aria-live="polite"></p>
@@ -541,11 +652,16 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint">The rotation the broadcast owes the people who paid.
           <b>Next sponsor</b> steps through the plan on program; every airing
           is counted for the post-event report.</p>
+        <!-- Dead until the list exists, and saying so. A shipped config has no
+             sponsors, so these two read as working controls and the first
+             press answered "No sponsors are configured." with nowhere to go
+             next. desk.js turns them on when a list arrives. -->
         <div class="row">
-          <button class="btn btn--go" id="spNext">Next sponsor</button>
-          <button class="btn" id="spHide">Hide</button>
+          <button class="btn btn--go" id="spNext" disabled>Next sponsor</button>
+          <button class="btn" id="spHide" disabled>Hide</button>
         </div>
-        <p class="hint" id="spHint" aria-live="polite"></p>
+        <p class="hint" id="spHint" aria-live="polite">No sponsors on the list yet. The
+          content lead adds them at <b>/s/setup</b>, behind the settings code.</p>
       </section>
 
 <section id="sec-timer">
@@ -554,7 +670,10 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           field for robot setup. It clears itself the moment a match starts.</p>
         <div class="row">
           <button class="btn" id="tmSetup">Field setup 2:00</button>
-          <button class="btn" id="tmFive">5:00</button>
+          <!-- Named, like its neighbour: the word on the button is the word
+               the side screens count down under, so nobody has to press it to
+               find out what the hall will read. -->
+          <button class="btn" id="tmFive">Break 5:00</button>
           <input id="tmLabelIn" aria-label="Timer label" placeholder="Label" style="flex:2 1 140px">
           <input id="tmMinIn" aria-label="Timer minutes" placeholder="Min" inputmode="numeric" style="flex:0 1 70px">
           <button class="btn" id="tmStart">Start</button>
@@ -621,9 +740,14 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <h2>Run of show</h2>
         <p class="hint">The day as a list, timed from measured pace. The side
           screens count down to whatever is next.</p>
-        <p class="hint" id="rdNow" aria-live="polite">No run of show planned.</p>
+        <p class="hint" id="rdNow" aria-live="polite">No run of show yet. The content lead
+          builds the day at <b>/s/setup</b>, behind the settings code.</p>
+        <!-- Enabled by desk.js once there are segments to advance through. It
+             used to stay pressable over an empty plan and answer "No run of
+             show is configured.", which tells a first-timer nothing about
+             where a run of show comes from. -->
         <div class="row">
-          <button class="btn" id="rdAdvance">Finish segment, start the next</button>
+          <button class="btn" id="rdAdvance" disabled>Finish segment, start the next</button>
         </div>
         <p class="hint" id="rdHint" aria-live="polite"></p>
       </section>
@@ -683,18 +807,25 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <summary>Field-down kit: run matches by hand</summary>
 <section>
         <h2>Load match</h2>
+        <!-- Grey examples, never filled-in values. These are real Bay Area
+             team numbers, loading a match takes the program screen, and this
+             kit unfolds itself the moment the field bridge drops: one press
+             by a panicking first-timer put an invented "Qualification 42"
+             alliance overview on program and every TV in the venue. desk.js
+             refuses an empty form for the same reason the lower third does. -->
         <label for="mName">Match name</label>
-        <input id="mName" placeholder="Qualification 42" value="Qualification 42">
+        <input id="mName" placeholder="Qualification 42">
         <label for="mRed">Red alliance: team numbers</label>
-        <input id="mRed" placeholder="846 1868 253" value="846 1868 253">
+        <input id="mRed" placeholder="846 1868 253">
         <label for="mBlue">Blue alliance: team numbers</label>
-        <input id="mBlue" placeholder="100 115 670" value="100 115 670">
+        <input id="mBlue" placeholder="100 115 670">
         <div class="row" style="margin-top:12px">
           <button class="btn needs-link" id="loadMatch">Load</button>
         </div>
         <p class="hint">With the Cheesy bridge up, names fill in from the field's team
           list on their own. Running desk-only, numbers alone are enough for the overview to
           build itself.</p>
+        <p class="hint" id="loadHint" aria-live="polite"></p>
       </section>
 
 <section>
@@ -718,10 +849,16 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
       </details>
 
+      <!-- Named for the job it does first. "Setup & end of day" reads like
+           configuration, and the doors check, the one readout that rolls up
+           every subsystem, was behind it: a volunteer without the printout
+           never found it. desk.js opens this fold on a failing check and on
+           any jump to the doors check. -->
       <details class="group" id="setupGroup">
-        <summary>Setup &amp; end of day</summary>
+        <summary>Doors check, setup &amp; end of day</summary>
 <section id="vitalsSection">
-        <h2>Doors check <span class="vdot" id="vitalsDot"></span></h2>
+        <h2>Doors check <span class="vdot" id="vitalsDot" aria-hidden="true"></span>
+          <span id="vitalsWord">not run yet</span></h2>
         <p class="hint">Everything the desk can check about itself. The point is the
           failures nothing else complains about: a muted announcer mic, a disk that
           will fill during playoffs, a stream dropping frames.</p>

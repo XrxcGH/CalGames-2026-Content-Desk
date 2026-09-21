@@ -34,8 +34,8 @@ with nothing already installed, and can be deleted afterwards by deleting one fo
 machine already has Node 22.6 or newer, the launcher uses that instead and installs nothing.
 
 **Your files are never overwritten.** `config.json`, `data/trivia.json`, `data/event-content.json`
-(the desk's own Event setup edits), the event logs, and the robot photo library all survive a
-re-run. The operator edits the question bank from the trivia
+(the edits made live on `/s/setup` and on the Judge Advisor's `/s/awards`), the event logs, and
+the robot photo library all survive a re-run. The operator edits the question bank from the trivia
 console during the event, and shipping a fresh copy over the top of that would quietly delete an
 afternoon of somebody's work. Everything else is replaced, so re-running the launcher is also how
 you update the desk.
@@ -112,8 +112,10 @@ front of it, so a monitor needs nothing but a browser in full screen.
 | Trivia | `/s/watch?screen=trivia` | The crowd game, showing the join code between questions |
 | When do we play? | `/s/watch?screen=next` | Per-team schedule with drift-adjusted start times |
 
-The field feed behind the program overlay comes from the desk's Event setup group (or its seed,
-`kiosk.fieldStreamUrl` in `config.json`). It
+The field feed behind the program overlay comes from the Event settings page, `/s/setup`, under
+**Screens and stream**; the desk console links to that page but does not hold the control, and
+the page takes the settings code rather than the desk PIN. Its seed is `kiosk.fieldStreamUrl` in
+`config.json`. It
 takes a YouTube live URL, an MJPEG stream off a capture box or IP camera, or any video URL a
 browser plays on its own. Leave it blank and the overlay draws on the CalGames backdrop instead of
 a black rectangle, which is the right failure mode for a monitor nobody is watching yet.
@@ -134,12 +136,26 @@ Who needs to know it: the content desk operator, the announcer, the replay opera
 the trivia host, the arcade scorer, and the head referee. That is a real list of people, so treat
 it as a door code and not a secret.
 
-**The awards code is a second, separate door.** If `awards.pin` is set in `config.json` (or the
-`JA_PIN` env var), the Judge Advisor holds that code and the desk crew does not, until right
-before the ceremony. It opens exactly one thing, the awards system (including the JA's own
-staging page at `/s/awards`), and nothing else on the desk. Unset, awards run on the ordinary
-PIN, which is right for a small event where the producer is the JA. The reasoning behind where the line falls is in the README
-under *Who can drive it*.
+**There are two more doors, and neither is the PIN.** The awards code (`awards.pin` in
+`config.json`, or the `JA_PIN` env var) is held by the Judge Advisor and not by the desk crew
+until right before the ceremony; it opens exactly one thing, the awards system including the JA's
+own staging page at `/s/awards`, and nothing else on the desk. The settings code (`setup.pin`, or
+`SETUP_PIN`) is held by the content lead and opens `/s/setup`, where the event's content is
+edited. The reasoning behind where those lines fall is in the README under *Who can drive it*.
+
+Both ship with a working default (`1357` and `4567`), which is what makes a first run work out of
+the box and what makes forgetting them expensive: the defaults are in this repository, and
+`/s/awards` is open enough to load its sign-in box for anyone on the venue network. Leaving the
+awards code alone hands the staged winners to the gym before the ceremony. Setting either value
+to an explicitly empty string is the other option: that collapses the tier onto the desk PIN,
+which is right for a small event where the producer is also the JA. Leaving the key out entirely
+does not do that; it keeps the shipped default.
+
+The launcher has no option for either code. The exe unpacks `config.example.json` into the desk
+folder and never overwrites an existing `config.json`, so the deployment path is: copy the
+example to `config.json` on that machine, set the two pins, restart. The desk prints a warning
+in the launcher window for every code still on its default, and the doors check shows the same
+thing as an amber **Access codes** row.
 
 ---
 
@@ -199,8 +215,14 @@ Two ways to check it is working. The launcher window prints `recording N source(
 after it starts, and files appear under `rec/` within a few seconds. If neither happens, the
 window says why: usually ffmpeg is missing, or a camera in the list could not be opened.
 
-Pass `/no-record` for a laptop that should not fill its disk. Recording also needs ffmpeg, which
-the launcher does not install: see the ffmpeg note in the README.
+There is no launcher option to turn recording off, and that follows from the paragraph above: the
+camera list is the switch. For a laptop that should not fill its disk, set `"sources": []` under
+`recording` in that machine's `config.json`. (The desk binary does take `--no-record`, which is
+how `npm start` turns it off, but the launcher does not forward it and silently ignores anything
+it does not recognise, so typing `/no-record` at the exe records anyway.)
+
+Recording also needs ffmpeg, which the launcher does not install: see the ffmpeg note in the
+README.
 
 ---
 

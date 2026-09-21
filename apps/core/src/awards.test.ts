@@ -436,3 +436,38 @@ test('the shipped ceremony list parses, in order, with nothing truncated', async
     assert.ok(!a.description.endsWith('...'), `${a.id} is not truncated`);
   }
 });
+
+test('the Judge Advisor can change the running order, within one ceremony', async () => {
+  // The order is the thing most likely to move late, and it was the last
+  // detail about an award that still meant editing config.json by hand.
+  const dir = await scratch();
+  try {
+    const awards = new Awards(dir, new EventBus(), [
+      { id: 'a', title: 'Alpha', day: 'Saturday' },
+      { id: 'b', title: 'Bravo', day: 'Saturday' },
+      { id: 'c', title: 'Charlie', day: 'Sunday' },
+      { id: 'd', title: 'Delta', day: 'Sunday' },
+    ]);
+    let saved: string[] = [];
+    awards.onListChanged = list => { saved = list.map(a => a.id); };
+
+    awards.reorder('b', -1);
+    assert.deepEqual(awards.definitions.map(a => a.id), ['b', 'a', 'c', 'd']);
+    assert.deepEqual(saved, ['b', 'a', 'c', 'd'], 'the move is persisted');
+
+    // A move that would cross into the other ceremony does nothing: Saturday
+    // and Sunday are different evenings, not one long list.
+    awards.reorder('a', 1);
+    assert.deepEqual(awards.definitions.map(a => a.id), ['b', 'a', 'c', 'd'],
+      'the last Saturday award cannot fall into Sunday');
+    awards.reorder('c', -1);
+    assert.deepEqual(awards.definitions.map(a => a.id), ['b', 'a', 'c', 'd'],
+      'nor can the first Sunday award climb into Saturday');
+
+    awards.reorder('c', 1);
+    assert.deepEqual(awards.definitions.map(a => a.id), ['b', 'a', 'd', 'c']);
+    assert.throws(() => awards.reorder('nope', 1), /no award "nope"/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

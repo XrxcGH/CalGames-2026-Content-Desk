@@ -52,7 +52,13 @@ const CSS = `
   clip-path: var(--chamfer); --ch: 6px;
   background: var(--surface-sunken); color: var(--text); white-space: nowrap; }
 .opnav a:hover, .opnav button:hover { background: var(--btn-hover); }
-.opnav a:focus-visible, .opnav button:focus-visible {
+/* Inset, and :root-prefixed to match the weight of tokens.css's own
+   :root[data-surface="console"] :focus-visible rule. Without the prefix that
+   rule won on specificity and forced outline-offset back to +2px, which on
+   these chamfer-clipped links paints NOTHING: the operator strip is the
+   first thing a keyboard user tabs into on all nine consoles, and it had no
+   visible focus anywhere. */
+:root .opnav a:focus-visible, :root .opnav button:focus-visible {
   outline: 3px solid var(--focus-ring); outline-offset: -5px; }
 /* Where you are, said twice: color and a filled background, so it is not
    color alone doing the work. */
@@ -60,6 +66,17 @@ const CSS = `
 .opnav .sep { width: 1px; height: 22px; background: var(--surface-sunken); margin: 0 6px; }
 .opnav .lbl { font-family: var(--font-cond); font-size: 13px; letter-spacing: .12em;
   text-transform: uppercase; color: var(--text-dim); }
+/* The spoken-refusal line gets its OWN class rather than borrowing .lbl.
+   Sharing .lbl meant the narrow-window rule below hid it outright, and an
+   author display:none cannot be undone by clearing the hidden attribute,
+   so below 900px a refused take said nothing at all: not on screen, and not
+   to a screen reader either, since a display:none role="status" is not
+   announced. That silenced the one message that matters most, "The desk
+   restarted. Reload this page to sign back in.", on exactly the tablets and
+   half-screen laptop windows the consoles are used on. It wraps onto its own
+   row instead of being squeezed out of the strip. */
+.opnav .note { flex-basis: 100%; font-family: var(--font-cond); font-size: 13px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--text); }
 .opnav .take { background: var(--accent); color: var(--text-on-accent); }
 .opnav .live { background: var(--st-ok); color: var(--cg-black); }
 @media (max-width: 900px) { .opnav .lbl, .opnav .sep { display: none; } }
@@ -88,13 +105,21 @@ export function mountNav(current, opts = {}) {
     + 'letter-spacing:.1em;font-size:13px;';
   skip.addEventListener('focus', () => { skip.style.left = '8px'; });
   skip.addEventListener('blur', () => { skip.style.left = '-9999px'; });
-  document.body.prepend(skip);
   // The landmark the link needs: the page's own wrapper, promoted.
   // The telestrator pad has neither, so the drawing surface is the fallback:
   // a skip link that lands nowhere is worse than none.
+  //
+  // The fragment is read back OFF the element instead of being assumed. The
+  // link hard-coded '#main' while the id was only assigned when the element
+  // had none, and the one page that reaches the #pad fallback,
+  // surfaces/draw, ships `<div id="pad">`: it kept its own id, #main was
+  // never created, and the analyst's skip link navigated nowhere. Where
+  // there is no landmark at all the link is left out entirely, for the same
+  // reason the fallback exists.
   const wrap = document.querySelector('.wrap, main') ?? document.querySelector('#pad');
   if (wrap && !wrap.id) wrap.id = 'main';
   if (wrap && wrap.tagName !== 'MAIN') wrap.setAttribute('role', 'main');
+  if (wrap) skip.href = `#${wrap.id}`;
 
   const nav = document.createElement('nav');
   nav.className = 'opnav';
@@ -114,6 +139,14 @@ export function mountNav(current, opts = {}) {
       : '');
 
   document.body.prepend(nav);
+  // The skip link goes in AFTER the strip, so that it ends up BEFORE it.
+  // prepend() puts each node at the front of <body>, so prepending the link
+  // first and the strip second left the DOM (and therefore the tab order)
+  // reading nav, skip, page: a keyboard operator had to walk all nine console
+  // links and eleven take buttons to reach the link whose only job is to let
+  // them skip those. Because the link is off-screen until focused, nothing
+  // ever revealed that it was doing nothing on every console.
+  if (wrap) document.body.prepend(skip);
 
   // The strip wraps to two rows on narrow windows, so its height is a fact
   // only the browser knows. Published as a root variable for any page-level
@@ -173,12 +206,9 @@ export function mountNav(current, opts = {}) {
         // JA-only) and this handler only looked for state frames, so the
         // operator pressed, nothing happened, and nothing said why.
         if (msg?.t === 'denied') {
-          note.textContent = msg.reason === 'PIN required'
+          sayNote(msg.reason === 'PIN required'
             ? 'The desk restarted. Reload this page to sign back in.'
-            : (msg.reason || 'The desk refused that.');
-          note.hidden = false;
-          clearTimeout(note._t);
-          note._t = setTimeout(() => { note.hidden = true; }, 6000);
+            : (msg.reason || 'The desk refused that.'));
           return;
         }
         const state = msg?.state;
@@ -202,10 +232,23 @@ export function mountNav(current, opts = {}) {
     ws.addEventListener('error', () => ws.close());
   }
   const note = document.createElement('span');
-  note.className = 'lbl';
+  note.className = 'note';
   note.setAttribute('role', 'status');
   note.hidden = true;
   nav.append(note);
+
+  /**
+   * The one place the strip speaks. Every path that has something to tell the
+   * operator goes through here, so none of them can quietly pick a channel
+   * that nobody reads.
+   */
+  let noteTimer = null;
+  function sayNote(text) {
+    note.textContent = text;
+    note.hidden = false;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { note.hidden = true; }, 6000);
+  }
 
   connectNav();
 
@@ -213,9 +256,18 @@ export function mountNav(current, opts = {}) {
     b.onclick = () => {
       // Say so instead of doing nothing: a take pressed during a desk restart
       // used to no-op with no clue anywhere on the strip.
+      //
+      // Said through the role="status" note, the same channel the `denied`
+      // branch uses, because the two things this once relied on are not
+      // channels at all: a `title` needs a sustained mouse hover, is never
+      // surfaced on a press, and is not announced on activation, and a 300ms
+      // opacity blink carries no words. Writing b.title also permanently
+      // replaced that button's real tooltip ("Take the Blank screen") for the
+      // rest of the session, so the one durable effect was making the strip
+      // slightly worse.
       if (!ready) {
         b.animate?.([{ opacity: 1 }, { opacity: .3 }, { opacity: 1 }], { duration: 300 });
-        b.title = 'Reconnecting to the desk. Try again in a second.';
+        sayNote('Reconnecting to the desk. Try again in a second.');
         return;
       }
       ws.send(JSON.stringify({

@@ -8,9 +8,9 @@ The sweep produced roughly ninety candidate items across seven areas. About a th
 
 Ranking is value to an event times evidence of demand, divided by effort, with two overrides. First, anything that puts a factually wrong statement on a 20-foot screen outranks anything that adds a feature, because the desk's program feed is replacing the audience display and a wrong ranking-point claim is worse than a missing graphic. Second, anything that gates other work is pulled forward regardless of its own value, which is why a LICENSE file sits at the top of a roadmap that is otherwise about broadcast software.
 
-Two things are true of the repo today that shape the whole document:
+Two things were true of the repo when this was written and shaped the whole document. The first has since been dealt with; it is left here because it is why the ranking looks the way it does:
 
-- There is no `LICENSE`, no `NOTICE`, no `CONTRIBUTING.md`, no `SECURITY.md` and no `TRADEMARKS.md`, and `package.json` carries `"private": true`. Nobody can legally adopt or modify this, so every publishable-standard item is currently blocked behind a five-minute change.
+- **Fixed.** There was no `LICENSE`, no `NOTICE`, no `CONTRIBUTING.md`, no `SECURITY.md` and no `TRADEMARKS.md`, and `package.json` carried `"private": true`. Nobody could legally adopt or modify this, so every publishable-standard item was blocked behind a five-minute change. All five files are at the repo root now and `package.json` carries `"license": "Apache-2.0"` with no `"private"` key. See B1 for what is left.
 - 62 files contain `CalGames`, `WRRF` or `Woodside` across 354 occurrences, and 42 raw six-digit hex colours live outside `packages/theme/tokens.css`. A palette swap today produces a fork that looks broken rather than rebranded.
 
 Verdict shorthand used throughout: **program** means it serves running the event; **standard** means it serves adoption; **both** means it does real work on each axis rather than being claimed for both by association.
@@ -27,7 +27,9 @@ Verdict shorthand used throughout: **program** means it serves running the event
 
 **Where.** Repo root. `package.json`.
 
-**Effort.** Small. **Serves.** Standard, and it gates every other standard item.
+**Effort.** Done, apart from `GOVERNANCE.md`. **Serves.** Standard, and it gated every other standard item.
+
+**What shipped, against what this asked for.** `LICENSE` (Apache-2.0), `NOTICE`, `TRADEMARKS.md`, `CONTRIBUTING.md` and `SECURITY.md` are all at the repo root, and `package.json` carries `"license": "Apache-2.0"` with the `"private"` key gone. Two deliberate departures from the plan above: `docs/` went out under Apache 2.0 rather than CC BY 4.0, on the grounds that one licence across the whole repository is one fewer thing for an adopter to reason about; and the brand carve-out is a statement of what the licence does not reach (`TRADEMARKS.md`, and the trademark section of `NOTICE`) rather than an all-rights-reserved block, because there are no logo files in the repository to reserve. `GOVERNANCE.md` is the outstanding piece, and it is still the WRRF board conversation in the caveat below rather than a file somebody can just write.
 
 **Caveat.** This needs a WRRF board conversation, not an engineering decision, because it decides what happens to the CalGames wordmark and the WRRF marks. Start that conversation this week; it is the long pole, not the files. Do not adopt a CLA: it will scare off student contributors for no benefit at this scale.
 
@@ -624,11 +626,11 @@ The shortening happens in the core, **before** the panel payload is built, not a
 
 #### 42. Music source ledger and the venue/transmission rights doc
 
-**What.** Extend the `audio.updated` payload with source service, licence id and allowlist proof so the log carries a running per-track manifest; and write `docs/15-music-rights.md` separating the two rights the event needs, with a named safe source.
+**What.** Extend the `audio.updated` payload with source service, licence id and allowlist proof so the log carries a running per-track manifest; and write `docs/16-music-rights.md` separating the two rights the event needs, with a named safe source.
 
 **Why.** The ledger half is close to free: `audio/store.ts` already publishes `audio.updated` carrying `NowPlaying{title, artist}` onto the append-only log every time the playlist changes; the missing fields are licence and source. The doc half matters because `docs/06` states the two-bus rule and the Content ID rationale but not the *reason*, and the reason is what a forking event needs. The statutory line is crisp and nowhere in the repo: [17 U.S.C. §110(4)](https://www.law.cornell.edu/uscode/text/17/110) exempts performance "otherwise than in a transmission to the public", so the nonprofit exemption that plausibly covers the gym excludes the stream by its own terms. Without it every adopter re-learns this via a claimed VOD, which is exactly what happened at scale: [official event Twitch VODs unpublished over copyright, and streams dropping mid-match](https://www.chiefdelphi.com/t/lets-solve-the-twitch-and-youtube-dmca-issues-from-streams/429168). [YouTube's own Audio Library](https://support.google.com/youtube/answer/3376882?hl=en) is the safe default and explicitly disclaims other "royalty-free" libraries.
 
-**Where.** `apps/core/src/audio/store.ts`; new `docs/15-music-rights.md`.
+**Where.** `apps/core/src/audio/store.ts`; new `docs/16-music-rights.md`. (Numbered 16, not 15: `docs/15-committee-brainstorm.md` took that slot.)
 
 **Effort.** Small. **Serves.** Both.
 
@@ -808,11 +810,11 @@ Note also: do **not** rebuild the FMS Companion shim as an ingest path. `docs/01
 
 #### 55. AV pattern book, with the NDI recipe and PTZ documented rather than coded
 
-**What.** A new `docs/14-av-pattern-book.md` plus an `av/` directory: three named costed tiers (one laptop one camera; the CalGames tier; NDI multi-cam), each with a BOM, signal-flow diagram, an addressing plan that avoids the field's 10.0.100.x, and a labelling scheme, plus patch sheets and cable labels generated from the event's own config. Includes the NDI distribution recipe (DistroAV for OBS, native NDI for vMix, receiver config for venue displays and pit monitors) and the zero-code PTZ tier.
+**What.** A new `docs/17-av-pattern-book.md` plus an `av/` directory: three named costed tiers (one laptop one camera; the CalGames tier; NDI multi-cam), each with a BOM, signal-flow diagram, an addressing plan that avoids the field's 10.0.100.x, and a labelling scheme, plus patch sheets and cable labels generated from the event's own config. Includes the NDI distribution recipe (DistroAV for OBS, native NDI for vMix, receiver config for venue displays and pit monitors) and the zero-code PTZ tier.
 
 **Why.** The most on-goal item in the AV area for goal 2. `docs/06` is genuinely good and genuinely one tier: the CalGames tier, with CalGames-specific advice down to the venue's own 2025 power outage. The gear diversity nobody has written down is verified: [four districts, four camera choices](https://www.chiefdelphi.com/t/who-is-using-ptzoptics-cameras-for-live-streaming-events/501850) (Panasonic AW-UE50KPJ at CAMB/CASJ/CABE, Marshall CV605BK with the FIRST Webcast Unit, Aida PTZ-X12/X20 in Texas, PTZOptics plus a Sony with AI face tracking at FIM), and the thread exists because none of it is documented. [AV Crew requires no pre-event training](https://www.firstinspires.org/community/volunteers/roles/audio-visual-crew) and the [Webcast Operator path](https://www.firstinspires.org/resource-library/frc/webcast-operator) is tied to the FIRST Webcast Unit and does not transfer to a self-equipped offseason. NDI belongs here rather than in code, and the evidence is an FRC offseason already doing it: [Spectrum 3847's TRI writeup](https://www.chiefdelphi.com/t/spectrum-3847-build-blog-2024/447471/600) lists [DistroAV](https://github.com/DistroAV/DistroAV) and describes using a third network jack to "distribute the event as an NDI stream across campus for the pits, concession stand, and volunteer lounge". Same for PTZ: [obs-ptz](https://github.com/glikely/obs-ptz) already does VISCA over RS232/RS422/UDP/TCP, Pelco-P/D, experimental ONVIF *and* automatic camera selection based on the active scene, and Spectrum's rack already runs it, so the desk changing OBS scenes plus that plugin gets most of the value for zero code.
 
-**Where.** `docs/14-av-pattern-book.md` and `av/`; the generator belongs in `tools/kit` so it reads the same `config.json`.
+**Where.** `docs/17-av-pattern-book.md` and `av/`; the generator belongs in `tools/kit` so it reads the same `config.json`. (Numbered 17: 14 is this document and 15 is the committee brainstorm.)
 
 **Effort.** Medium. **Serves.** Standard.
 
@@ -1015,7 +1017,7 @@ Nothing here is optional and nothing here is large.
 
 15. Accessibility services card (32), phase banner (33), talent prompts (35), text announce bus (34), low-stim mode (37), phone-surface remainder (38).
 16. No-PII crowd identity plus display-name filter and operator kill (39).
-17. Notice and signage pack (41); music ledger and `docs/15` (42); claim watchdog and live kids declaration (43); chat posture runbook (45).
+17. Notice and signage pack (41); music ledger and `docs/16` (42); claim watchdog and live kids declaration (43); chat posture runbook (45).
 18. Replay-on-boot recovery (15), tested by killing the process mid-harness.
 19. Result amendment lineage (3) if it fits; otherwise the print-only correction path and defer the automation.
 20. Full dry run: fake arena, three simulated days, preflight signed, load-out gate exercised, printed pack produced.

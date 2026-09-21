@@ -107,7 +107,12 @@ input:focus { outline: none; border-color: var(--accent); }
     <div class="qbox">
       <div class="cat" id="cat">&nbsp;</div>
       <div class="text" id="qText" aria-live="polite">Waiting. Hit Open question to put the next one on the board.</div>
-      <div id="optLines" aria-live="polite"></div>
+      <!-- No aria-live here, deliberately. This is a rebuilt LIST, not a
+           status line: it is four options plus a live answer tally that moves
+           on every poll, and announcing the whole thing is noise, not news.
+           What changed is said once, in words, through #status below. The
+           arcade console reasons the same way about its score rows. -->
+      <div id="optLines"></div>
     </div>
     <div class="row">
       <label class="in" for="secs">Seconds</label>
@@ -155,14 +160,21 @@ input:focus { outline: none; border-color: var(--accent); }
         <input id="qeCat" type="text" placeholder="REBUILT">
 
         <p class="hint" style="margin:10px 0 4px">Four options. Pick the correct one.</p>
+        <!-- The text fields are named, not just placeholdered. Every other
+             field in this editor has a <label>, and the radios beside these
+             four already carry an aria-label; the inputs had only a
+             placeholder, which is a last-resort accessible name AND
+             disappears the moment the host types into it. A volunteer tabbing
+             back to correct option C then had four identical unnamed fields
+             to tell apart by reading their contents. -->
         <div class="qopt"><input type="radio" name="qAnswer" value="0" id="qea0" checked
-          aria-label="Option A is correct"><input id="qeo0" type="text" placeholder="Option A"></div>
+          aria-label="Option A is correct"><input id="qeo0" type="text" aria-label="Option A" placeholder="Option A"></div>
         <div class="qopt"><input type="radio" name="qAnswer" value="1" id="qea1"
-          aria-label="Option B is correct"><input id="qeo1" type="text" placeholder="Option B"></div>
+          aria-label="Option B is correct"><input id="qeo1" type="text" aria-label="Option B" placeholder="Option B"></div>
         <div class="qopt"><input type="radio" name="qAnswer" value="2" id="qea2"
-          aria-label="Option C is correct"><input id="qeo2" type="text" placeholder="Option C"></div>
+          aria-label="Option C is correct"><input id="qeo2" type="text" aria-label="Option C" placeholder="Option C"></div>
         <div class="qopt"><input type="radio" name="qAnswer" value="3" id="qea3"
-          aria-label="Option D is correct"><input id="qeo3" type="text" placeholder="Option D"></div>
+          aria-label="Option D is correct"><input id="qeo3" type="text" aria-label="Option D" placeholder="Option D"></div>
 
         <div class="row" style="margin-top:12px">
           <button class="btn btn--go" id="qSave">Save question</button>
@@ -186,7 +198,10 @@ input:focus { outline: none; border-color: var(--accent); }
 
   <section>
     <h2>Standings</h2>
-    <div id="standings" aria-live="polite"><p class="hint">Nobody in yet. The overlay shows the join URL.</p></div>
+    <!-- Also not a live region: a leaderboard that re-reads itself in full
+         every two seconds all day is the fastest way to make this console
+         unusable with a screen reader on. -->
+    <div id="standings"><p class="hint">Nobody in yet. The overlay shows the join URL.</p></div>
   </section>
 
   <section>
@@ -204,7 +219,18 @@ import { mountNav } from '/shared/nav.js';
 mountNav('triviadesk');
 const $ = id => document.getElementById(id);
 const LETTERS = ['A', 'B', 'C', 'D'];
-const say = (m, err = false) => { $('status').textContent = m; $('status').toggleAttribute('data-err', err); };
+/**
+ * Every write below is diff-guarded, because paint() is driven by a 2 second
+ * poll that repaints whether or not anything moved, and half these targets
+ * are aria-live. The textContent setter replaces the node's children even
+ * when the string is identical, and an aria-live region whose children were
+ * replaced is a region that changed, so a host running this console with a
+ * screen reader heard the link state, the player count, the round position
+ * and the whole question read out again every two seconds, all day. Same
+ * guard the desk console's setText and the audience trivia page already use.
+ */
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+const say = (m, err = false) => { setText($('status'), m); $('status').toggleAttribute('data-err', err); };
 
 async function post(action, body) {
   const res = await fetch(`/api/trivia/${action}`, {
@@ -257,13 +283,15 @@ function paintSessions(s) {
 }
 
 let lastSnap = null;
+let lastOptsHTML = null;
+let lastStandingsHTML = null;
 
 function paint(s) {
   lastSnap = s;
   paintAdvance(s);
   if (!s) return;
   $('dot').dataset.up = 'true';
-  $('linkText').textContent = 'linked';
+  setText($('linkText'), 'linked');
   // The bank list carries the live-question highlight (and the store's
   // cannot-edit-while-on-screen rule with it), but it was only fetched at
   // page load and after edits, so during a normal Open/Reveal/Next round the
@@ -274,39 +302,52 @@ function paint(s) {
     lastLiveKey = liveKey;
     void loadBank();
   }
-  $('who').textContent = `${s.players} player${s.players === 1 ? '' : 's'}`;
+  setText($('who'), `${s.players} player${s.players === 1 ? '' : 's'}`);
   // Position within the ROUND, not the whole bank: the host is running a
   // four-minute round, and "question 19 of 36" tells them nothing about
   // whether they have time to open another one before the field is ready.
-  $('progress').textContent = s.questionIndex >= s.questionCount
+  setText($('progress'), s.questionIndex >= s.questionCount
     ? `bank done · ${s.asked} asked`
     : s.session
       ? `${s.session.name} · question ${s.session.position} of ${s.session.size} · ${s.phase}`
-      : `question ${s.questionIndex + 1} of ${s.questionCount} · ${s.phase}`;
+      : `question ${s.questionIndex + 1} of ${s.questionCount} · ${s.phase}`);
   paintSessions(s);
 
   const q = s.question;
   // The escaped nbsp holds the line box like the markup's &nbsp; does. A
   // plain space collapses, .cat loses its height, and the question jumps.
-  $('cat').textContent = q?.category ?? '\u00a0';
-  $('qText').textContent = q?.text ??
+  setText($('cat'), q?.category ?? '\u00a0');
+  setText($('qText'), q?.text ??
     (s.questionIndex >= s.questionCount
       ? 'Bank exhausted. Reset to run it again.'
-      : 'Waiting. Hit Open question to put the next one on the board.');
+      : 'Waiting. Hit Open question to put the next one on the board.'));
   // The right answer gets a bright accessible green AND a visible "Correct" tag,
   // never color alone, so it still reads for colorblind hosts.
-  $('optLines').innerHTML = q ? q.options.map((text, i) => `
+  //
+  // Rebuilt only when the markup actually changed, the way paintSessions
+  // already guards on lastSessionsSig: the innerHTML setter replaces every
+  // child even for an identical string, so the unguarded version churned the
+  // option list and the leaderboard twice a second for nothing.
+  const optsHTML = q ? q.options.map((text, i) => `
     <div class="optline" ${q.answer !== null ? `data-right="${i === q.answer}"` : ''}>
       <b>${LETTERS[i]}</b><span>${esc(text)}${i === q.answer ? ' <span class="tag-correct">Correct</span>' : ''}</span>
       <span class="mono">${q.distribution?.[i] ?? 0}</span>
     </div>`).join('') : '';
+  if (optsHTML !== lastOptsHTML) {
+    lastOptsHTML = optsHTML;
+    $('optLines').innerHTML = optsHTML;
+  }
 
-  $('standings').innerHTML = s.standings.length
+  const standingsHTML = s.standings.length
     ? s.standings.map(row =>
         `<div><span class="mono">${row.rank}</span>` +
         `<span>${esc(row.name)}${row.team ? ' · ' + row.team : ''}</span>` +
         `<span class="mono">${row.score} pts · ${row.correct} right</span></div>`).join('')
     : '<p class="hint">Nobody in yet. The overlay shows the join URL.</p>';
+  if (standingsHTML !== lastStandingsHTML) {
+    lastStandingsHTML = standingsHTML;
+    $('standings').innerHTML = standingsHTML;
+  }
 }
 
 // The filter screens names on join; this is for whatever gets past it, while
@@ -384,7 +425,10 @@ $('resetHard').onclick = () => {
 
 const load = async () => {
   try { paint(await fetch('/api/trivia').then(r => r.json())); }
-  catch { $('dot').dataset.up = 'false'; $('linkText').textContent = 'reconnecting...'; }
+  // Guarded like every other write to this wrapper: a desk that is down stays
+  // down for many polls, and an unguarded write re-announced "reconnecting"
+  // every two seconds for as long as it lasted.
+  catch { $('dot').dataset.up = 'false'; setText($('linkText'), 'reconnecting...'); }
 };
 setInterval(load, 2000);
 load();

@@ -1,5 +1,17 @@
 <!doctype html>
-<html lang="en" data-key="alpha">
+<!-- data-surface="console" because this IS a console: nav.js lists it in
+     CONSOLES and the page mounts the strip. Without the attribute the strip
+     injected here fell through to the :root broadcast tokens and painted
+     brand purple (--surface-raised resolving to --cg-purple-hi #7B2394)
+     where the same strip is near-black on the other eight, and --btn-hover
+     fell back to that identical purple, so hovering a nav link made it
+     disappear into the bar behind it. It also put this page outside the
+     reduced-motion block in tokens.css, which is scoped to console surfaces:
+     the tool transitions and the :active press-scale kept animating for an
+     analyst who had asked their OS for less motion, on the one surface in
+     the fleet where that was ignored.
+     data-key stays: applyDisplayMode() rewrites it from ?key=. -->
+<html lang="en" data-surface="console" data-key="alpha">
 <head>
 <meta charset="utf-8">
 <!-- No zoom lock: pinch-during-stroke is already handled by touch-action:
@@ -12,12 +24,17 @@
 <style>
 /* Tablet surface. Dark, because the analyst is sitting in a dim broadcast
    position and a white UI at arm's length is blinding. Big targets. This is
-   driven with a stylus and a thumb, standing up, under time pressure. */
+   driven with a stylus and a thumb, standing up, under time pressure.
+
+   The dark field itself comes from the console surface in tokens.css now,
+   which paints it on the ROOT and keeps the body transparent. This page used
+   to hand-roll its own purple-void fill with the broadcast atmosphere glow
+   over it; almost none of it was ever visible, because a letterboxed 16:9
+   pad and a full-width toolbar leave only a sliver of page showing, and the
+   local copy was the reason the page had drifted out of the console surface
+   in the first place. */
 html, body { height: 100%; overscroll-behavior: none; }
 body {
-  background: var(--cg-purple-void);
-  background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
   display: flex; flex-direction: column;
   touch-action: none; -webkit-user-select: none; user-select: none;
 }
@@ -88,8 +105,15 @@ body {
 /* Two-tone ring: a plain white ring was invisible on the white "note" swatch,
    so the analyst could not tell which ink was active. */
 .ink[aria-pressed="true"] { box-shadow: inset 0 0 0 3px var(--cg-black), inset 0 0 0 6px var(--cg-white); }
-/* Inset: all three are chamfer-clipped, and an outset ring clips to nothing. */
-.tool:focus-visible, .ink:focus-visible, .tag:focus-visible {
+/* Inset: all three are chamfer-clipped, and an outset ring clips to nothing.
+   The :root prefix is load-bearing, not decoration. tokens.css gives every
+   operator surface a blanket `:root[data-surface="console"] :focus-visible`
+   with a +2px offset, which outweighs a plain `.tool:focus-visible` by one
+   selector: on a clip-path'd button that ring paints nothing at all, so the
+   pad's three control types would have had no visible focus. Matching that
+   rule's weight, later in the cascade, is what keeps the ring inside the
+   shape. */
+:root .tool:focus-visible, :root .ink:focus-visible, :root .tag:focus-visible {
   outline: 3px solid var(--focus-ring); outline-offset: -3px;
 }
 
@@ -133,12 +157,24 @@ body {
 </div>
 
 <div id="bar">
+  <!-- A title on every tool, because these five words ARE the page's entire
+       instruction set: there is no visible heading and no helper text (see
+       the .vh comment above), and the buttons are nouns. "Pen", "Arrow" and
+       "Circle" carry themselves; "Spot" and "Path" say nothing at all to an
+       analyst picking the tablet up for the first time, and the dimmed
+       keyboard letter under each one reads as part of the name ("Path R").
+       The <small> stays a separate line and the title says what happens. -->
   <div class="grp" id="tools">
-    <button class="tool" data-tool="pen" aria-pressed="true">Pen<small>P</small></button>
-    <button class="tool" data-tool="arrow">Arrow<small>A</small></button>
-    <button class="tool" data-tool="ellipse">Circle<small>E</small></button>
-    <button class="tool" data-tool="spotlight">Spot<small>S</small></button>
-    <button class="tool" data-tool="path">Path<small>R</small></button>
+    <button class="tool" data-tool="pen" aria-pressed="true"
+            title="Pen: freehand ink, exactly where you draw">Pen<small>P</small></button>
+    <button class="tool" data-tool="arrow"
+            title="Arrow: drag from where you start to what you are pointing at">Arrow<small>A</small></button>
+    <button class="tool" data-tool="ellipse"
+            title="Circle: ring a robot or a patch of field">Circle<small>E</small></button>
+    <button class="tool" data-tool="spotlight"
+            title="Spotlight: dim the whole frame except what you circle">Spot<small>S</small></button>
+    <button class="tool" data-tool="path"
+            title="Path: an animated dashed route, for showing where something went">Path<small>R</small></button>
   </div>
 
   <div class="sep"></div>
@@ -208,12 +244,19 @@ addEventListener('resize', layout);
 layout();
 
 // ---- ink swatches ---------------------------------------------------------
+// Third column: what a PERSON is told. The ids are the renderer's and the
+// archive's vocabulary, and 'good' and 'note' name nothing an analyst would
+// recognise; they were going out raw to both the tooltip and the screen
+// reader, on swatches that are otherwise colour and nothing else.
 const INK_SWATCHES = [
-  ['gold', '--cg-gold'], ['good', '--cg-green-hi'], ['note', '--cg-white'],
-  ['red', '--alliance-red'], ['blue', '--alliance-blue'],
+  ['gold', '--cg-gold', 'Gold ink, the default'],
+  ['good', '--cg-green-hi', 'Green ink, for a good play'],
+  ['note', '--cg-white', 'White ink, for a note'],
+  ['red', '--alliance-red', 'Red alliance ink'],
+  ['blue', '--alliance-blue', 'Blue alliance ink'],
 ];
-$('inks').innerHTML = INK_SWATCHES.map(([id, v]) =>
-  `<button class="ink" data-ink="${id}" style="background:var(${v})" aria-pressed="${id === 'gold'}" aria-label="${id} ink" title="${id}"></button>`).join('');
+$('inks').innerHTML = INK_SWATCHES.map(([id, v, name]) =>
+  `<button class="ink" data-ink="${id}" style="background:var(${v})" aria-pressed="${id === 'gold'}" aria-label="${name}" title="${name}"></button>`).join('');
 
 // ---- stroke transport -----------------------------------------------------
 // Points are batched and flushed once per frame. A Pencil reports at 120Hz;

@@ -40,6 +40,24 @@ desk.on('link', up => {
   }
 });
 
+// ---- the sticky chrome -----------------------------------------------------
+// Two strips stack above the page: the injected nav, which publishes its own
+// measured height as --opnav-h, and this page's jump strip under it. A jump
+// anchor has to clear BOTH. The stylesheet used to guess one flat number, so
+// clicking Awards or Safety mid-show scrolled the section's heading in behind
+// the strip the operator had just clicked: they arrive at a panel whose title
+// they cannot see, at the one moment the strip exists for. Both strips wrap to
+// a second row on a narrow window, so the height is a fact only the browser
+// knows.
+const jumpStrip = document.querySelector('.jump');
+const setJumpHeight = () =>
+  document.documentElement.style.setProperty('--jump-h', `${jumpStrip.offsetHeight}px`);
+setJumpHeight();
+addEventListener('resize', setJumpHeight);
+// Webfonts land after the first paint and can rewrap the strip on their own,
+// with no resize event to go with it.
+if (typeof ResizeObserver === 'function') new ResizeObserver(setJumpHeight).observe(jumpStrip);
+
 // ---- live readout ----------------------------------------------------------
 // Writes are guarded: setting textContent mutates the node even when the
 // string is identical, and the Now readout's fields are aria-live, so
@@ -85,6 +103,38 @@ function paintLiveState(s) {
       `A ${s.cardCall.color} card for ${s.cardCall.team} is ON SCREEN. Clear it before the score.`);
   } else if (!cardUp && $('ccHint').textContent.includes('ON SCREEN')) {
     setText($('ccHint'), '');
+  }
+
+  // The delay card, which nothing else on this console reveals. status.show
+  // does not move the program screen, so the Now readout still reads
+  // "overview" while the card covers the feed, and a card the operator put up
+  // waits for Hide card however long that takes: the field comes back, nobody
+  // presses it, and "Field delay" sits over program and the venue TVs through
+  // the next match. Clear gets the same emphasis the card call's does.
+  const statusUp = !!s.status;
+  $('statusClear').classList.toggle('btn--go', statusUp);
+  setText($('statusHint'), statusUp
+    ? `ON SCREEN over program and the side screens: "${s.status.message}"`
+      + (s.status.backAt
+        ? `, back at about ${new Date(s.status.backAt).toLocaleTimeString()}` : '')
+      + '. Press Hide card when the show starts again.'
+    : '');
+
+  // The telestrator. The section is four buttons and nothing that says
+  // whether the analyst has a frame to draw on or whether the render is
+  // hidden, which is the difference between "the ink is on air" and "the
+  // analyst is drawing into a blank". Only these two lines get repainted, so
+  // a refusal from Send this URL survives the next bus event the way
+  // emergState's latched failure does.
+  const tele = s.telestrator;
+  const teleLine = $('teleHint').textContent;
+  if (teleLine === '' || teleLine.startsWith('A frozen frame') || teleLine.startsWith('No frozen frame')) {
+    setText($('teleHint'), (tele?.frame
+      ? 'A frozen frame is loaded on the analyst\'s pad.'
+      : 'No frozen frame yet: the pad stays blank until one is sent.')
+      + (tele?.hidden
+        ? ' The render surface is HIDDEN, so nothing the analyst draws is on air. Show again brings it back.'
+        : ' The render surface is up.'));
   }
 
   // The panel: a reload must not claim an empty desk under a full graphic.
@@ -349,23 +399,59 @@ const teamList = str => str.trim().split(/\s+/).filter(Boolean)
   .map(n => ({ number: Number(n), name: '' }));
 
 $('loadMatch').onclick = () => {
-  emit('match.loaded', {
-    id: `m${Date.now()}`,
-    displayName: $('mName').value || 'Match',
-    red: teamList($('mRed').value),
-    blue: teamList($('mBlue').value),
-  });
+  // The boxes are examples, not defaults, for the reason the lower third
+  // already refuses its own: loading a match takes the program screen, so a
+  // press on an untouched form painted an invented alliance overview, made of
+  // real team numbers, onto program and every TV in the venue. This kit
+  // unfolds itself the moment the field bridge drops, which is exactly when
+  // somebody presses the one button in front of them to see what it does.
+  const displayName = $('mName').value.trim();
+  const red = teamList($('mRed').value);
+  const blue = teamList($('mBlue').value);
+  if (!displayName || !red.length || !blue.length) {
+    setText($('loadHint'), 'Type the match name and both alliances. The grey text is an '
+      + 'example, not a match: loading it would put those teams on every screen.');
+    return;
+  }
+  emit('match.loaded', { id: `m${Date.now()}`, displayName, red, blue });
+  // What went out, in the numbers that are now on the overview, because
+  // loading takes the program screen and nothing else here says so.
+  setText($('loadHint'), `${displayName} is loaded and on the program screen: red `
+    + `${red.map(t => t.number).join(' ')} against blue ${blue.map(t => t.number).join(' ')}.`);
 };
 
 // ---- telestrator -----------------------------------------------------------
+// The placeholder is a sample, not a default. It used to be the fallback, so
+// sending a frame before typing anything put "Analysis - Priya Raman" on
+// the broadcast, naming a person who is not in the building. The lower third
+// fixed this same class already; this kept the old pattern. Empty is fine:
+// the renderer draws a bare "Analysis" chip when there is no name.
 const teleFrame = (frame) => emit('telestrator.frame', {
-  analyst: $('analyst').value || $('analyst').placeholder,
+  analyst: $('analyst').value.trim(),
   frame,
 });
-$('teleSend').onclick = () => teleFrame($('frame').value || null);
-$('teleLive').onclick = () => teleFrame(desk.state?.telestrator?.frame ?? null);
-$('teleClear').onclick = () => emit('telestrator.clear');
-$('teleHide').onclick = () => emit('telestrator.hide');
+// Hands the hint back to paintLiveState: it only repaints its own lines, so a
+// refusal left in place would hide what the telestrator is actually doing
+// from the press after it.
+const showTeleState = () => setText($('teleHint'), '');
+$('teleSend').onclick = () => {
+  // An empty box is not "send nothing", it is "wipe the frame the analyst is
+  // drawing on". The normal path is the replay console pushing a frame, so
+  // this box is empty almost always: pressing Send frame to see what it did
+  // dropped the pad to "No frozen frame" mid-segment, and this console said
+  // nothing about it.
+  const frame = $('frame').value.trim();
+  if (!frame) {
+    setText($('teleHint'), 'Paste an image URL in the box above first. Sending an empty box '
+      + 'takes away the frame the analyst is drawing on.');
+    return;
+  }
+  showTeleState();
+  teleFrame(frame);
+};
+$('teleLive').onclick = () => { showTeleState(); teleFrame(desk.state?.telestrator?.frame ?? null); };
+$('teleClear').onclick = () => { showTeleState(); emit('telestrator.clear'); };
+$('teleHide').onclick = () => { showTeleState(); emit('telestrator.hide'); };
 
 // ---- replay markers --------------------------------------------------------
 $('mark').onclick = () => mark();
@@ -881,6 +967,9 @@ $('audNext').onclick = () => audio('next');
 $('audPrev').onclick = () => audio('previous');
 $('audConsole').onclick = () => audio('source', { source: 'console', reason: 'Game audio, from the desk' });
 // Proving the music machine answers, before doors rather than during a match.
+// It wakes the music service's playback device, NOT the /s/house player page
+// the hint names: a volunteer chasing a silent room read the old "Wake
+// player" label as the page and pressed it instead of arming a player.
 $('audWake').onclick = () => audio('wake');
 $('audDuck').onclick = () => audio('duck', { on: !(audioSnap?.music?.ducked) });
 $('audVol').oninput = () => { $('audVolText').textContent = $('audVol').value; };
@@ -905,9 +994,16 @@ function paintAudio(s) {
   const dev = s.music?.device;
   $('audioWho').textContent = dev ? `· ${dev}` : '·';
   $('audioSrc').dataset.s = s.source;
-  $('audDuck').classList.toggle('btn--go', !!s.music?.ducked);
-  $('audDuck').setAttribute('aria-pressed', String(!!s.music?.ducked));
-  setText($('audDuck'), s.music?.ducked ? 'Unduck' : 'Duck');
+  // Both words say what the press will do to the room. "Duck" and "Unduck"
+  // are audio-desk words: a first-timer with an announcer talking over a song
+  // has no reading of either.
+  const ducked = !!s.music?.ducked;
+  $('audDuck').classList.toggle('btn--go', ducked);
+  $('audDuck').setAttribute('aria-pressed', String(ducked));
+  setText($('audDuck'), ducked ? 'Music back up' : 'Duck music');
+  $('audDuck').title = ducked
+    ? 'Puts the music back to its full volume.'
+    : 'Drops the music under the announcer so the room can hear them.';
   setText($('audToggle'), s.source === 'playlist' ? 'Pause music' : 'Play music');
   $('audToggle').setAttribute('aria-pressed', String(s.source === 'playlist'));
 
@@ -1033,12 +1129,43 @@ setInterval(() => { if (!document.hidden) void loadCoverage(); }, 60_000);
 // One health report across every subsystem. Polled slowly on purpose: several
 // checks talk to OBS, and a panel that hammers the switcher every second is
 // itself a production risk.
+//
+// Pass or fail as a WORD. A level only ever reached the page as the colour of
+// a 10px dot, which is nothing at all to an operator who cannot tell the
+// greens from the reds, and nothing at all on the printed sheet, whose whole
+// job is to be carried around the venue before doors. vitals.ts never puts
+// the level in the text either: "connected, not streaming" and "not
+// answering" read the same in black ink.
+const VITAL_WORD = { ok: 'OK', warn: 'WARNING', fail: 'FAILED', unknown: 'UNKNOWN', off: 'OFF' };
+// The same verdict said in words, for the heading and the header mirror.
+const VITAL_VERDICT = {
+  ok: 'all good', warn: 'needs a look', fail: 'something is broken',
+  unknown: 'cannot tell', off: 'nothing to check',
+};
+// The fold opens itself once, on the first failing check, the way the
+// field-down kit does. It never closes itself: the operator may be reading a
+// failure that has already cleared, and a panel that shuts while they read is
+// worse than one they have to shut by hand.
+let vitalsOpened = false;
+
 async function loadVitals() {
   try {
     const res = await fetch('/api/vitals');
     if (!res.ok) return;
     const r = await res.json();
+    const verdict = VITAL_VERDICT[r.worst] ?? r.worst;
     $('vitalsDot').dataset.l = r.worst;
+    setText($('vitalsWord'), verdict);
+    // Mirrored into the page header, because this is the one readout that
+    // rolls up every subsystem and it lives inside a fold that can stay shut
+    // all day: the console knew the announcer mic was muted and said so
+    // nowhere anybody was looking.
+    $('vitalsMirror').dataset.l = r.worst;
+    setText($('vitalsMirrorText'), `doors check: ${verdict}`);
+    if (r.worst === 'fail' && !vitalsOpened) {
+      vitalsOpened = true;
+      $('setupGroup').open = true;
+    }
 
     $('vitals').replaceChildren(...r.checks.map(c => {
       const row = document.createElement('div');
@@ -1049,7 +1176,10 @@ async function loadVitals() {
       label.textContent = c.label;
       const detail = document.createElement('span');
       detail.textContent = c.detail;
-      row.append(dot, label, detail);
+      const lvl = document.createElement('span');
+      lvl.className = 'lvl';
+      lvl.textContent = VITAL_WORD[c.level] ?? c.level;
+      row.append(dot, label, detail, lvl);
       if (c.fix) {
         const fix = document.createElement('span');
         fix.className = 'fix';
@@ -1062,6 +1192,12 @@ async function loadVitals() {
 }
 
 $('vitalsCheck').onclick = loadVitals;
+// Every way in opens the fold on the way past. An anchor pointing inside a
+// closed <details> scrolls to a section the browser is not showing, so the
+// jump strip and the header mirror would both look broken.
+for (const a of document.querySelectorAll('a[href="#vitalsSection"]')) {
+  a.onclick = () => { $('setupGroup').open = true; };
+}
 $('vitalsPrint').onclick = () => {
   // A closed <details> is display:none inside, and display:none beats the
   // print stylesheet's visibility trick; open it or the sheet comes out blank.
@@ -1125,7 +1261,13 @@ async function loadScenes() {
 function paintScene(state) {
   const live = state?.scene ?? null;
   for (const btn of document.querySelectorAll('#sceneRow .btn')) {
-    btn.dataset.live = String(btn.dataset.scene === live);
+    const on = btn.dataset.scene === live;
+    btn.dataset.live = String(on);
+    // Said as a state, not only as a gold fill. This row is the one control
+    // that answers "what is the audience actually seeing", and it was the
+    // only toggle group on the console a screen reader could not read the
+    // state of: every other row on this page sets aria-pressed the same way.
+    btn.setAttribute('aria-pressed', String(on));
   }
 }
 
@@ -1289,13 +1431,60 @@ async function sponsorAction(action) {
 $('spNext').onclick = () => void sponsorAction('next');
 $('spHide').onclick = () => void sponsorAction('hide');
 
+/**
+ * Honestly dead until a sponsor list exists.
+ *
+ * A shipped config has none, and the section still rendered two live-looking
+ * buttons under copy about what the broadcast owes the people who paid. The
+ * first press answered "No sponsors are configured." and stopped there,
+ * naming no page and no person. Everything else on this console gets this
+ * right: the award list says the Judge Advisor builds it at /s/awards, the
+ * deck says "Add one below", the profile book says "Nobody saved yet."
+ */
+async function loadSponsors() {
+  try {
+    const res = await fetch('/api/sponsors');
+    if (!res.ok) return;
+    const rows = (await res.json())?.rows ?? [];
+    $('spNext').disabled = !rows.length;
+    $('spHide').disabled = !rows.length;
+    // The page ships with the empty-state sentence already in it, so it is
+    // honest before this first answer lands. Left alone when it is already
+    // right, because spHint is aria-live and rewriting it re-announces it.
+    if (!rows.length) {
+      if (!$('spHint').textContent.startsWith('No sponsors')) {
+        setText($('spHint'), 'No sponsors on the list yet. The content lead adds them '
+          + 'at /s/setup, behind the settings code.');
+      }
+    } else if ($('spHint').textContent.startsWith('No sponsors')) {
+      setText($('spHint'), '');
+    }
+  } catch { /* transient */ }
+}
+void loadSponsors();
+// Slow poll, because the content lead edits the plan at /s/setup during the
+// day and a console that needs a reload to notice stays dead until someone
+// thinks to reload it.
+setInterval(() => { if (!document.hidden) void loadSponsors(); }, 60_000);
+
 // ---- run of show ------------------------------------------------------------
 async function loadRundown() {
   try {
     const res = await fetch('/api/rundown');
     if (!res.ok) return;
     const rd = await res.json();
-    if (!rd?.segments?.length) return;
+    // Same treatment as the sponsor rotation: no plan means Advance is dead
+    // and says where a plan comes from, instead of staying pressable over an
+    // empty day and answering "No run of show is configured."
+    const segments = rd?.segments ?? [];
+    $('rdAdvance').disabled = !segments.length;
+    if (!segments.length) {
+      if (!$('rdNow').textContent.startsWith('No run of show')) {
+        setText($('rdNow'), 'No run of show yet. The content lead builds the day at '
+          + '/s/setup, behind the settings code.');
+      }
+      return;
+    }
     const now = rd.live ? `Live: ${rd.live.label}` : 'Nothing live';
     const next = rd.next ? ` · next: ${rd.next.label}` : '';
     setText($('rdNow'), now + next);
@@ -1437,6 +1626,15 @@ function paintAwards() {
 
 $('awShow').onclick = async () => {
   const custom = $('awCustomTitle').value.trim();
+  // A leftover custom title used to win silently over the picked award, so
+  // the plate showed one award while the list highlighted another, mid
+  // ceremony. If both are set the operator has to say which they meant.
+  if (custom && awardPicked) {
+    $('awHint').textContent = 'Both a picked award and a custom title are set. '
+      + 'Clear the custom title box to show the picked award, or clear the '
+      + 'selection to show the custom one.';
+    return;
+  }
   const body = {
     action: 'show',
     ...(custom ? { title: custom, description: $('awCustomDesc').value.trim() }
@@ -1663,3 +1861,139 @@ $('tmClear').onclick = async () => {
     $('tmHint').textContent = `Still running: ${err.message}. Press Clear again.`;
   }
 };
+
+
+// ---- show automation: the cues, armed from the desk -------------------------
+// They ship disarmed, and until now the phone remote was the ONLY place to
+// arm one: a producer with no phone could not turn show automation on at all,
+// and nothing on this console said cues existed. The desk has to be able to
+// run the whole show by itself.
+let cueSig = '';
+
+async function loadCues() {
+  try {
+    const res = await fetch('/api/cues');
+    if (!res.ok) return;
+    const snap = await res.json();
+    // Diff-guarded: this polls, and repainting an unchanged list would move
+    // the buttons under the operator's cursor and re-announce the note.
+    const sig = JSON.stringify(snap);
+    if (sig === cueSig) return;
+    cueSig = sig;
+    paintCues(snap);
+  } catch { /* transient */ }
+}
+
+function paintCues({ available, obs, cues = [] }) {
+  const box = $('cueList');
+  const armAll = $('cueArmAll');
+  const disarmAll = $('cueDisarmAll');
+
+  if (!available) {
+    setText($('cueNote'), '· off');
+    box.innerHTML = '<p class="hint" style="padding:8px">Show automation is not running '
+      + 'on this desk. Everything still works by hand; nothing is missing from the show.</p>';
+    armAll.disabled = true;
+    disarmAll.disabled = true;
+    return;
+  }
+  if (!cues.length) {
+    setText($('cueNote'), '· none configured');
+    box.innerHTML = '<p class="hint" style="padding:8px">No cues are configured on this '
+      + 'desk. They are set up before the event, in config.json on this machine.</p>';
+    armAll.disabled = true;
+    disarmAll.disabled = true;
+    return;
+  }
+
+  const armed = cues.filter(c => c.autopilot).length;
+  setText($('cueNote'), `· ${armed} of ${cues.length} armed`);
+  armAll.disabled = armed === cues.length;
+  disarmAll.disabled = armed === 0;
+
+  // A cue that drives OBS cannot do anything while OBS is away. Say so once,
+  // here, rather than letting every press fail quietly.
+  const obsDown = obs && obs.attached && !obs.connected;
+
+  box.replaceChildren(...cues.map(c => {
+    const row = document.createElement('div');
+    row.className = 'cue';
+
+    const who = document.createElement('span');
+    const name = document.createElement('b');
+    name.textContent = c.name;
+    who.append(name);
+    if (c.does) {
+      const does = document.createElement('span');
+      does.className = 'does';
+      does.textContent = c.does;
+      who.append(does);
+    }
+    const st = document.createElement('span');
+    st.className = 'st';
+    if (c.lastError) {
+      st.dataset.err = 'true';
+      st.textContent = `failed last time: ${c.lastError}`;
+    } else if (c.autopilot) {
+      st.dataset.on = 'true';
+      st.textContent = 'armed, runs by itself';
+    } else {
+      st.textContent = c.wouldHaveFired
+        ? `off, would have run ${c.wouldHaveFired}x`
+        : 'off';
+    }
+    who.append(st);
+
+    const toggle = document.createElement('button');
+    toggle.className = c.autopilot ? 'btn' : 'btn btn--go';
+    toggle.textContent = c.autopilot ? 'Turn off' : 'Arm';
+    toggle.title = c.autopilot
+      ? `Stop ${c.name} running by itself. It still counts what it would have done.`
+      : `Let ${c.name} run by itself from now on.`;
+    toggle.onclick = () => void cueAction(c.id, c.autopilot ? 'disarm' : 'arm');
+
+    const fire = document.createElement('button');
+    fire.className = 'btn';
+    fire.textContent = 'Run now';
+    fire.title = `Run ${c.name} once, right now, whatever it is set to.`;
+    fire.disabled = !!obsDown;
+    fire.onclick = () => void cueAction(c.id, 'fire');
+
+    row.append(who, toggle, fire);
+    return row;
+  }));
+
+  if (obsDown) {
+    const warn = document.createElement('p');
+    warn.className = 'hint';
+    warn.style.padding = '8px';
+    warn.textContent = 'OBS is not connected, so Run now is off. Arming still works: '
+      + 'a cue armed now starts working the moment OBS comes back.';
+    box.append(warn);
+  }
+}
+
+async function cueAction(id, action) {
+  try {
+    const res = await fetch(`/api/cues/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    if (action === 'fire') setText($('cueNote'), '· ran it');
+    cueSig = '';            // force the next paint
+    await loadCues();
+  } catch (err) {
+    setText($('cueNote'), `· ${err.message}`);
+  }
+}
+
+$('cueArmAll').onclick = async () => {
+  if (!confirm('Arm every cue? The desk starts cutting cameras and driving audio '
+    + 'by itself from now on. You can still take anything by hand.')) return;
+  await cueAction('all', 'arm');
+};
+$('cueDisarmAll').onclick = () => void cueAction('all', 'disarm');
+
+void loadCues();
+// Slow poll: arming is a between-matches decision, and the counts of what a
+// cue would have fired move as the show runs.
+setInterval(() => { if (!document.hidden) void loadCues(); }, 15_000);

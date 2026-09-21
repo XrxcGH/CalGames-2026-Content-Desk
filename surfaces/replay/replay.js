@@ -6,7 +6,7 @@
  * placed, so the job is choosing rather than hunting.
  */
 
-import { connect, startTicker, clockDisplay, REBUILT } from '/shared/desk-client.js';
+import { connect, startTicker, clockDisplay, PHASE_LABEL, REBUILT } from '/shared/desk-client.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('replay');
@@ -15,18 +15,36 @@ const T0 = REBUILT.AUTO_START;          // -20
 const T1 = REBUILT.MATCH_END;           // 140
 const SPAN = T1 - T0;                   // 160s of match clock
 
+/**
+ * The timeline segments, derived rather than hand-kept.
+ *
+ * Every word comes from PHASE_LABEL and every boundary from REBUILT, because
+ * this console sits next to the desk console and both show the phase word at
+ * the same moment. A hand-kept copy drifted exactly the way you would expect:
+ * the row guarded by a comment ("End game", two words) stayed correct while
+ * the row three lines above it read "Trans" where the desk, talent, remote
+ * and ref review pages all read "Transition". The shift boundaries were
+ * literals too (10, 35, 60, 85, 110), agreeing with TRANSITION_END and
+ * SHIFT_SECONDS by coincidence rather than by construction.
+ *
+ * "Transition" is 6% of the track and does not fit at that width; the CSS
+ * clips it and the title attribute gives the whole word back on hover. One
+ * spelling, narrowed, beats a second spelling.
+ */
+const SHIFTS = Array.from({ length: REBUILT.SHIFT_COUNT }, (_, i) => {
+  const a = REBUILT.TRANSITION_END + i * REBUILT.SHIFT_SECONDS;
+  return [`shift${i + 1}`, a, a + REBUILT.SHIFT_SECONDS];
+});
+
 const PHASES = [
-  ['auto', 'Auto', T0, 0],
-  ['transition', 'Trans', 0, REBUILT.TRANSITION_END],
-  ['shift1', 'Shift 1', 10, 35], ['shift2', 'Shift 2', 35, 60],
-  ['shift3', 'Shift 3', 60, 85], ['shift4', 'Shift 4', 85, 110],
-  // 'End game', two words, to match PHASE_LABEL: the desk console sits next
-  // to this one and the two must not spell the same phase differently.
-  ['endgame', 'End game', REBUILT.ENDGAME_START, T1],
-];
+  ['auto', T0, REBUILT.TELEOP_START],
+  ['transition', REBUILT.TELEOP_START, REBUILT.TRANSITION_END],
+  ...SHIFTS,
+  ['endgame', REBUILT.ENDGAME_START, T1],
+].map(([id, a, b]) => [id, PHASE_LABEL[id], a, b]);
 
 $('phases').innerHTML = PHASES.map(([id, label, a, b]) =>
-  `<div data-p="${id}" style="flex:${b - a}">${label}</div>`).join('');
+  `<div data-p="${id}" style="flex:${b - a}" title="${label}"><span>${label}</span></div>`).join('');
 
 const TICK_CLOCKS = [-20, 0, 30, 60, 90, 120, 140];
 // The first and last labels are anchored to the track's own edges (see CSS):

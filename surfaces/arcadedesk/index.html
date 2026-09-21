@@ -12,7 +12,7 @@ body { font-size: var(--font-ui-body); }
 /* Column WIDTH, not page width: sections flow into as many 460px columns as
    the monitor actually has, the same rule as the desk console. */
 @media (min-width: 1150px) {
-  /* 620, not the desk's 460: this page has five sections, and 460 makes four
+  /* 620, not the desk's 460: this page has six sections, and 460 makes four
      columns on a 2400 monitor with nothing left for the fourth. */
   .wrap { columns: 620px; column-gap: 18px; }
   .wrap > section { break-inside: avoid; }
@@ -34,6 +34,15 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
 .btn { font-size: 14px; padding: 9px 14px; }
 .btn--go { background: var(--accent); color: var(--text-on-accent); }
+/* The on/off word the box toggles carry. Lighter than the noun it follows so
+   the label still reads as the label; .btn's uppercase makes it "· ON" /
+   "· OFF". Explicitly full size, NOT the browser's `smaller` default, which
+   would land it near 11px: the fleet-wide type lift in tokens.css exists
+   because 13px reads fine at a desk at home and small on a folding table
+   under gym light, and this word is the state. No opacity fade either, for
+   the same reason: it has to hold contrast on the sunken face and on the
+   gold pressed one. */
+.box small { font-size: inherit; font-weight: 400; letter-spacing: .06em; }
 label.in { font-family: var(--font-cond); font-weight: 600; font-size: 13px;
   letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); }
 input, select { padding: 8px 10px; font-family: var(--font-display); font-size: 14px;
@@ -171,11 +180,14 @@ input.wide { flex: 1; min-width: 180px; }
     <p class="hint">Each box comes off on its own, so the game gets the screen back
       without losing the scores that are on it. They slide off the edge they live on
       and slide back the same way. A box with nothing to show stays off regardless.</p>
+    <!-- data-label carries the noun; paintBoxes rebuilds each button as
+         "<noun> · on" or "<noun> · off". The state is deliberately in the
+         text and not only in the fill: see paintBoxes. -->
     <div class="row" id="boxRow">
-      <button class="btn box" data-box="card">Versus strip</button>
-      <button class="btn box" data-box="ffa">Free-for-all strip</button>
-      <button class="btn box" data-box="gp">Grand prix panel</button>
-      <button class="btn box" data-box="upNext">Up next chip</button>
+      <button class="btn box" data-box="card" data-label="Versus strip">Versus strip</button>
+      <button class="btn box" data-box="ffa" data-label="Free-for-all strip">Free-for-all strip</button>
+      <button class="btn box" data-box="gp" data-label="Grand prix panel">Grand prix panel</button>
+      <button class="btn box" data-box="upNext" data-label="Up next chip">Up next chip</button>
       <button class="btn" id="boxAll">Show all</button>
     </div>
   </section>
@@ -185,10 +197,30 @@ input.wide { flex: 1; min-width: 180px; }
     <div class="row">
       <input id="upNext" class="wide" placeholder="Grand Final · 1678 vs 254"
              aria-label="Up next, free text shown on the overlay chip">
-      <button class="btn" id="setUpNext">Set</button>
-      <button class="btn" id="clearAll">Clear everything</button>
+      <!-- "Update up next", not "Set". "Set" is this page's dominant noun
+           (Start set, End set, Live set, no set running), so a bare "Set"
+           next to a text field reads to a first-timer as "start a set". -->
+      <button class="btn" id="setUpNext">Update up next</button>
     </div>
     <p id="status" aria-live="polite"></p>
+  </section>
+
+  <!-- Its own section, away from everything.
+       This button used to sit in the Up next row, one slot from "Set", under
+       a heading that names one small text chip: read in place it says "clear
+       the up-next chip", and it is not that. It posts /api/arcade/clear,
+       which ends the live set, ends the grand prix and throws away every
+       recorded race, with no undo. A single mis-click was the whole loss.
+       The confirm in the handler is the second guard and it only fires when
+       there is something to lose; this heading and this label are the first
+       guard, and they work before the press rather than after it. -->
+  <section>
+    <h2>Start over</h2>
+    <p class="hint">Not just the chip. This ends the live set, ends the grand prix and
+      throws away every race it has recorded. Nothing here can be undone.</p>
+    <div class="row">
+      <button class="btn" id="clearAll">Clear the set, the grand prix and the chip</button>
+    </div>
   </section>
 </div>
 
@@ -348,6 +380,19 @@ let hadBracketSets = false;
  * The box toggles. Each button IS the state, not a command: it reads "on" or
  * "off" so an operator glancing at the console can see what the audience is
  * looking at without switching to the overlay.
+ *
+ * The word is written here, in the button's own text, because for a long time
+ * this comment described an intention the code never carried out. The only
+ * difference between on and off was the fill: accent gold against sunken
+ * purple, from tokens.css's `.btn[aria-pressed="true"]`. That is colour
+ * alone, on a dark console, and every label in this row is a bare noun
+ * ("Versus strip", "Grand prix panel") that says nothing about which way a
+ * press will take it. aria-pressed serves a screen reader; it does nothing
+ * for the volunteer looking at the screen.
+ *
+ * Rebuilt from data-label rather than appended to, so repeated paints (and
+ * this repaints on every snapshot, plus a 30s reconcile) cannot stack
+ * suffixes.
  */
 function paintBoxes(boxes) {
   const b = boxes ?? { card: true, ffa: true, gp: true, upNext: true };
@@ -356,6 +401,7 @@ function paintBoxes(boxes) {
     btn.dataset.on = String(on);
     btn.setAttribute('aria-pressed', String(on));
     btn.classList.toggle('btn--go', on);
+    btn.innerHTML = `${btn.dataset.label} <small>· ${on ? 'on' : 'off'}</small>`;
   }
 }
 
@@ -456,8 +502,11 @@ $('undoRace').onclick = () => post('undo').then(() => say('Last race removed.'))
 $('setUpNext').onclick = () => post('upnext', { text: $('upNext').value })
   .then(() => say('Up next set.')).catch(e => say(e.message, true));
 $('clearAll').onclick = () => {
-  // Mid-grand-prix this discards every recorded race with no undo, and the
-  // button sits one slot from "Set". A single mis-click was the whole loss.
+  // Mid-grand-prix this discards every recorded race with no undo. The button
+  // used to sit one slot from "Set" inside the Up next section, where a
+  // single mis-click was the whole loss; it now has its own section and a
+  // label that names its scope. This confirm is the backstop, and it fires
+  // exactly when there is something to lose.
   const busy = lastState?.set || lastState?.gp;
   if (busy && !confirm('Clear the live set, the grand prix, and the up-next chip? '
     + 'Recorded races cannot be recovered.')) return;

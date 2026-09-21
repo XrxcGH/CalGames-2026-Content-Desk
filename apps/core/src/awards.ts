@@ -249,6 +249,31 @@ export class Awards {
   }
 
   /**
+   * Move an award one place up or down the running order.
+   *
+   * Scoped to its own ceremony day: "up" from the first Sunday award must
+   * not jump it into Saturday's list, which is a different evening. Hitting
+   * the end of the day's block is a no-op rather than an error, because the
+   * button that does nothing is already disabled in the page and an
+   * exception here would only be a scary message for a mis-click.
+   */
+  reorder(id: string, delta: number): AwardDef[] {
+    const from = this.#list.findIndex(a => a.id === id);
+    if (from < 0) throw new Error(`There is no award "${id}".`);
+    const step = delta < 0 ? -1 : 1;
+    const day = (this.#list[from]!.day ?? '').toLowerCase();
+    const to = from + step;
+    if (to < 0 || to >= this.#list.length) return this.definitions;
+    // Only swap with a neighbour from the same ceremony.
+    if ((this.#list[to]!.day ?? '').toLowerCase() !== day) return this.definitions;
+    const moved = this.#list[from]!;
+    this.#list[from] = this.#list[to]!;
+    this.#list[to] = moved;
+    this.onListChanged?.(this.definitions);
+    return this.definitions;
+  }
+
+  /**
    * Remove an award from the ceremony list. Refused once presented: the
    * presentation is history and the checklist must keep showing it happened.
    * A staged winner for it is discarded along with it.

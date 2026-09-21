@@ -80,7 +80,14 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
      here.</p>
 </div>
 
-<div class="wrap">
+<!-- A real <main>, not a plain div. Every console that mounts the nav strip
+     gets its landmark for free, because nav.js promotes .wrap and points its
+     skip link at it; this page deliberately does not mount the strip (see
+     the script below), and without this element it would have had no main
+     landmark at all. No skip link is needed to go with it: the reason that
+     link exists is the nineteen tab stops of strip above a console's first
+     control, and there is no strip here. -->
+<main class="wrap">
   <header>
     <h1>House audio</h1>
     <span class="hint">the room, not the stream</span>
@@ -121,9 +128,28 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
       team: <span class="mono">254.mp3</span>, or <span class="mono">254 - Song.mp3</span> to show
       the title. Drop files in and they appear here.</p>
   </section>
-</div>
+</main>
 
 <script type="module">
+// No mountNav here, and no entry in nav.js's CONSOLES, on purpose. Two
+// console-styled pages opt out of the strip; the settings page says why at
+// the top of its own file, and this one had never said anything. It does
+// now:
+//
+// This page IS the player. The audio element lives in it, and a browser only
+// makes a sound after somebody has clicked the page once, which is what the
+// arm button buys. Navigating away disarms it. The nav strip is a row of
+// nine one-tap links to other consoles, sitting at the top of a machine that
+// is wired to the PA, parked in a corner, and looked at by nobody for hours
+// at a time: nine ways to silence the walk-ups mid-show, with the desk still
+// showing an armed player until the next check-in fails.
+//
+// The music machine is also not an operator position. Whoever walks up to it
+// is checking on the sound, not running the show from it, and the gold bus
+// plate above is the only thing they should read.
+//
+// The landmark the strip would have provided comes from the <main> element
+// above instead; see the comment there.
 import { connect } from '/shared/desk-client.js';
 
 // ---------------------------------------------------------------------------

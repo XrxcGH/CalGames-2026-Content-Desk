@@ -93,21 +93,38 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
   letter-spacing: .16em; text-indent: .16em; text-transform: uppercase;
 }
 .calling-match { font-family: var(--font-num); font-weight: 900; font-size: 52px; line-height: 1; }
-.calling-teams {
-  margin-left: auto; font-family: var(--font-num); font-weight: 900; font-size: 44px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+/* There is deliberately no team-number line on this plate. The deck below is
+   already printing the called match's six numbers in their own red and blue
+   blocks, about 90px lower, under the gold "next up" cap, so a second copy up
+   here was the same six numbers twice on one frame. See paint() for the rest
+   of the reason. */
 /* Announcements are typed by a human in a hurry and can be any length, so the
    type fits itself to the room rather than trusting the author. */
 .note-body {
-  flex: 1; display: flex; align-items: center; justify-content: center;
+  /* min-height: 0 is load-bearing, the same rule .deck below already follows
+     and for a sharper reason: a flex item defaults to min-height: auto, which
+     pins this to its CONTENT height instead of its share of the pane. At
+     content height scrollHeight and clientHeight are always equal, so
+     fitNote()'s guard could never fire and the two step-down sizes below were
+     unreachable CSS. program.js documents the identical bug, already fixed,
+     on the safety plate. overflow: hidden is the belt: past the last step the
+     text is cut at the pane's edge rather than painted down over the bottom
+     of the screen. */
+  flex: 1; min-height: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
   text-align: center; padding: 0 40px;
   font-family: var(--font-display); font-weight: 800;
   font-variation-settings: "wdth" var(--wdth-display);
   font-size: 76px; line-height: 1.15;
 }
 .note-body[data-fit="1"] { font-size: 60px; }
-/* Slides ride the note's layout: one idea, readable across a room. */
+/* Slides ride the note's layout: one idea, readable across a room.
+   52px is under this file's 72px room floor on purpose, and unlike the two
+   sub-floor sizes above it that is worth saying out loud: a slide carries up
+   to six author-written lines of up to 90 characters each, and at 72px one
+   full line alone wraps to three in the 1608px this pane has, so six of them
+   would be five times the height the panel owns. The floor governs one-line
+   facts (a deck row, a ranking); it cannot govern a paragraph. */
 .slide-body {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 18px; text-align: center; padding: 0 60px;
@@ -115,8 +132,16 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
   line-height: 1.2;
 }
 .slide-body .sl-line { max-width: 100%; overflow-wrap: anywhere; }
-/* The attribution line on a shout-out reads quieter than the message. */
-.slide-body .sl-line:last-child:not(:only-child) {
+/* The attribution line on a shout-out reads quieter than the message, and
+   ONLY on a shout-out. Unscoped, this demoted the last line of every slide to
+   38px --cg-white-dim, which on a recognition or info slide is the substance:
+   the volunteer list, or the room the session is in. It is the one thing
+   somebody walked up to the pit TV to read, rendered as the smallest and
+   dimmest type on the screen. showSlide() writes slide.kind onto the body so
+   the rule has something to scope against. 38px stays under the room floor
+   because a credit under a message that is already legible is not a fact
+   anyone has to read from the back, the same exception .deck-head takes. */
+.slide-body[data-kind="shoutout"] .sl-line:last-child:not(:only-child) {
   font-size: 38px; font-weight: 500; color: var(--cg-white-dim);
 }
 #timerOver {
@@ -286,7 +311,6 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
     <div class="calling" id="calling" hidden>
       <span class="calling-label">Now queuing</span>
       <span class="calling-match" id="callingMatch"></span>
-      <span class="calling-teams" id="callingTeams"></span>
     </div>
     <div class="deck-head" id="deckHead" hidden>
       <span></span><span>Red alliance</span><span>Blue alliance</span>
@@ -342,20 +366,22 @@ const desk = connect('side');
 fitStage($('stage'));
 
 // Rotate on a timer. A pit TV has no operator, and a screen that shows one
-// thing forever stops being looked at. The rankings walk through EVERY page
-// (12 teams at a time, left column first) before the deck comes back. For
-// example, a 36-team field shows pages 1-12, 13-24, 25-36, then on-deck again.
+// thing forever stops being looked at. The deck takes every second slot and
+// everything else interleaves with it: on a 36-team field that is deck,
+// announcement, deck, ranks 1-12, deck, 13-24, deck, 25-36, deck, a slide,
+// and round again (12 teams a page, left column first). advance() has the
+// arithmetic for why the deck can never be two slots away.
 const DWELL_MS = 14_000;
 const PAGE_SIZE = 12;
-let onDeck = true;
 let rankPage = 0;
 let lastState = null;
 
-/** Which panel is up: 'deck', 'rank', or 'note'. */
+/** Which panel is up: 'deck', 'rank', 'note' or 'slide'. It is the only
+    record of what is on screen: advance() reads it to hand the next slot
+    back to the deck. */
 let panel = 'deck';
 
 function show(deck) {
-  onDeck = deck;
   panel = deck ? 'deck' : 'rank';
   $('scr-deck').toggleAttribute('data-active', deck);
   $('scr-rank').toggleAttribute('data-active', !deck);
@@ -387,7 +413,6 @@ const noteLive = () => {
 
 function showNote() {
   panel = 'note';
-  onDeck = false;
   $('scr-deck').removeAttribute('data-active');
   $('scr-rank').removeAttribute('data-active');
   $('scr-slide').removeAttribute('data-active');
@@ -418,12 +443,17 @@ function showSlide() {
   const slide = slideDeck[slideCursor % slideDeck.length];
   slideCursor++;
   panel = 'slide';
-  onDeck = false;
   for (const id of ['scr-deck', 'scr-rank', 'scr-note']) $(id).removeAttribute('data-active');
   $('scr-slide').setAttribute('data-active', '');
   $('slideKick').textContent = SLIDE_KICKER[slide.kind] ?? 'Event info';
   $('slideTitle').textContent = slide.title;
-  $('slideBody').replaceChildren(...slide.lines.map(line => {
+  const body = $('slideBody');
+  // The kind has to reach the stylesheet, not just the kicker: only a
+  // shout-out ends on an attribution that should read quieter, and with
+  // nothing on the pane carrying the kind that rule demoted the last line of
+  // every slide. See .slide-body above.
+  body.dataset.kind = slide.kind ?? '';
+  body.replaceChildren(...slide.lines.map(line => {
     const div = document.createElement('div');
     div.className = 'sl-line';
     div.textContent = line;
@@ -448,28 +478,78 @@ setInterval(() => {
     `${Math.floor(shown / 60)}:${String(shown % 60).padStart(2, '0')}`;
 }, 250);
 
-function advance() {
+/**
+ * The other panes of one rotation, in order, built fresh when the last one
+ * has been spent.
+ *
+ * Built once per rotation rather than recomputed every tick: `pages` moves
+ * whenever a team crosses a page boundary, and a walk that renumbers itself
+ * mid-rotation skips or repeats a page. (That is the shape of the bug the old
+ * `panel === 'rank'` gate was patching: a boundary crossing during the
+ * slide's dwell used to render a new rankings page into the hidden panel
+ * without switching to it, holding the slide for a second full dwell while
+ * that page never showed.)
+ */
+function rotationPanes() {
   const pages = Math.max(1, Math.ceil((lastState?.rankings?.length ?? 0) / PAGE_SIZE));
-  // Deck, then the announcement if there is a live one, then rankings.
-  if (panel === 'deck' && noteLive()) { showNote(); return; }
-  if (panel === 'note') { rankPage = 0; renderRank(); show(false); return; }
-  if (onDeck) {
-    rankPage = 0;
+  const panes = [];
+  for (let p = 0; p < pages; p++) panes.push(`rank:${p}`);
+  if (slideDeck.length) panes.push('slide');
+  return panes;
+}
+
+/** The panes still owed a slot in the rotation now running. */
+let queue = [];
+/**
+ * postedAt of the announcement this rotation has already given a slot to.
+ * A live note leads every rotation exactly once, and a note that goes live
+ * mid-rotation jumps the queue instead of waiting for it to drain: twenty
+ * minutes is the whole shelf life, and most of it should not be spent queued.
+ */
+let notedAt = null;
+
+/**
+ * One step of the rotation. The deck takes every second slot.
+ *
+ * It used to take a single slot at the head of a rotation that then walked
+ * EVERY ranking page before coming back. At 36 teams that is 3 pages, so 5
+ * advances (70s) with no live announcement and 6 (84s) with one; at 48 teams,
+ * 4 pages, so 84 to 98s. That left the on-deck panel visible 14 seconds out
+ * of every 70 to 98, while the rankings took 3 or 4 consecutive slots. The
+ * deck is the reason a team walks up to a pit TV at all, and the thing the
+ * gold "Now queuing" plate and the four rows under it are both built for; the
+ * rankings are what you read while you wait. The only interruption was
+ * `match.loaded`, which fires about once a match cycle.
+ *
+ * Interleaved, the deck is at most one dwell (14s) away at any moment, and a
+ * full rotation costs twice as many slots without any pane losing its turn.
+ */
+function advance() {
+  // Coming off any other pane, the deck gets the slot.
+  if (panel !== 'deck') { show(true); return; }
+
+  if (!queue.length) { queue = rotationPanes(); notedAt = null; }
+  const live = noteLive() ? lastState.announcement.postedAt : null;
+  if (live !== null && live !== notedAt && !queue.includes('note')) queue.unshift('note');
+
+  const next = queue.shift();
+  if (next === 'note') {
+    // It can go stale between being queued and being reached.
+    if (live === null) return;
+    notedAt = live;
+    showNote();
+    return;
+  }
+  if (next === 'slide') {
+    // The deck is refetched on a slow poll, so it can empty after the queue
+    // was built; showSlide() would index an empty array. Hold the deck.
+    if (slideDeck.length) showSlide();
+    return;
+  }
+  if (typeof next === 'string' && next.startsWith('rank:')) {
+    rankPage = Number(next.slice(5));
     renderRank();
     show(false);
-  } else if (panel === 'rank' && rankPage + 1 < pages) {
-    // Gated on the rankings actually being the panel that is up: `pages` is
-    // recomputed every tick, so a team ranked past a page boundary DURING the
-    // slide's dwell used to take this branch from the slide, render the new
-    // page into the hidden rank panel without switching to it, and hold the
-    // slide for a second full dwell while that rankings page never showed.
-    rankPage++;
-    renderRank();
-  } else if (panel !== 'slide' && slideDeck.length) {
-    // The slide slot: one per rotation, after the rankings finish.
-    showSlide();
-  } else {
-    show(true);
   }
 }
 // Resettable so a fresh match load (below) always buys the deck a full
@@ -491,15 +571,19 @@ function paint(s) {
   // simply is not there, which is why nothing below depends on it.
   const calling = s.nowQueuing;
   $('calling').hidden = !calling;
-  if (calling) {
-    $('callingMatch').textContent = calling;
-    const row = (s.upcoming ?? []).find(m => m.name === calling);
-    // Split the alliances: six numbers in a row is a phone number, not two
-    // teams of three, and this plate is read at a glance from the pits.
-    $('callingTeams').textContent = row
-      ? `${(row.red ?? []).join(' ')}  vs  ${(row.blue ?? []).join(' ')}`
-      : '';
-  }
+  // The label and the match name, and nothing else. The plate used to repeat
+  // the called match's six team numbers, looked up out of the same
+  // s.upcoming the deck below renders, so a queued match printed its numbers
+  // twice on one frame about 90px apart, the second copy already wearing the
+  // gold "next up" cap. On a panel whose own rows fight for every pixel of
+  // height, the duplicate was the most expensive line on the screen.
+  //
+  // The separation it was trying to buy never arrived either: the doubled
+  // spaces around "vs" collapse under HTML whitespace collapsing, and
+  // white-space: nowrap stops wrapping without preserving runs, so
+  // "254 8 604  vs  1678 199 5" rendered as one undifferentiated phone
+  // number. The deck's red and blue blocks do that job properly.
+  if (calling) $('callingMatch').textContent = calling;
 
   // ---- announcement ----
   const note = s.announcement;
@@ -600,6 +684,16 @@ function renderRank() {
 /**
  * Announcements are typed by a human in a hurry, so the length is unknown.
  * Step down until it fits rather than trusting the author to be brief.
+ *
+ * The comparison only means something because .note-body carries
+ * min-height: 0. Without it the element sized to its own content, so
+ * scrollHeight and clientHeight agreed however long the note was, this loop
+ * broke on its first pass, and the 60px and 46px steps were dead CSS. The
+ * header, subtitle and tick leave the body about 747px of the 972px content
+ * column, which is roughly eight 76px lines, and anything past that just kept
+ * growing: a 496-character note measured 1311px and finished 510px below the
+ * frame, at full size, where the stage clips it. The same note now reports
+ * scrollHeight 1029 against clientHeight 747, steps to 46px, and fits.
  */
 function fitNote() {
   const el = $('noteBody');

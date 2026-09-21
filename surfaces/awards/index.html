@@ -43,9 +43,17 @@ h1 { margin: 0 0 4px; text-align: center;
 
 label { display: block; font-family: var(--font-cond); font-weight: 600; font-size: 14px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--cg-white-dim); margin: 10px 0 6px; }
+/* The border is the field's ONLY boundary, so it has to clear the 3:1
+   non-text floor on its own. --cg-purple-hi measured 1.50:1 against the card
+   it sits on and 2.02:1 against the field's own fill: an unfocused field was
+   dark-on-dark, findable only by its placeholder, which vanishes the moment
+   the Judge Advisor starts typing. The muted white reads 3.36:1 on the card
+   and 4.53:1 on the fill. Same value and same reason as the console rule in
+   packages/theme/tokens.css, which this page cannot inherit: it declares no
+   data-surface, deliberately, because it is a phone page and not a console. */
 input, textarea { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 17px;
   font-family: var(--font-display); background: var(--cg-purple-lo); color: var(--cg-white);
-  border: 2px solid var(--cg-purple-hi); }
+  border: 2px solid var(--cg-white-mute); }
 textarea { min-height: 74px; resize: vertical; font-size: 16px; line-height: 1.5; }
 input::placeholder, textarea::placeholder { color: var(--cg-white-dim); }
 input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-ring);
@@ -66,8 +74,29 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
   letter-spacing: .1em; text-transform: uppercase; }
 .btn-quiet:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
 
+/* The literal fallback is load-bearing, not belt-and-braces. --st-bad-text is
+   declared only under :root[data-surface="console"], and this page carries no
+   data-surface, so the bare var() was invalid at computed-value time and
+   `color` fell back to the inherited body white. Every failure on this page
+   routes through .err, including "The desk restarted and this page got signed
+   out", while success sits right next to it in green, because --st-ok IS a
+   base :root token. A JA who loaded a winner that did not save read the
+   failure in exactly the same white as the rest of the card. The token now
+   lives on the base :root beside the alliance voices, so the bare var()
+   resolves here. */
 .err { color: var(--st-bad-text); font-size: 15px; line-height: 1.5; margin: 10px 0 0; }
 .ok-line { color: var(--st-ok); font-size: 15px; margin: 10px 0 0; }
+
+/* ---- locking the page again ----
+   This page holds every award winner in plain text from the moment it is
+   unlocked, and the session it rides on lasts sixteen hours. The bar is at
+   the very top because the tablet is put down on the judging table far more
+   often than it is closed. */
+.lockbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 16px; }
+.lockbar .lock-why { flex: 1 1 250px; margin: 0; font-size: 13px; line-height: 1.5;
+  color: var(--cg-white-dim); }
+.lock-note { font-size: 15px; line-height: 1.5; margin: 0 0 12px; color: var(--cg-gold); }
 
 /* One card per award. */
 .aw-row h2, .add-h { margin: 0; font-size: 20px; font-weight: 800;
@@ -109,7 +138,20 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
 <body>
   <h1>Awards · Judge Advisor<div class="tick"></div></h1>
 
+  <!-- The way back to locked. There was no way at all: the awards session is
+       set for sixteen hours and nothing on any surface ended one, so a tablet
+       unlocked in the judging room at lunchtime displayed every winner, in
+       full, to anyone who picked it up until the desk restarted. -->
+  <div class="lockbar" id="lockBar" hidden>
+    <button class="btn-go" id="lock" type="button">Lock this page</button>
+    <p class="lock-why">Takes every loaded winner back off this screen and asks
+      for the code again. Press it before the tablet leaves your hands. It also
+      locks itself after ten minutes untouched, or two minutes in the
+      background.</p>
+  </div>
+
   <div class="card" id="gate">
+    <p class="lock-note" id="lockNote" hidden role="status"></p>
     <p class="sub" style="margin-bottom:10px">This page is for the Judge Advisor.
       Build the ceremony list and load each award's winner here as judging wraps
       up. Winners stay locked away from every screen, every feed, and the desk
@@ -164,10 +206,90 @@ async function load() {
   paint(snap);
 }
 
-function show(unlocked) {
-  $('gate').hidden = unlocked;
-  $('list').hidden = !unlocked;
+let unlocked = false;
+
+function show(open) {
+  unlocked = open;
+  $('gate').hidden = open;
+  $('list').hidden = !open;
+  $('lockBar').hidden = !open;
+  if (open) { $('lockNote').hidden = true; armIdle(); }
+  else { clearTimeout(idleTimer); clearTimeout(hiddenTimer); }
 }
+
+/* ---- locking the page again -------------------------------------------------
+ *
+ * The architecture is careful about the wire and the file: a staged winner
+ * never enters the event bus before the reveal, and the desk PIN cannot reach
+ * one, to type or to read. The hole was the tablet itself. /api/awards/auth
+ * sets a sixteen hour session and no route anywhere clears one, so once the
+ * Judge Advisor unlocked this page in the judging room it stayed unlocked,
+ * with every winner rendered in plain text, for the rest of the day or until
+ * the desk restarted. The only way back was knowing to clear site data by
+ * hand.
+ *
+ * This is the half that lives on the phone: drop the winners out of the DOM
+ * and put the gate back. It calls POST /api/awards/signout for the other
+ * half, which does not exist on the desk yet; when it lands, this same button
+ * becomes a real sign-out with no change here. Until then the copy below says
+ * exactly what it did and did not do, because a lock that quietly is not one
+ * is worse than a page with no button: the JA would put the tablet down
+ * believing it shut.
+ */
+const IDLE_LOCK_MS = 10 * 60_000;
+const HIDDEN_LOCK_MS = 2 * 60_000;
+let idleTimer = null;
+let hiddenTimer = null;
+
+function armIdle() {
+  clearTimeout(idleTimer);
+  if (!unlocked) return;
+  idleTimer = setTimeout(() => void lockPage('idle'), IDLE_LOCK_MS);
+}
+
+async function lockPage(reason) {
+  let serverCleared = false;
+  try {
+    const res = await fetch('/api/awards/signout', { method: 'POST' });
+    serverCleared = res.ok;
+  } catch { /* desk unreachable: the local half below still runs */ }
+  // replaceChildren, not hidden: a hidden subtree still holds every winner,
+  // and "hidden" is one devtools toggle away from being on the screen again.
+  $('list').replaceChildren();
+  $('gateErr').hidden = true;
+  show(false);
+  const note = $('lockNote');
+  note.hidden = false;
+  note.textContent = (reason === 'idle'
+      ? 'Locked after ten minutes with nobody touching it. '
+      : reason === 'hidden'
+        ? 'Locked while this tab sat in the background. '
+        : 'Locked. ')
+    + (serverCleared
+      ? 'Enter the code to open it again.'
+      : 'The winners are off this screen, but this desk has no sign-out route '
+        + 'yet, so the sixteen hour session is still open: reloading this page '
+        + 'reopens the list without the code. Close the tab as well if the '
+        + 'tablet is leaving your hands.');
+}
+
+$('lock').onclick = () => void lockPage('button');
+
+// Idle is measured from the last thing a person did, not the last repaint,
+// and the capture phase catches it wherever in the page it happened.
+for (const ev of ['pointerdown', 'keydown', 'input']) {
+  document.addEventListener(ev, armIdle, true);
+}
+// The realistic failure is a tablet set face-up and walked away from, which
+// never fires visibilitychange, so the idle timer above is the one that
+// catches it. This covers the other half: the JA switches to the schedule and
+// the awards tab sits behind it, unlocked, for the rest of the afternoon.
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(hiddenTimer);
+  if (!unlocked) return;
+  if (document.hidden) hiddenTimer = setTimeout(() => void lockPage('hidden'), HIDDEN_LOCK_MS);
+  else armIdle();
+});
 
 // ---- tiny element helpers ---------------------------------------------------
 const el = (tag, cls, text) => {
@@ -229,7 +351,8 @@ function paint(snap) {
     count.dataset.done = String(loaded === g.items.length);
     head.append(count);
     out.push(head);
-    g.items.forEach((a, i) => out.push(awardCard(a, i + 1)));
+    g.items.forEach((a, i) => out.push(
+      awardCard(a, i + 1, i === g.items.length - 1)));
   }
   box.replaceChildren(...out, addCard());
 }
@@ -242,12 +365,18 @@ function emptyCard() {
   return card;
 }
 
-function awardCard(a, order) {
+function awardCard(a, order, lastInDay) {
   const card = el('div', 'card aw-row');
   const note = el('p');
   note.setAttribute('role', 'status');
 
-  const paintView = () => {
+  // Both painters rebuild the card from scratch, which destroys the very
+  // button that was pressed and drops focus to <body>. Each one therefore
+  // hands focus to its counterpart in the new DOM: Edit wording lands on the
+  // first field it just opened (the trivia editor already does exactly this),
+  // and Cancel lands back on the Edit button it came from. Without it a JA
+  // working by keyboard tabs from the top of the page after every press.
+  const paintView = (focusEdit = false) => {
     card.replaceChildren();
     const head = el('div', 'aw-head');
     if (order) head.append(el('span', 'aw-num', String(order)));
@@ -306,9 +435,26 @@ function awardCard(a, order) {
     }
 
     const tools = el('div', 'tools');
+    // The running order, changeable here. It is the detail most likely to
+    // move late, and it was the one thing about an award that still meant
+    // editing config.json by hand.
+    const up = quietBtn('Move earlier');
+    up.disabled = order === 1;
+    up.setAttribute('aria-label', `Move ${a.title} earlier in the ceremony`);
+    up.onclick = async () => {
+      try { await api({ action: 'reorder', id: a.id, delta: -1 }); await load(); }
+      catch (err) { sayErr(note, err); }
+    };
+    const down = quietBtn('Move later');
+    down.disabled = !!lastInDay;
+    down.setAttribute('aria-label', `Move ${a.title} later in the ceremony`);
+    down.onclick = async () => {
+      try { await api({ action: 'reorder', id: a.id, delta: 1 }); await load(); }
+      catch (err) { sayErr(note, err); }
+    };
     const edit = quietBtn('Edit wording');
     edit.onclick = paintEdit;
-    tools.append(edit);
+    tools.append(up, down, edit);
     if (!a.presented) {
       const retire = quietBtn('Remove from the ceremony');
       retire.onclick = async () => {
@@ -320,6 +466,7 @@ function awardCard(a, order) {
       tools.append(retire);
     }
     card.append(tools, note);
+    if (focusEdit) edit.focus();
   };
 
   const paintEdit = () => {
@@ -341,7 +488,7 @@ function awardCard(a, order) {
       } catch (err) { sayErr(note, err); }
     };
     const cancel = quietBtn('Cancel');
-    cancel.onclick = paintView;
+    cancel.onclick = () => paintView(true);
     const row = el('div', 'tools');
     row.append(save, cancel);
     card.append(
@@ -352,6 +499,7 @@ function awardCard(a, order) {
         + 'definition below is what the GA reads aloud and what the slides show.'),
       labelEl('Full definition'), d,
       row, note);
+    t.focus();
   };
 
   paintView();

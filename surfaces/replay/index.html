@@ -34,8 +34,18 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   color: var(--text-dim); background: var(--surface-sunken); padding: 0 4px;
   /* Tracking adds a trailing space to every glyph, so centered tracked text
      sits half a track left of center; the indent puts it back (see broadcast.css). */
-  text-indent: .12em; box-sizing: border-box;
+  text-indent: .12em; box-sizing: border-box; overflow: hidden;
   box-shadow: inset -1px 0 0 rgba(0,0,0,.12); }
+/* The words come from PHASE_LABEL, which is written for a console panel, not
+   for a 10-second sliver of a 160-second track: "Transition" is 6% of the
+   width. It truncates here rather than carrying a second, shorter spelling
+   of the same phase. ("Trans" used to live in this row, against "Transition"
+   on the desk console sitting next to this one, which is exactly the drift
+   PHASE_LABEL's comment exists to stop.) The title attribute gives the whole
+   word back on hover, and the tick labels under the track say where the
+   boundary falls regardless. */
+#phases div span { max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 #phases div[data-p="auto"] { background: var(--btn-hover); color: var(--text); }
 /* Bespoke deep gold: the segment must still read as gold while keeping the
    gold-hi text above 4.5:1, and even --cg-gold-lo is too light for that. */

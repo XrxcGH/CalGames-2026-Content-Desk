@@ -194,9 +194,42 @@
 }
 :root[data-key="luma"] .bar { background-color: var(--cg-purple); background-image: var(--tex-perf); }
 
+/* The alliance FILL bleeds to the frame edge; the INK does not. .bar-teams is
+   the first flex child on red and, under row-reverse, on blue too, so the flat
+   36px this used to carry put a team number 1.875% from the frame edge: inside
+   the 3.5% action-safe line (67.2px at 1920) and inside the 5% title-safe box
+   the test card labels "graphics live here". A 4-digit number sets about 69px
+   wide at --t-label, so it ran x=36 to x=105, and on any display cropping 3.5%
+   (LED processors and projector overscan both do it, which is why the test
+   card exists) the first two digits went with the crop and 1868 read as "68".
+   This is the one graphic that is up during every match, and the program
+   screen is also an advertised pit-TV kiosk, so it reaches venue displays.
+
+   Only the OUTER edge moves to --safe-x. The inner edge faces the clock
+   column, not the frame, so it has no safe area to answer to, and moving both
+   would cost the side 120px it does not have. The 750px side column leaves
+   615px of content box at 96/36. .bar-stats cannot go under 458px (the
+   fuel/tower line over its three RP badges, plus the total's 3ch reservation)
+   and the team block measures 71px plain or 92px carrying a card, so with the
+   28px flex gap there is 58px of slack plain and 37px carded. At 96/96 the
+   box would be 555px, under that 458px floor, and the RP strip would push
+   toward the clock. The one shape that still runs out of room is a 5-digit
+   number carrying a card AND a surrogate mark (141px): the 1fr track grows
+   11px, which slides the clock 11px off centre rather than clipping anything,
+   and FRC has not issued a 5-digit number. */
 .bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px; }
-.bar-side--red  { background: var(--alliance-red);  border-right: var(--rule); }
-.bar-side--blue { background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; }
+.bar-side--red  { padding-left: var(--safe-x);  background: var(--alliance-red);  border-right: var(--rule); }
+.bar-side--blue { padding-right: var(--safe-x); background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; }
+
+/* The FILL bleeds to the bottom edge; the INK is lifted off it.
+   The alliance ink ended 29.3px from the frame bottom, 8.5px inside the same
+   3.5% action-safe line the outer edges were just pulled back to, so an
+   overscanning display cropped into the team numbers. Padding the three
+   COLUMNS rather than the bar leaves the bar's height, border and bleed
+   exactly as they were, and lifts all three together so the clock stays
+   level with the teams. Declared AFTER .bar-side because the two selectors
+   weigh the same and that rule's `padding` shorthand resets this to zero. */
+.bar > * { padding-bottom: 18px; }
 
 .bar-teams {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
@@ -359,10 +392,27 @@
   letter-spacing: .2em; text-indent: .2em; text-transform: uppercase;
   color: var(--cg-gold);
 }
+/* Two lines, hard, and words that break anywhere.
+   This card floats at z-index 45 over the live field picture, and its message
+   is the one operator-typed string the reducer passes through with no length
+   cap (emergency is capped at 200, a card reason at 160, an announcement at
+   280) from a desk input with no maxlength. At 44px Archivo in 1100px that is
+   about 43 characters a line, so a 150-character note was four lines and a
+   300-character one seven, growing the plate down through the top half of the
+   frame, which is exactly where the wide shot has the field. Clamping rather
+   than stepping the size down is deliberate: this plate says why nothing is
+   happening, the announcer is saying the same thing out loud, and a paragraph
+   over live video is worse for the viewer than a sentence plus an ellipsis.
+   `anywhere` is the other half: with the default wrapping a single pasted
+   unbreakable token (a stream URL) set one ~90-character line that ran out
+   through both frame edges instead of wrapping at all. */
 .sc-msg {
   font-family: var(--font-display); font-weight: 800; font-size: var(--t-title);
   font-variation-settings: "wdth" var(--wdth-display); line-height: 1.05;
   color: var(--cg-white); text-align: center; max-width: 1100px;
+  overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
 
 /* ==========================================================================
@@ -1146,7 +1196,16 @@
   font-size: 38px; line-height: 1.35; color: var(--cg-white);
 }
 .sl-lines div { overflow-wrap: anywhere; }
-/* A shout-out's attribution line reads quieter than the message above it. */
-.sl-lines div:last-child:not(:only-child) {
+/* A shout-out's attribution line reads quieter than the message above it, and
+   ONLY a shout-out's. Unscoped, this demoted the last line of every slide:
+   only `approve()` in slides.ts builds a trailing attribution, while a
+   recognition or info slide is author-written lines all the way down and its
+   last line is the substance. On "THANK YOU, SETUP CREW" the volunteer list
+   was the smallest, dimmest text on the frame, and the shipped example info
+   slide ends on "Limelight walks through the 2027 controller", which is the
+   detail the audience is there for. paintSlide() writes slide.kind onto
+   .sl-lines so this rule has something to scope against; nothing on the plate
+   carried the kind before, which is why it could not be scoped. */
+.sl-lines[data-kind="shoutout"] div:last-child:not(:only-child) {
   font-size: 30px; color: var(--cg-white-dim);
 }

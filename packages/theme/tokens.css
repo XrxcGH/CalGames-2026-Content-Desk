@@ -61,6 +61,22 @@
      for recessed fills behind the canonical color. */
   --alliance-red:     #ED1C24;
   --alliance-blue:    #0066B3;
+  /* The alliance colors AS TEXT. The official red and blue clear 3:1 only as
+     large fills, so small text uses these lightened voices. Defined on the
+     BASE root, not on a surface: they used to exist only under
+     [data-surface="console"], and the phone remote declares no surface, so
+     both of its scores resolved to inherited white. A producer glancing at
+     the phone could not tell red from blue. Surfaces may still override. */
+  --alliance-red-text:  #FF6B6B;
+  --alliance-blue-text: #6FB6FF;
+  /* Error text, same mechanism and same reason as the alliance voices above:
+     the official --st-bad (#C13030) is only 3.17:1 on a raised panel, so
+     anything that has to be READ uses this lightened red. On the base root
+     because the audience phone pages (the shout-out form, the Judge
+     Advisor's page, the quiz) declare no data-surface, and their error text
+     resolved to nothing and rendered plain white: the one line on the page
+     whose whole job is to look wrong looked like every other line. */
+  --st-bad-text:      #FF6B6B;
   --alliance-red-lo:  #7A0F13;
   --alliance-blue-lo: #00375F;
 
@@ -243,9 +259,9 @@
      because #ED1C24 reads 4.1:1 on --surface-raised (and only 2.9:1 on brand
      purple); this reads 6.4:1. */
   --st-bad-text:    #FF6B6B;
-  /* Alliance colors AS TEXT on dark panels: the official red and blue clear
-     3:1 only as large fills, so small text uses these lightened voices. Same
-     mechanism as --st-bad-text, different meaning. */
+  /* Alliance text: same values as the base root above, restated here only so
+     the console block reads as a complete palette. Changing one without the
+     other is the drift this comment exists to prevent. */
   --alliance-red-text:  #FF6B6B;
   --alliance-blue-text: #6FB6FF;
 }
@@ -589,6 +605,27 @@ html, body {
 .btn:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
 .btn[aria-pressed="true"] { background: var(--accent); color: var(--text-on-accent); }
 .btn[aria-pressed="true"]:focus-visible { outline-color: var(--cg-black); }
+
+/*
+ * The primary action on a panel. Used across the consoles (the desk alone
+ * marks nine buttons with it) and, until now, defined nowhere at all, so
+ * every "Show the award", "Put the card up" and "Reveal the winner" rendered
+ * identical to the secondary controls beside it. On a console with sixty
+ * buttons the one that matters has to look like it.
+ *
+ * Declared AFTER the base .btn states on purpose: a modifier and a state are
+ * the same specificity, so .btn:hover placed later would have repainted a
+ * gold button purple the moment the cursor touched it.
+ */
+.btn--go { background: var(--accent); color: var(--text-on-accent); }
+.btn--go:hover { background: var(--cg-gold-hi, var(--accent)); }
+.btn--go:active { background: var(--cg-gold-lo); }
+/* Gold on gold is invisible; the ring goes black on a gold face. */
+.btn--go:focus-visible { outline-color: var(--cg-black); }
+/* Disabled beats primary: a gold button nobody can press is a lie. */
+.btn--go:disabled, .btn--go:disabled:hover {
+  background: var(--surface-sunken); color: var(--text);
+}
 /* Disabled has to LOOK dead. The media consent row uses the disabled button
    as its current-state marker, and without this rule all three states
    rendered identically. */

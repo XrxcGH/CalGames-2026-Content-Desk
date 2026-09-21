@@ -91,7 +91,8 @@ export type DeskEventType =
   | 'card.call' | 'card.call_clear'
   // event flow
   | 'rankings.updated' | 'alliance_selection.update'
-  // The awards ceremony. `award.show` carries title and description ONLY: the
+  // The awards ceremony. `award.show` carries title, description and the
+  // one-line on-air blurb, and NO winner: the
   // bus fans out to every open surface, so the winner first appears in
   // `award.presented`, at the moment it stops being a secret.
   | 'award.show' | 'award.presented' | 'award.clear'

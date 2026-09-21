@@ -829,7 +829,14 @@ function paintSlide(slide) {
   if (!slide) return;
   $('slKicker').textContent = SLIDE_KICKER[slide.kind] ?? 'Event info';
   $('slTitle').textContent = slide.title;
-  $('slLines').replaceChildren(...(slide.lines ?? []).map(line => {
+  const lines = $('slLines');
+  // The kind has to reach the stylesheet, not just the kicker. Only a
+  // shout-out ends on an attribution that should read quieter; a recognition
+  // or info slide's last line is the substance, and with nothing on the plate
+  // carrying the kind the quiet-last-line rule could not be scoped and
+  // demoted it on every slide. See .sl-lines in broadcast.css.
+  lines.dataset.kind = slide.kind ?? '';
+  lines.replaceChildren(...(slide.lines ?? []).map(line => {
     const div = document.createElement('div');
     div.textContent = line;
     return div;
@@ -849,12 +856,27 @@ function paintCardCall(call) {
   $('ccName').textContent = roster.find(t => t.number === call.team)?.name ?? '';
   $('ccReason').textContent = call.reason ?? '';
 
-  // Whoever typed the reason was typing during a match, so the type fits
-  // itself rather than trusting them to be brief.
+  /*
+   * Whoever typed the reason was typing during a match, so the type fits
+   * itself rather than trusting them to be brief.
+   *
+   * Measured against the PLATE, not against the reason's own box. .cc-reason
+   * is an auto-height item in a centred flex column, so its scrollHeight can
+   * never exceed its clientHeight and the old guard broke on its first pass:
+   * the 42px and 34px steps below were unreachable, and a long reason simply
+   * grew the column until it ran off the frame. Same dead guard, same fix, as
+   * the emergency plate.
+   */
   const r = $('ccReason');
   r.removeAttribute('data-fit');
+  const fits = () => {
+    const box = plate.getBoundingClientRect();
+    const first = plate.firstElementChild.getBoundingClientRect();
+    const last = plate.lastElementChild.getBoundingClientRect();
+    return first.top >= box.top - 1 && last.bottom <= box.bottom + 1;
+  };
   for (const step of ['1', '2']) {
-    if (r.scrollHeight <= r.clientHeight) break;
+    if (fits()) break;
     r.dataset.fit = step;
   }
 }

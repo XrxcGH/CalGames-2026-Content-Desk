@@ -6,7 +6,7 @@ cannot be rescheduled. That single fact decides most of what follows.
 ## The short version
 
 - Node 22.6+. `npm install`, `npm test`, `npm start -- --demo`. No build step.
-- `npx tsc --noEmit` and `npm test` must pass before you open a PR.
+- `npm run typecheck` and `npm test` must pass before you open a PR.
 - Explain **why** in the code, not what. See [Comments](#comments) below.
 - If you are changing something that goes on air, look at it on a screen.
 
@@ -22,11 +22,29 @@ every surface can be worked on with no field, no cameras, and no accounts. If
 something can only be developed against real hardware, that is usually a design
 problem worth fixing rather than a setup instruction worth writing.
 
+`npm run dev` is the same entry point under `node --watch`, which restarts the
+desk on every save; it takes the same flags, so `npm run dev -- --demo` is the
+watching version of the two lines above. Good for surface work, less good when
+you are watching a long match loop, because the restart takes the match with
+it.
+
 ```bash
-npm test              # 196 tests, ~20s, no network
-npx tsc --noEmit      # types
-npm run replay -- data/events/sample.ndjson 4
+npm test              # 420 tests, a couple of minutes, no network
+npm run typecheck     # types
 ```
+
+Every run of the desk writes an event log to `data/events/`, named for the
+moment it started. Replaying one drives every graphic from real recorded
+input, at whatever speed you ask for:
+
+```bash
+npm run replay -- data/events/2026-09-20-14-31-07.ndjson 4
+```
+
+Use a filename that is actually in your own `data/events/`. The logs are
+gitignored and no sample one is committed, so a fresh clone has none: the
+fastest way to get one is to run `npm start -- --demo` for a couple of
+minutes and replay what it wrote.
 
 ## What good looks like here
 
