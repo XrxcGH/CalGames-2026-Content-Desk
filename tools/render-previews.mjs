@@ -211,6 +211,18 @@ const SHOTS = [
       'same deck ambiently; this is the desk deliberately taking one to air.',
     setup: async () => {
       await post('/api/awards', { action: 'clear' });
+      // Two invented submissions, so the desk shot still demonstrates the
+      // moderation queue without photographing anyone's real words. These go
+      // through the real /api/gp path a phone in the stands would use.
+      await post('/api/gp', {
+        name: 'Sam R', team: 604,
+        message: 'Huge thanks to the pit crew who lent us a battery between matches.',
+      });
+      await post('/api/gp', {
+        name: 'Jordan P', team: 1678,
+        message: 'Our rookies wired their first robot this week and it moved on the first try.',
+      });
+
       const slide = await post('/api/slides', {
         action: 'add', kind: 'recognition', title: 'Thank you, setup crew',
         lines: ['Friday load-in and field build', 'Ana · Ben · Cy · Dee · the WRRF interns'],
@@ -426,6 +438,28 @@ async function main() {
   const sweepFixtureLog = fixtureLogSweeper(join(ROOT, 'data', 'events'));
 
   const restoreNow = restoreOnExit(() => { restore(); sweepFixtureLog(); });
+
+  /*
+   * Blank the two files that hold PRIVATE data, now that they are safely
+   * backed up, so the photographed desk boots with an empty profile book and
+   * an empty shout-out queue.
+   *
+   * Restoring afterwards was never enough. The snapshot above protects the
+   * operator's state from the render; it does nothing about what the render
+   * SAW. previews/ is force-included in .gitignore (`!previews/`), so every
+   * console shot is committed, and the desk console displays both the profile
+   * book (real volunteer names) and the pending shout-out queue (unmoderated
+   * crowd text, with submitter names and team numbers). A render run on the
+   * event laptop published exactly that to a public repository as pixels,
+   * which is the thing .gitignore lines 24 and 35 exist to prevent. It had
+   * already happened once.
+   *
+   * The shots stay illustrative because the render posts its own fixtures
+   * into the empty files below.
+   */
+  for (const f of [join(ROOT, 'data', 'profiles.json'), join(ROOT, 'data', 'slides.json')]) {
+    await rm(f, { force: true });
+  }
 
   // Started with the gate explicitly OFF. That is the documented escape hatch
   // (an empty REMOTE_PIN, see access.ts) and it is the right tool here: this
