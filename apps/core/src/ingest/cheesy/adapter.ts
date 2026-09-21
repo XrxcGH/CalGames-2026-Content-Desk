@@ -41,6 +41,12 @@ export function mapRankings(res: RankingsResponse): {
       team: r.TeamId ?? 0,
       name: r.Nickname ?? '',
       rankingPoints: r.RankingPoints ?? 0,
+      // What the ORDERING is on. Cheesy sorts by RP per match played, so a
+      // table printing the raw total puts a rank-4 team above a rank-3 team
+      // on the number beside its own rank.
+      avgRp: (r.Played ?? 0) > 0
+        ? Math.round(((r.RankingPoints ?? 0) / (r.Played ?? 1)) * 10) / 10
+        : 0,
       record: `${r.Wins ?? 0}-${r.Losses ?? 0}-${r.Ties ?? 0}`,
       played: r.Played ?? 0,
     })),
@@ -579,6 +585,35 @@ export class CheesyAdapter {
     // read after the guards would never see a break at all.
     this.#breakDescription = (msg.BreakDescription ?? '').trim();
     this.#breakNextMatch = (msg.BreakNextMatchName ?? '').trim();
+
+    /*
+     * A TEST match is the arena saying there is nothing loaded.
+     *
+     * When the last match of a type is committed, LoadNextMatch finds nothing
+     * and calls LoadTestMatch, which loads {Type: Test, Id: 0, LongName:
+     * "Test Match"} with no teams at all. That happens at the end of
+     * qualifications and again after the last final, so without this the
+     * program feed and the lower third read "Test Match" with two empty
+     * alliances for the whole alliance-selection window and again through the
+     * awards, while the arena's own automation had already moved its audience
+     * display to the logo for exactly that reason.
+     *
+     * It also poisoned the coverage ledger, which created a row named "Test
+     * Match" and pointed #lastLoaded at it, so any stray match.end or posted
+     * score in that window was filed against a match that does not exist.
+     *
+     * Suppressed rather than rendered: the desk keeps the last real match on
+     * screen, which is what the room is still talking about, and the operator
+     * moves it on. The publish queue refuses a test match separately, because
+     * a scorekeeper can commit one deliberately during Friday checkout.
+     */
+    if (matchKind(m.Type) === 'test') {
+      if (this.#loadedMatchId !== null) {
+        console.log('[cheesy] the field has loaded its test match: nothing is ' +
+          'queued. Holding the last real match on screen.');
+      }
+      return;
+    }
     const teamAt = (key: string, fallback: number | undefined): Team | null => {
       const t = msg.Teams?.[key];
       const number = t?.Id ?? fallback;
@@ -753,7 +788,30 @@ export class CheesyAdapter {
         // Only a real match end (coming back from a timeout isn't one).
         if (previous === MatchState.TeleopPeriod || previous === MatchState.AutoPeriod
             || previous === MatchState.PausePeriod) {
-          this.#emit({ type: 'match.end' });
+          /*
+           * An ABORT looks exactly like a buzzer from here: AbortMatch sets
+           * the arena's state straight to PostMatch, so the desk emitted
+           * match.end either way and the coverage ledger marked the match
+           * played. An abort that is never replayed, because of a card, a
+           * schedule change or a field fault late on Sunday, then sat in the
+           * gap list reporting no-score AND never-queued, advising somebody
+           * to hand-queue a match that was correctly never recorded. A gap
+           * report full of those stops being read.
+           *
+           * The clock tells them apart. A real match reaches the end of the
+           * timeline; an abort stops short of it. The arena's own match time
+           * is on this message, so this is its number rather than ours, and
+           * the grace is generous because the only cost of guessing "ended"
+           * is the behaviour that was there before.
+           */
+          const at = Number(msg.MatchTimeSec);
+          const full = REBUILT.MATCH_END - REBUILT.AUTO_START;   // 160s
+          const aborted = Number.isFinite(at) && at > 0 && at < full - 5;
+          if (aborted) {
+            console.log(`[cheesy] the field stopped at ${Math.round(at)}s of ${full}: ` +
+              'treating this as an abort rather than a result.');
+          }
+          this.#emit({ type: aborted ? 'match.aborted' : 'match.end' });
         }
         this.#started = false;
         break;

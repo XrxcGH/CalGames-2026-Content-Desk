@@ -177,7 +177,7 @@ function card(t, rankings) {
       <div class="top">
         <span class="tnum num">${t.number}</span>
         <span class="tname">${esc(t.name || '-')}</span>
-        <span class="tmeta">${row ? `Rank ${row.rank} · ${row.record} · ${row.rankingPoints} RP` : ''}</span>
+        <span class="tmeta">${row ? `Rank ${row.rank} · ${row.record} · ${(row.avgRp ?? 0).toFixed(1)} RP/match` : ''}</span>
       </div>
       ${flags ? `<div class="tflags">${flags}</div>` : ''}
       <textarea class="tnote" data-team="${t.number}" rows="1"

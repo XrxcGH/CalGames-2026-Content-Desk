@@ -299,7 +299,10 @@ function paint(s) {
   const row = (s.rankings ?? []).find(r => r.team === team);
   $('rank').hidden = !row;
   if (row) setHTML($('rank'),
-    `Rank <b>${row.rank}</b> · ${row.record} · ${row.rankingPoints} RP`);
+    // Average RP, which is what the ranking is ordered on: the raw total
+    // disagrees with the rank order once teams have played unequal numbers of
+    // matches, which is routine at an offseason.
+    `Rank <b>${row.rank}</b> · ${row.record} · ${(row.avgRp ?? 0).toFixed(1)} RP/match`);
 
   const eta = i => s.pace?.nextStartAt && s.pace?.cycleSec
     ? `~${clock(s.pace.nextStartAt + i * s.pace.cycleSec * 1000)}`

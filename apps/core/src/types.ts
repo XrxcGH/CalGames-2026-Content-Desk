@@ -367,6 +367,19 @@ export interface RankingRow {
   team: number;
   name: string;
   rankingPoints: number;
+  /**
+   * RP per match played, to one decimal, which is what the ordering is on.
+   *
+   * Cheesy ranks on AVERAGE RP: Rankings.Less cross-multiplies
+   * a.RankingPoints*b.Played against b.RankingPoints*a.Played, and every
+   * tiebreaker under it does the same. The desk printed the raw total beside
+   * the rank, so at an offseason where teams play unequal numbers of matches,
+   * which is routine once somebody drops out or a match is skipped, the
+   * on-air table showed a rank-4 team with MORE ranking points than the
+   * rank-3 team above it. That reads as a broken graphic and sends people to
+   * the scoring table.
+   */
+  avgRp: number;
   /** "8-2-1" */
   record: string;
   played: number;

@@ -252,5 +252,11 @@ Good for catching a regression in September without waiting on the next chance a
 - [x] Kill Cheesy Arena mid-match; confirm we back off cleanly instead of hammering.
 - [ ] Wireshark the field NIC for five minutes; confirm nothing but allowlisted traffic. Bring the
       capture to the FTA conversation (more persuasive than any promise).
-- [ ] Agree the reserved `displayId` with the scorekeeper, in writing.
+- [ ] Agree the reserved `displayId` prefix with the scorekeeper, in writing.
+- [ ] **Ask the scorekeeper to set Selection Round 3 Order on `/setup/settings` before alliance
+      selection.** Cheesy only creates a fourth alliance slot when that field is non-empty, and the
+      shipped default is empty. If nobody sets it, alliances are three teams, selection will not
+      finalize with a fourth pick, and everything on the desk that names the whole alliance (the
+      selection board, the result card, the awards graphic) quietly falls back to the on-field
+      three. Correct, but not what the event decided.
 - [ ] Rehearse the kill switch.

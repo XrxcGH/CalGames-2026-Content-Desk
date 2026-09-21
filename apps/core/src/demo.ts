@@ -35,19 +35,19 @@ const BLUE = [
  * whose empty states ("schedule not published yet") hide the real layout.
  */
 const DEMO_RANKINGS: RankingRow[] = [
-  { rank: 1, previousRank: 1, team: 254, name: 'The Cheesy Poofs', rankingPoints: 38, record: '10-1-0', played: 11 },
-  { rank: 2, previousRank: 3, team: 846, name: 'The Funky Monkeys', rankingPoints: 34, record: '8-2-1', played: 11 },
-  { rank: 3, previousRank: 2, team: 1678, name: 'Citrus Circuits', rankingPoints: 33, record: '8-3-0', played: 11 },
-  { rank: 4, previousRank: 5, team: 1868, name: 'Space Cookies', rankingPoints: 31, record: '7-3-1', played: 11 },
-  { rank: 5, previousRank: 4, team: 100, name: 'The Wildhats', rankingPoints: 29, record: '7-4-0', played: 11 },
-  { rank: 6, previousRank: 6, team: 115, name: 'MVRT', rankingPoints: 27, record: '6-5-0', played: 11 },
-  { rank: 7, previousRank: 8, team: 670, name: 'Homestead Robotics', rankingPoints: 25, record: '6-5-0', played: 11 },
-  { rank: 8, previousRank: 7, team: 253, name: 'Boba Bots', rankingPoints: 24, record: '5-6-0', played: 11 },
-  { rank: 9, previousRank: 9, team: 5940, name: 'BREAD', rankingPoints: 22, record: '5-6-0', played: 11 },
-  { rank: 10, previousRank: 11, team: 649, name: 'M-SET Fish', rankingPoints: 20, record: '4-7-0', played: 11 },
-  { rank: 11, previousRank: 10, team: 8033, name: 'Highlander Robotics', rankingPoints: 19, record: '4-7-0', played: 11 },
+  { rank: 1, previousRank: 1, team: 254, name: 'The Cheesy Poofs', rankingPoints: 38, avgRp: 3.5, record: '10-1-0', played: 11 },
+  { rank: 2, previousRank: 3, team: 846, name: 'The Funky Monkeys', rankingPoints: 34, avgRp: 3.1, record: '8-2-1', played: 11 },
+  { rank: 3, previousRank: 2, team: 1678, name: 'Citrus Circuits', rankingPoints: 33, avgRp: 3.0, record: '8-3-0', played: 11 },
+  { rank: 4, previousRank: 5, team: 1868, name: 'Space Cookies', rankingPoints: 31, avgRp: 2.8, record: '7-3-1', played: 11 },
+  { rank: 5, previousRank: 4, team: 100, name: 'The Wildhats', rankingPoints: 29, avgRp: 2.6, record: '7-4-0', played: 11 },
+  { rank: 6, previousRank: 6, team: 115, name: 'MVRT', rankingPoints: 27, avgRp: 2.5, record: '6-5-0', played: 11 },
+  { rank: 7, previousRank: 8, team: 670, name: 'Homestead Robotics', rankingPoints: 25, avgRp: 2.3, record: '6-5-0', played: 11 },
+  { rank: 8, previousRank: 7, team: 253, name: 'Boba Bots', rankingPoints: 24, avgRp: 2.2, record: '5-6-0', played: 11 },
+  { rank: 9, previousRank: 9, team: 5940, name: 'BREAD', rankingPoints: 22, avgRp: 2.0, record: '5-6-0', played: 11 },
+  { rank: 10, previousRank: 11, team: 649, name: 'M-SET Fish', rankingPoints: 20, avgRp: 1.8, record: '4-7-0', played: 11 },
+  { rank: 11, previousRank: 10, team: 8033, name: 'Highlander Robotics', rankingPoints: 19, avgRp: 1.7, record: '4-7-0', played: 11 },
   // A 5-digit rookie, on purpose: it exercises the widest-number layouts.
-  { rank: 12, previousRank: 12, team: 25801, name: 'Rookie Rhinos', rankingPoints: 17, record: '3-8-0', played: 11 },
+  { rank: 12, previousRank: 12, team: 25801, name: 'Rookie Rhinos', rankingPoints: 17, avgRp: 1.5, record: '3-8-0', played: 11 },
   // A realistically sized field (~36 teams), so the rankings rotation pages
   // through several screens exactly as it will at the event.
   ...([
@@ -65,6 +65,7 @@ const DEMO_RANKINGS: RankingRow[] = [
     team,
     name,
     rankingPoints: Math.max(0, 16 - i),
+    avgRp: Math.round((Math.max(0, 16 - i) / 11) * 10) / 10,
     record: `${Math.max(0, 3 - (i >> 3))}-${8 + (i >> 3)}-0`,
     played: 11,
   })),

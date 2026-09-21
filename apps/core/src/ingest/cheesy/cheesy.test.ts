@@ -411,7 +411,10 @@ test('rankings map from the REST shape', () => {
   assert.equal(out.highestPlayedMatch, 'Q42');
   assert.deepEqual(out.rankings[0], {
     rank: 1, previousRank: 3, team: 846, name: 'The Funky Monkeys',
-    rankingPoints: 34, record: '8-2-1', played: 11,
+    // The average is what Cheesy orders on: Rankings.Less cross-multiplies
+    // RankingPoints by the other team's Played. Printing the raw total put a
+    // rank-4 team above a rank-3 team on the number beside its own rank.
+    rankingPoints: 34, avgRp: 3.1, record: '8-2-1', played: 11,
   });
   // Missing fields degrade rather than crash a pit TV.
   assert.equal(out.rankings[1]?.record, '0-0-0');
@@ -1474,4 +1477,109 @@ test('a replay or a test feeds one source, so arbitration stays out of the way',
   adapter.ingest('matchLoad', { Match: { Id: 5, LongName: 'Qualification 5' } });
   adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod });
   assert.equal(bus.state.match?.displayName, 'Qualification 5');
+});
+
+test('the rankings column agrees with the order it is printed in', () => {
+  /*
+   * Cheesy ranks on AVERAGE ranking points: Rankings.Less compares
+   * a.RankingPoints*b.Played against b.RankingPoints*a.Played, and every
+   * tiebreaker under it cross-multiplies by Played too.
+   *
+   * The desk printed the raw total beside the rank. At an offseason, teams
+   * playing unequal numbers of matches is routine: somebody drops out, a
+   * match is skipped, a DQ counts as played with zero RP. So the on-air
+   * table would show a rank-4 team with MORE ranking points than the rank-3
+   * team above it, which reads as a broken graphic from the back of a gym and
+   * sends people to the scoring table.
+   */
+  const out = mapRankings({
+    Rankings: [
+      // 30 RP over 10 matches beats 33 over 12, and the arena ranks it that way.
+      { Rank: 1, TeamId: 254, RankingPoints: 30, Played: 10, Wins: 8 },
+      { Rank: 2, TeamId: 846, RankingPoints: 33, Played: 12, Wins: 9 },
+    ],
+  });
+
+  assert.equal(out.rankings[0]?.avgRp, 3);
+  assert.equal(out.rankings[1]?.avgRp, 2.8);
+  assert.ok(out.rankings[0]!.avgRp > out.rankings[1]!.avgRp,
+    'rank 1 has the higher number, which is the whole point');
+  assert.ok(out.rankings[0]!.rankingPoints < out.rankings[1]!.rankingPoints,
+    'while the raw total says the opposite, which is what was on air');
+});
+
+test('a team with no matches played does not divide by zero', () => {
+  const out = mapRankings({ Rankings: [{ Rank: 1, TeamId: 254, RankingPoints: 0, Played: 0 }] });
+  assert.equal(out.rankings[0]?.avgRp, 0);
+});
+
+test('an aborted match is not a played match', () => {
+  /*
+   * AbortMatch sets the arena's state straight to PostMatch, so from the
+   * desk's side an abort looked exactly like a buzzer: match.end fired and
+   * the coverage ledger marked the match played. An abort that is never
+   * replayed then sat in the gap list reporting no-score AND never-queued,
+   * advising somebody to hand-queue a match that was correctly never
+   * recorded. A gap report full of those stops being read on the Sunday it
+   * matters.
+   */
+  const bus = new EventBus();
+  const seen: string[] = [];
+  bus.subscribe(ev => seen.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 2 });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 30 });
+  // Stopped at 48s of 160.
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 48 });
+
+  assert.equal(seen.includes('match.aborted'), true);
+  assert.equal(seen.includes('match.end'), false, 'an abort is not a result');
+});
+
+test('a match that runs to the buzzer still ends normally', () => {
+  const bus = new EventBus();
+  const seen: string[] = [];
+  bus.subscribe(ev => seen.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 2 });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 30 });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+
+  assert.equal(seen.includes('match.end'), true);
+  assert.equal(seen.includes('match.aborted'), false);
+
+  // And a field that sends no match time at all is given the benefit of the
+  // doubt: the cost of guessing "ended" is only the behaviour that was there
+  // before, where the cost of guessing "aborted" is a lost video.
+  const bus2 = new EventBus();
+  const seen2: string[] = [];
+  bus2.subscribe(ev => seen2.push(ev.type));
+  const a2 = new CheesyAdapter({ bus: bus2, host: '127.0.0.1:1', displayId: 'test' });
+  a2.ingest('matchTime', { MatchState: MatchState.TeleopPeriod });
+  a2.ingest('matchTime', { MatchState: MatchState.PostMatch });
+  assert.equal(seen2.includes('match.end'), true);
+});
+
+test('the field loading its test match does not put "Test Match" on air', () => {
+  /*
+   * When the last match of a type is committed, LoadNextMatch finds nothing
+   * and calls LoadTestMatch, which loads {Type: Test, Id: 0, LongName: "Test
+   * Match"} with no teams. So the program feed and the lower third read "Test
+   * Match" with two empty alliances for the whole alliance-selection window,
+   * and again through the awards, while the arena's own automation had moved
+   * its audience display to the logo for exactly that reason.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', {
+    Match: { Id: 60, Type: 2, LongName: 'Qualification 60', Red1: 254, Blue1: 846 },
+  });
+  assert.equal(bus.state.match?.displayName, 'Qualification 60');
+
+  adapter.ingest('matchLoad', { Match: { Id: 0, Type: 0, LongName: 'Test Match' } });
+  assert.equal(bus.state.match?.displayName, 'Qualification 60',
+    'the last real match stays on screen, and the operator moves it on');
 });

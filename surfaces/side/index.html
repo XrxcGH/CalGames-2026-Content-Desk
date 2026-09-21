@@ -730,7 +730,11 @@ function renderRank() {
           <span class="rank-n num">${r.rank}</span>
           <span class="rank-num num">${r.team}</span>
           <span class="rank-team">${escapeHtml(r.name)}</span>
-          <span class="rank-rp num">${r.rankingPoints}</span>
+          <!-- The AVERAGE, because that is what the arena orders on. Printing
+               the raw total put a rank-4 team above a rank-3 team on the
+               number sitting next to its own rank, which reads as a broken
+               graphic from the back of a gym. -->
+          <span class="rank-rp num">${(r.avgRp ?? 0).toFixed(1)}</span>
         </div>`).join('')
     : '<div class="empty">No rankings yet</div>';
   fitRank();

@@ -36,6 +36,14 @@ export interface CoverageRow {
   blue: number[];
   /** Final score, once posted. */
   score: { red: number; blue: number } | null;
+  /**
+   * The last run of this match was aborted rather than played.
+   *
+   * Cleared by the next real buzzer, so a match that is aborted and then
+   * replayed reports normally. It exists so a row that was correctly never
+   * recorded does not sit in the gap list all weekend.
+   */
+  aborted?: boolean;
   /** The publish item covering this match, if one was ever created. */
   publish: {
     id: string;
@@ -126,12 +134,40 @@ export class CoverageLedger {
       }
 
       case 'match.end': {
-        // The buzzer is what makes a match "played". Not match.start: an
-        // aborted match never reaches here and should not count as missing
-        // video, which is exactly the false alarm that would make this
-        // report ignorable.
+        /*
+         * The buzzer is what makes a match "played".
+         *
+         * This comment used to say an aborted match never reaches here. It
+         * does: AbortMatch sets the arena's state to PostMatch, and the
+         * adapter emits match.end on any Auto/Pause/Teleop to PostMatch
+         * transition, so an abort set playedAt like any other buzzer. If the
+         * abort is replayed the row resolves, but an abort that is never
+         * replayed, because of a card, a schedule change or a field fault
+         * late on Sunday, left a row reporting BOTH no-score and
+         * never-queued, advising somebody to queue it by hand before the
+         * recording rolls off. That is exactly the false alarm that makes
+         * this report ignorable at the moment it matters.
+         */
         const name = this.#currentName(ev);
-        if (name) this.#row(name).playedAt = ev.ts;
+        if (name) {
+          const row = this.#row(name);
+          row.playedAt = ev.ts;
+          // A real buzzer retires an earlier abort of the same match.
+          row.aborted = false;
+        }
+        return;
+      }
+
+      case 'match.aborted': {
+        // Not played. Clearing playedAt rather than setting a flag, because
+        // every consumer already asks "was this played", and an aborted match
+        // that is later replayed gets its playedAt back from the real buzzer.
+        const name = this.#currentName(ev);
+        if (name) {
+          const row = this.#row(name);
+          row.playedAt = null;
+          row.aborted = true;
+        }
         return;
       }
 
