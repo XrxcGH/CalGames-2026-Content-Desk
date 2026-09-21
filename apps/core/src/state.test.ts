@@ -504,3 +504,54 @@ test('a yellow card does not cross the phase boundary on the overlay snapshot', 
   assert.equal(s.cards.byTeam[846]?.yellows, 1);
   assert.equal(s.cards.byTeam[846]?.phase, 'playoff');
 });
+
+test('the score the FIELD posted survives everything that recomputes', () => {
+  /*
+   * The scorekeeper's figure is not always the desk's arithmetic. A referee
+   * adjustment made on the review page after the last realtime frame lands in
+   * the committed score and never in the breakdown the desk has been adding
+   * up, so the two legitimately differ.
+   *
+   * match.score_posted wrote that figure straight onto `total`, outside
+   * settle(). settle() recomputes `total` from the breakdown, so the next
+   * thing to call it replaced the field's number with the desk's, on the
+   * Final screen, while the score review was still up, and drew it SOLID
+   * because totalConfidence was never lowered. The content lead saving the
+   * Game section at /s/setup was enough to do it.
+   */
+  let s = initialState();
+  s = reduce(s, ev('match.loaded', T0, { id: 'q42', displayName: 'Q42', red: [], blue: [] }));
+  s = reduce(s, ev('score.realtime', T0 + 1, {
+    red: { autoFuel: 40, teleopFuel: 60, autoTower: 0, teleopTower: 20, fouls: 0 },
+    blue: { autoFuel: 30, teleopFuel: 50, autoTower: 0, teleopTower: 20, fouls: 0 },
+  }));
+  const derived = s.score.red.total;
+
+  // The field commits, and its number is not the one the desk had.
+  s = reduce(s, ev('match.score_posted', T0 + 2, { red: { score: derived + 8 }, blue: { score: 99 } }));
+  assert.equal(s.score.red.total, derived + 8, 'the posted figure is what is on air');
+  assert.equal(s.totalConfidence, 'authoritative');
+
+  // Now every path that recomputes. A thresholds save at /s/setup:
+  s = reduce(s, ev('game.thresholds', T0 + 3,
+    { energizedFuel: 90, superchargedFuel: 300, traversalTower: 30 }));
+  assert.equal(s.score.red.total, derived + 8,
+    'a thresholds correction must not quietly re-do the field’s arithmetic');
+  assert.equal(s.score.blue.total, 99);
+
+  // And a realtime frame replayed to a reconnecting display:
+  s = reduce(s, ev('score.realtime', T0 + 4, {
+    red: { autoFuel: 40, teleopFuel: 60, autoTower: 0, teleopTower: 20, fouls: 0 },
+  }));
+  assert.equal(s.score.red.total, derived + 8, 'nor a late realtime frame');
+  assert.equal(s.totalConfidence, 'authoritative',
+    'and it is still honestly marked official');
+
+  // The next match starts clean: the adopted figure must not follow it.
+  s = reduce(s, ev('match.loaded', T0 + 5, { id: 'q43', displayName: 'Q43', red: [], blue: [] }));
+  assert.equal(s.score.red.total, 0);
+  s = reduce(s, ev('score.realtime', T0 + 6, {
+    red: { autoFuel: 10, teleopFuel: 0, autoTower: 0, teleopTower: 0, fouls: 0 },
+  }));
+  assert.equal(s.score.red.total, 10, 'and the new match computes its own total again');
+});

@@ -199,14 +199,32 @@ export interface AllianceScore {
   tower: number;
   /** Foul points this alliance CONCEDED (credited to the opponent's total). */
   fouls: number;
-  /** fuel + tower + opponent foul points */
+  /** fuel + tower + opponent foul points, unless `officialTotal` says otherwise. */
   total: number;
+  /**
+   * The total the FIELD posted, when it has posted one.
+   *
+   * The scorekeeper's figure is not always the desk's arithmetic: a referee
+   * adjustment made on the review page after the last realtime frame lands in
+   * the committed score and never in the breakdown the desk has been adding
+   * up. match.score_posted used to write that figure straight onto `total`,
+   * outside settle(), so the very next thing that called settle() (a replayed
+   * realtime frame, or a thresholds change saved at /s/setup) silently
+   * replaced the field's 128 with the desk's 120, on the Final screen, in
+   * front of the hall, still rendered solid because the confidence flag was
+   * never lowered.
+   *
+   * Kept separately so settle() can recompute the breakdown, which is always
+   * derived, without touching a number the field is authoritative for.
+   * Cleared when the next match loads.
+   */
+  officialTotal: number | null;
   rp: { energized: boolean; supercharged: boolean; traversal: boolean };
 }
 
 export const emptyAllianceScore = (): AllianceScore => ({
   autoFuel: 0, teleopFuel: 0, autoTower: 0, teleopTower: 0,
-  fuel: 0, tower: 0, fouls: 0, total: 0,
+  fuel: 0, tower: 0, fouls: 0, total: 0, officialTotal: null,
   rp: { energized: false, supercharged: false, traversal: false },
 });
 

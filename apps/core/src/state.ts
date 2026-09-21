@@ -31,7 +31,9 @@ function settle(s: AllianceScore, opponentFouls: number, t: RpThresholds): Allia
     ...s,
     fuel,
     tower,
-    total: fuel + tower + opponentFouls,
+    // The field's figure wins when there is one. Everything else here is
+    // derived and may be recomputed freely; this one was adopted.
+    total: s.officialTotal ?? fuel + tower + opponentFouls,
     // Scored against the live thresholds, never the defaults in REBUILT: an
     // off-season event can move these, and a badge that lights at a number
     // nobody is playing to is worse than no badge.
@@ -57,6 +59,18 @@ function withScore(state: DeskState, side: Alliance, patch: Partial<AllianceScor
 
 /** Re-score both alliances, for when the thresholds themselves change. */
 function rescore(state: DeskState): DeskState {
+  /*
+   * A committed match is history, not a live score.
+   *
+   * Thresholds arrive from config at boot and can be corrected at /s/setup
+   * mid-event. Re-scoring the live match immediately is right: a badge that
+   * lights at a number nobody is playing to is worse than no badge. Doing it
+   * to a match the field has already posted is not: those RPs were earned
+   * against the numbers in force when it was played, and the correction would
+   * relight or extinguish badges on the Final screen while the score review
+   * is still up.
+   */
+  if (state.scorePostedAt !== null) return state;
   return {
     ...state,
     score: {
@@ -229,7 +243,10 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           const total = Number(p[side]?.score);
           if (!Number.isFinite(total)) continue;
           official = true;
-          s = { ...s, score: { ...s.score, [side]: { ...s.score[side], total } } };
+          // Recorded as adopted, not just written. See AllianceScore.officialTotal:
+          // written onto `total` alone it survived only until the next settle().
+          s = { ...s, score: { ...s.score,
+            [side]: { ...s.score[side], total, officialTotal: total } } };
         }
         return official ? { ...s, totalConfidence: ev.confidence } : s;
       }

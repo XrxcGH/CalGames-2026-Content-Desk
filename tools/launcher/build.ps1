@@ -79,14 +79,25 @@ Push-Location $RepoRoot
 try { $tracked = & git ls-files } finally { Pop-Location }
 if (-not $tracked -or $tracked.Count -eq 0) { throw "git ls-files returned nothing. Run this from inside the repo." }
 
+# Tracked, but never shipped. harness.mjs is a Cheesy Arena WRITER: it opens
+# /match_play/websocket and the scoring panels and sends toggleBypass,
+# startMatch, fabricated scoring and commitAndPost. It exists to drive a local
+# dev arena while developing the bridge, and it has no business on a machine
+# sitting on the field network at an event. The desk's own bridge is
+# receive-only and GET-only; this would be the one thing in the payload that
+# could write a result into the event database.
+$NeverShip = @('harness.mjs')
+
 $n = 0
+$skipped = 0
 foreach ($rel in $tracked) {
+    if ($NeverShip -contains ($rel -replace '\', '/')) { $skipped++; continue }
     $src = Join-Path $RepoRoot $rel
     if (-not (Test-Path -LiteralPath $src)) { continue }
     Copy-Into $src $Stage $rel
     $n++
 }
-Say "$n tracked files"
+Say "$n tracked files ($skipped held back: arena-writing tools)"
 
 # node_modules is gitignored, so it has to be added by hand. Vendoring it means
 # the volunteer never runs npm install, and never needs the network to.

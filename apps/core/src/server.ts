@@ -135,6 +135,15 @@ export interface ServerOpts {
   lanBase?: string | null;
   /** Desk-editable event content, overlaid on config.json. */
   content?: EventContent | null;
+  /**
+   * How long the first brute-force lockout lasts, in milliseconds.
+   *
+   * Injected rather than read from the environment on purpose: a security
+   * constant that an env var can weaken is one somebody can weaken at the
+   * venue. Nothing in the running desk passes this; only the test that proves
+   * a served lockout releases, which cannot wait the real minute.
+   */
+  lockoutBaseMs?: number;
 }
 
 export function startServer(opts: ServerOpts) {
@@ -143,7 +152,7 @@ export function startServer(opts: ServerOpts) {
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
-          lanBase = null, content = null } = opts;
+          lanBase = null, content = null, lockoutBaseMs } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -326,7 +335,7 @@ export function startServer(opts: ServerOpts) {
    * failure. A correct PIN clears the slate.
    */
   const FAIL_LIMIT = 5;
-  const LOCKOUT_BASE_MS = 60_000;
+  const LOCKOUT_BASE_MS = lockoutBaseMs ?? 60_000;
   const LOCKOUT_MAX_MS = 15 * 60_000;
   // Below the limit, every miss still waits this long for its verdict, so
   // even a spread-out attack is capped at a few guesses a second.
@@ -351,20 +360,49 @@ export function startServer(opts: ServerOpts) {
    * concurrent attempts see one another: FAIL_LIMIT of them can be in
    * flight at once, and no more.
    */
-  const authFails = new Map<string, { count: number; blockedUntil: number; inflight: number }>();
+  const authFails = new Map<string, {
+    count: number; blockedUntil: number; inflight: number; rounds: number;
+  }>();
   const failKey = (door: string, addr: string): string => `${door}\u0000${addr}`;
 
+  /**
+   * Is this address currently shut out of this door?
+   *
+   * Sweeps a served lockout before answering, which is the whole reason this
+   * is not a pure predicate. Without the sweep the block was PERMANENT: the
+   * second clause stayed true forever, because `count` is only ever cleared by
+   * noteAuthPass, and noteAuthPass can never run, because every door calls
+   * this function BEFORE comparing the code. Five wrong guesses meant the
+   * right code was never compared again for the life of the process.
+   *
+   * On the awards door that bricks the Judge Advisor's tablet for the weekend:
+   * no winner can be staged and none can be revealed, and the only recovery is
+   * a desk restart, which rotates every session token and signs every console
+   * out mid-show. Under venue NAT every phone shares one source address, so a
+   * spectator idly guessing the remote's PIN could take the desk crew's own
+   * remote down with them.
+   *
+   * Serving the lockout hands back a fresh budget of guesses. The escalation
+   * moves to `rounds`, which survives the reset, so each successive lockout
+   * for the same address is still twice as long as the one before it.
+   */
   const authBlocked = (addr: string, door = 'desk'): boolean => {
     const rec = authFails.get(failKey(door, addr));
     if (!rec) return false;
-    return rec.blockedUntil > Date.now() || rec.count + rec.inflight >= FAIL_LIMIT;
+    const now = Date.now();
+    if (rec.blockedUntil && rec.blockedUntil <= now) {
+      rec.count = 0;
+      rec.blockedUntil = 0;
+    }
+    if (rec.blockedUntil > now) return true;
+    return rec.count + rec.inflight >= FAIL_LIMIT;
   };
 
   /** Reserve a guessing slot, SYNCHRONOUSLY, before any await. Every reserve
    *  is resolved by exactly one of noteAuthFail / noteAuthPass / authRelease. */
   const authReserve = (addr: string, door = 'desk'): void => {
     const k = failKey(door, addr);
-    const rec = authFails.get(k) ?? { count: 0, blockedUntil: 0, inflight: 0 };
+    const rec = authFails.get(k) ?? { count: 0, blockedUntil: 0, inflight: 0, rounds: 0 };
     rec.inflight += 1;
     authFails.set(k, rec);
   };
@@ -396,16 +434,21 @@ export function startServer(opts: ServerOpts) {
 
   function noteAuthFail(addr: string, door = 'desk'): void {
     const k = failKey(door, addr);
-    const rec = authFails.get(k) ?? { count: 0, blockedUntil: 0, inflight: 0 };
+    const rec = authFails.get(k) ?? { count: 0, blockedUntil: 0, inflight: 0, rounds: 0 };
     // Drop the reservation the async doors took; the sync paths (header PIN,
     // WS) never reserved, so the clamp keeps this safe for them too.
     rec.inflight = Math.max(0, rec.inflight - 1);
     rec.count += 1;
     if (rec.count >= FAIL_LIMIT) {
-      const ms = Math.min(LOCKOUT_BASE_MS * 2 ** (rec.count - FAIL_LIMIT), LOCKOUT_MAX_MS);
+      // Counted in ROUNDS, not in total failures. The old form read
+      // `2 ** (count - FAIL_LIMIT)`, which is always 2**0: count can never get
+      // past the limit, because every door refuses at it. The doubling this
+      // line documents had never once happened.
+      rec.rounds += 1;
+      const ms = Math.min(LOCKOUT_BASE_MS * 2 ** (rec.rounds - 1), LOCKOUT_MAX_MS);
       rec.blockedUntil = Date.now() + ms;
       console.warn(`[auth] ${door} door: ${addr} locked out for ${Math.round(ms / 1000)}s ` +
-        `after ${rec.count} failed attempts`);
+        `after ${rec.count} failed attempts (round ${rec.rounds})`);
     }
     authFails.set(k, rec);
   }

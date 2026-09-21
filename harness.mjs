@@ -6,11 +6,53 @@
  * The bridge itself never touches these control endpoints. This is a separate
  * client standing in for the volunteers who would normally drive them.
  *
- *   node harness.mjs
+ * IT WRITES TO THE ARENA. It refuses to run unless it is pointed at loopback
+ * and armed with an explicit flag, and it is held out of the volunteer payload
+ * by tools/launcher/build.ps1. Never run it against an event arena.
+ *
+ *   node harness.mjs --drive-a-dev-arena
  */
 import { WebSocket } from 'ws';
 
 const ARENA = process.env.ARENA ?? 'localhost:8080';
+
+/*
+ * This script WRITES to Cheesy Arena. It bypasses stations, starts the match,
+ * injects scoring and commits a result into the event database and the
+ * rankings. It exists to drive a `cheesy-arena -dev` build on this machine so
+ * the bridge can be watched end to end, and the content desk's own bridge
+ * never touches any of these endpoints.
+ *
+ * Two guards, because the failure is unrecoverable and the instruction to run
+ * it used to sit on an event-day checklist. It refuses unless it is pointed at
+ * loopback, and refuses unless a human typed a flag that cannot be arrived at
+ * by accident. A crew member on the field network who runs `node harness.mjs`
+ * now gets a paragraph instead of a fabricated Qualification result.
+ */
+const HOST = ARENA.replace(/^\w+:\/\//, '').split(':')[0].toLowerCase();
+const LOOPBACK = HOST === 'localhost' || HOST === '127.0.0.1' || HOST === '::1'
+  || HOST === '[::1]';
+const ARMED = process.argv.includes('--drive-a-dev-arena');
+if (!LOOPBACK || !ARMED) {
+  console.error(`
+This is not a test client. It drives Cheesy Arena as the scorekeeper and the
+referees: it bypasses all six stations, starts the match, injects scoring, and
+commits a result into the event database and the rankings.
+
+  ARENA is "${ARENA}" (host "${HOST}") -> ${LOOPBACK ? 'loopback, ok' : 'REFUSED: not loopback'}
+  --drive-a-dev-arena              -> ${ARMED ? 'given' : 'REFUSED: not given'}
+
+Run it only against a cheesy-arena -dev build on this machine:
+
+  node harness.mjs --drive-a-dev-arena
+
+To watch the desk's bridge with no arena at all, which is what you almost
+certainly want at an event:
+
+  npm run fake-arena
+`);
+  process.exit(2);
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const open = url => new Promise((res, rej) => {
   const ws = new WebSocket(url);

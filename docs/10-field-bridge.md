@@ -206,7 +206,10 @@ Good for catching a regression in September without waiting on the next chance a
 - [x] Run the whole ingest against a local `cheesy-arena -dev` instance through a real match
 - [x] Repeatable offline regression check (`npm run fake-arena` + `npm run validate:offline`) that
       exercises the same client, allowlist, and adapter without needing a live Cheesy Arena build
-- [ ] Re-run `harness.mjs` against the actual offseason build being used at the event, in case it
+- [ ] Re-run `harness.mjs` against a local `cheesy-arena -dev` build of the actual
+      offseason source being used at the event, on a developer machine and never on
+      the field network. It writes: it bypasses stations, starts the match and commits
+      a result. It refuses to run against anything but loopback for that reason. In case it
       differs from `main`
 - [x] Unit test asserting the endpoint allowlist (`cheesy.test.ts`: refuses control sockets,
       permits only the listener sockets, refuses REST paths outside the read allowlist). It fails
