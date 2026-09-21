@@ -84,18 +84,32 @@ h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
 .vlink:hover { color: var(--text); }
 .vlink:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
 
-.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
-  gap: 20px; align-items: start; }
-/* Wide monitors get their whitespace back: the show column flows into two
-   real columns, sections unbroken. Small laptops collapse to one. */
-/* Column WIDTH, not column count: multicol fits as many 460px show columns
-   as the monitor actually has: one on a laptop, two at 1600, three at 2400,
-   four on an ultrawide. No breakpoints to outgrow, no dead side margins. */
-@media (min-width: 1150px) {
-  .grid > div:first-child { columns: 460px; column-gap: 20px; }
-  .grid > div:first-child > section { break-inside: avoid; }
-}
-@media (max-width: 940px) { .grid { grid-template-columns: 1fr; } }
+/*
+ * ONE flow of cards, not a show column beside a sidebar.
+ *
+ * It used to be a two-column grid: the show controls on the left, flowing
+ * into as many 460px columns as fit, and everything else stacked in a fixed
+ * 320-400px sidebar on the right. That sidebar is eleven sections tall and
+ * the left side balances itself short, so the two never came close to the
+ * same height. Measured at 2000x1200: the page ran 5049px, the sidebar 4788
+ * of it, and the left region's 1528px of width sat empty for very nearly
+ * three thousand pixels. Most of the console was purple.
+ *
+ * Every section here is an independent card, so they can all share one
+ * multicolumn flow and balance across whatever width the monitor actually
+ * has. `display: contents` on the two wrappers keeps the markup and the
+ * reading order (show controls first, the rest after) while letting their
+ * children join that flow.
+ *
+ * Sized by column WIDTH rather than a count, which is what makes this hold at
+ * any size, ratio or zoom without a single breakpoint: the browser fits as
+ * many 400px columns as there is room for, and a zoom level is just a
+ * narrower viewport in CSS pixels. One column on a phone or at 200%, two on a
+ * laptop, four at 1920, six on an ultrawide.
+ */
+.grid { columns: 400px; column-gap: 20px; }
+.grid > div { display: contents; }
+.grid > div > section, .grid > div > details.group { break-inside: avoid; }
 /* Collapsible groups for the tools that are not the show: field-down kit and
    setup. Native details, keyboard-free of charge. */
 details.group { margin-bottom: 20px; }
@@ -282,7 +296,19 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 #cueList .cue { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px 8px; align-items: center; padding: 8px 10px; }
 #cueList .cue > span:first-child { min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 1500px) {
+/*
+ * A CONTAINER query, not a viewport one.
+ *
+ * This used to ask how wide the window was, which stopped being the right
+ * question the moment the console became one flow of cards: a cue row now
+ * sits in a 400px column whether the monitor is 1400px or 3000px wide, so a
+ * window-based rule left the row cramped on exactly the big screens it was
+ * meant to help. Asking the list how wide IT is answers correctly at every
+ * window size, aspect ratio and zoom level, because all three come down to
+ * the same thing here: how much room this column actually got.
+ */
+#cueList { container-type: inline-size; }
+@container (max-width: 430px) {
   #cueList .cue { grid-template-columns: 1fr 1fr; }
   #cueList .cue > span:first-child { grid-column: 1 / -1; }
 }
