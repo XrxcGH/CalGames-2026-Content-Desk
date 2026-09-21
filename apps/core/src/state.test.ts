@@ -555,3 +555,37 @@ test('the score the FIELD posted survives everything that recomputes', () => {
   }));
   assert.equal(s.score.red.total, 10, 'and the new match computes its own total again');
 });
+
+test('a hold on the Final screen does not survive into the next match', () => {
+  /*
+   * Every other screen a producer holds still means something when the next
+   * match loads: the arcade bumper, a sponsor, the explainer. The Final screen
+   * does not, because match.loaded resets the score in the same breath. The
+   * held screen repainted itself as a 0-0 tie, under the new match's team
+   * numbers, and sat on program and every venue TV looking like a match that
+   * had just been played and ended level.
+   */
+  let s = initialState();
+  s = reduce(s, ev('match.loaded', T0, { id: 'q1', displayName: 'Q1', red: [], blue: [] }));
+  s = reduce(s, ev('match.end', T0 + 1));
+  s = reduce(s, ev('match.score_posted', T0 + 2, { red: { score: 88 }, blue: { score: 74 } }));
+
+  // The producer takes the Final screen by hand and holds it while the
+  // announcer talks through the result.
+  s = reduce(s, ev('screen.change', T0 + 3, { screen: 'score' }));
+  assert.equal(s.screen, 'score');
+  assert.equal(s.screenHold, true);
+
+  // The next match loads underneath them.
+  s = reduce(s, ev('match.loaded', T0 + 4, { id: 'q2', displayName: 'Q2', red: [], blue: [] }));
+  assert.notEqual(s.screen, 'score',
+    'the Final screen cannot show a result for a match nobody has played');
+  assert.equal(s.screen, 'overview');
+  assert.equal(s.screenHold, false, 'and the hold goes with it');
+
+  // A hold on anything else is still the producer's to keep.
+  s = reduce(s, ev('screen.change', T0 + 5, { screen: 'arcade' }));
+  s = reduce(s, ev('match.loaded', T0 + 6, { id: 'q3', displayName: 'Q3', red: [], blue: [] }));
+  assert.equal(s.screen, 'arcade', 'an arcade hold still means something next match');
+  assert.equal(s.screenHold, true);
+});

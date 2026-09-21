@@ -785,3 +785,57 @@ test('a reconnect echo of matchLoad in the post-score gap does not wipe the scor
   assert.equal(bus.recent.filter(e => e.type === 'match.loaded').length, loadsBefore + 1,
     'a flagged replay is a real re-run and must reset');
 });
+
+test('a desk that restarts mid-match picks the match up where it is', () => {
+  /*
+   * #matchState starts at PreMatch, so a desk that connects during teleop
+   * sees its first frame as a transition into TeleopPeriod. The teleop arm
+   * only re-anchors when it follows auto or the pause, and the start arm only
+   * fires for StartMatch and AutoPeriod, so nothing emitted match.start: the
+   * clock sat dead at 0:00 and program held the alliance overview for the
+   * rest of the match. A restart during the one stretch of the day that
+   * cannot be paused is exactly when a restart happens.
+   */
+  const bus = new EventBus();
+  const seen: string[] = [];
+  bus.subscribe(ev => seen.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  // The field is 42 seconds into teleop when the desk comes back.
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 42 });
+
+  assert.equal(seen.filter(t => t === 'match.start').length, 1,
+    'the match is running, so the desk says so');
+  assert.ok(bus.state.matchStartedAt !== null, 'and the clock is anchored');
+
+  // Back-dated to the field's own match time, not restarted at zero in front
+  // of the hall, and not re-anchored to the top of teleop either.
+  const age = Date.now() - (bus.state.matchStartedAt ?? 0);
+  assert.ok(age >= 41_000 && age <= 45_000,
+    `the clock picks up ~42s in, not at 0:00 (got ${Math.round(age / 1000)}s)`);
+  assert.equal(seen.filter(t => t === 'match.teleop_start').length, 0,
+    'the teleop re-anchor exists to guess an unknown pause; here the field '
+    + 'told us the time, so guessing would throw that away');
+
+  // And it still only fires once as the match plays out.
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+  assert.equal(seen.filter(t => t === 'match.start').length, 1);
+  assert.equal(seen.filter(t => t === 'match.end').length, 1);
+});
+
+test('joining at the normal time is unchanged', () => {
+  // The late-join path must not double-fire on an ordinary match.
+  const bus = new EventBus();
+  const seen: string[] = [];
+  bus.subscribe(ev => seen.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+  adapter.ingest('matchTime', { MatchState: MatchState.PausePeriod, MatchTimeSec: 16 });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 20 });
+
+  assert.equal(seen.filter(t => t === 'match.start').length, 1, 'exactly one start');
+  assert.equal(seen.filter(t => t === 'match.teleop_start').length, 1, 'exactly one re-anchor');
+});

@@ -121,6 +121,22 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
     switch (ev.type) {
       case 'match.loaded': {
         const p = ev.payload as DeskState['match'];
+        /*
+         * A hold on the Final screen is a hold on a RESULT, and the result has
+         * just been replaced by a match nobody has played.
+         *
+         * Every other screen a producer holds still means something when the
+         * next match loads: the arcade bumper, a sponsor, the explainer. The
+         * Final screen does not. The score resets to zero in this same case,
+         * so the held screen repainted itself as a 0-0 tie, with both
+         * alliances' new team numbers under it, and sat there on program and
+         * every venue TV looking like a played match that ended level.
+         *
+         * Released rather than repainted, the same way clearing an award or a
+         * slide releases a hold on those screens a few cases below: the thing
+         * being held no longer exists, so the hold cannot.
+         */
+        const heldOnAResult = state.screenHold && state.screen === 'score';
         return {
           ...state,
           match: p,
@@ -149,7 +165,8 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           // socket, and a bad entry here puts an "S" on the wrong team.
           surrogates: (p?.surrogates ?? [])
             .map(Number).filter(n => Number.isInteger(n) && n > 0),
-          screen: auto(state, 'overview'),
+          screen: heldOnAResult ? 'overview' : auto(state, 'overview'),
+          ...(heldOnAResult ? { screenHold: false } : {}),
         };
       }
 

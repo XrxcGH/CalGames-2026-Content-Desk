@@ -368,6 +368,49 @@ export class CheesyAdapter {
     const previous = this.#matchState;
     this.#matchState = state;
 
+    /*
+     * Joining a match already in progress.
+     *
+     * #matchState starts at PreMatch, so a desk that connects mid-match sees
+     * its first frame as a transition INTO whatever is running. The auto and
+     * start arms below only fire for AutoPeriod and StartMatch, and the
+     * teleop arm only re-anchors when it follows auto or the pause, so a desk
+     * restarted during teleop never emitted match.start at all: #started
+     * stayed false, the reducer never got a matchStartedAt, the clock sat
+     * dead at 0:00 and program held the alliance overview for the rest of the
+     * match. That is a restart during the one part of the day nobody can
+     * pause, which is exactly when a restart happens.
+     *
+     * Back-dated by the field's own MatchTimeSec so the clock picks up where
+     * the match actually is rather than restarting it at zero in front of the
+     * hall. Without a usable time the event still fires: a clock that is a
+     * few seconds out beats a screen frozen on the wrong graphic.
+     */
+    const joinedLate = !this.#started
+      && (state === MatchState.AutoPeriod
+        || state === MatchState.PausePeriod
+        || state === MatchState.TeleopPeriod)
+      && previous !== MatchState.StartMatch;
+    if (joinedLate) {
+      const elapsed = Number(msg.MatchTimeSec);
+      const ts = Number.isFinite(elapsed) && elapsed > 0
+        ? Date.now() - elapsed * 1000
+        : Date.now();
+      this.#started = true;
+      this.#emit({ type: 'match.start', ts });
+      console.log('[cheesy] joined a match already running '
+        + `(${Number.isFinite(elapsed) ? Math.round(elapsed) : '?'}s in); clock re-anchored`);
+      /*
+       * Deliberately no match.teleop_start here, even when joining during
+       * teleop. That event exists to re-anchor the clock after a pause whose
+       * length the desk could not know, by treating "now" as the start of
+       * teleop. On a late join we have something better: MatchTimeSec is the
+       * field's own match time, so the anchor above is already correct and
+       * firing the re-anchor would throw it away and restart the clock at the
+       * top of teleop. Measured: it turned a 42-second join into 20.
+       */
+    }
+
     switch (state) {
       case MatchState.StartMatch:
       case MatchState.AutoPeriod:
