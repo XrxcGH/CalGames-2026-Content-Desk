@@ -121,8 +121,11 @@ export function drawCard(ctx, card) {
   for (let x = S / 2 - 210; x < S / 2 + 210; x += 14) ctx.fillRect(x, 196, 2, 5);
 
   // ---- score blocks -----------------------------------------------------
-  const won = (card.red?.score ?? 0) > (card.blue?.score ?? 0) ? 'red'
-    : (card.blue?.score ?? 0) > (card.red?.score ?? 0) ? 'blue' : 'tie';
+  // The field's answer when it gave one. Falling back to the totals keeps a
+  // desk with no field working, and that case is already stamped unofficial.
+  const won = card.winner ?? (
+    (card.red?.score ?? 0) > (card.blue?.score ?? 0) ? 'red'
+      : (card.blue?.score ?? 0) > (card.red?.score ?? 0) ? 'blue' : 'tie');
 
   const blockY = 240, blockH = 300, gap = 24;
   const blockW = (S - 120 - gap) / 2;
@@ -188,6 +191,18 @@ export function drawCard(ctx, card) {
 
   side(60, card.red, p.red, 'Red', won === 'red');
   side(60 + blockW + gap, card.blue, p.blue, 'Blue', won === 'blue');
+
+  // Why a level score still has a winner, in the arena's own wording. Only
+  // when the field gave one: a reason the desk invented would be worse than
+  // the silence it replaces.
+  if (card.tiebreak && !card.estimated) {
+    ctx.save();
+    ctx.fillStyle = p.dim;
+    ctx.textAlign = 'center';
+    ctx.font = cond(700)(22);
+    trackedCenter(ctx, card.tiebreak, S / 2, blockY + blockH + 34, 3);
+    ctx.restore();
+  }
 
   // ---- vertical rhythm below the score blocks ---------------------------
   // Three equal optical gaps: blocks to team list, team list to RP badges,
@@ -309,6 +324,18 @@ export function cardFromState(state, opts = {}) {
     // totalConfidence, not confidence: this card shows the FINAL SCORE, and
     // an official total posted over a typed-in breakdown is not a guess.
     estimated: state.totalConfidence === 'estimated',
+    /*
+     * The FIELD's verdict, not a comparison of the two totals.
+     *
+     * In a playoff, comparing totals is wrong twice over: a level score is
+     * resolved on major fouls, then auto fuel, then tower points, and a
+     * disqualification is recorded without touching the score. This card is
+     * the one that gets posted, so it printed TIE on a match the bracket had
+     * already advanced someone out of, or WINNER under the alliance that had
+     * just been disqualified.
+     */
+    winner: state.officialWinner ?? null,
+    tiebreak: state.tiebreakReason ?? null,
     red: side('red'),
     blue: side('blue'),
     footer: opts.footer ?? 'calgames.org',

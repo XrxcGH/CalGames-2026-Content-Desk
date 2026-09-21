@@ -1095,6 +1095,20 @@
   display: flex; justify-content: center; gap: 16px;
 }
 .final-cards[hidden] { display: none; }
+
+/* Why a level score still has a winner: "TIEBREAK: AUTO FUEL".
+   Centred across both plates for the same reason the cards are, and sat
+   BELOW them rather than in the grid, because .final is a positioned box.
+   Quiet type: the plates and the gold cap carry the result, this carries the
+   footnote, and a footnote that shouts competes with the thing it explains. */
+.final-tiebreak {
+  position: absolute; bottom: 132px; left: 0; right: 0;
+  text-align: center;
+  font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
+  letter-spacing: .18em; text-indent: .18em; text-transform: uppercase;
+  color: var(--cg-white-dim);
+}
+.final-tiebreak[hidden] { display: none; }
 .fc-chip {
   font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
   letter-spacing: .12em; text-transform: uppercase;

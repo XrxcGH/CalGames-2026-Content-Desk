@@ -42,6 +42,11 @@ export interface ScoreSummary {
   TraversalBonusRankingPoint?: boolean;
   BonusRankingPoints?: number;
   PlayoffDq?: boolean;
+  /**
+   * Major fouls the OPPONENT committed. The first playoff tiebreak criterion,
+   * ahead of auto fuel and tower points, and the desk had no field for it.
+   */
+  NumOpponentMajorFouls?: number;
 }
 
 /** field/arena_notifiers.go (audienceAllianceScoreFields) */
@@ -97,11 +102,13 @@ export interface CheesyMatch {
   /**
    * Seed numbers, playoffs only, 0 during qualification.
    *
-   * Only three robots ever take the field, so these slots stay at three. A
-   * playoff alliance of four carries a backup, and the fourth member is only
-   * knowable by joining these seeds against the alliance rosters from
-   * selection. That join is what lets a playoff graphic name the whole
-   * alliance rather than just whoever is on the field this match.
+   * Only three robots ever take the field, so these slots stay at three. The
+   * rest of a playoff alliance, the backup included, comes from matchLoad's
+   * RedOffFieldTeams / BlueOffFieldTeams, which the arena resolves for us.
+   * This comment used to say the fourth member was knowable only by joining
+   * these seeds against the rosters from alliance selection; that is not true
+   * against this build, and believing it left a desk that restarted through
+   * selection unable to name the backup at all.
    */
   PlayoffRedAlliance?: number;
   PlayoffBlueAlliance?: number;
@@ -113,8 +120,28 @@ export interface MatchLoadMessage {
   Teams?: Record<string, CheesyTeam | null>;
   Rankings?: Record<string, number>;
   IsReplay?: boolean;
+  /**
+   * What the break that is starting is called, and what follows it. Set by
+   * the arena when a scheduled break or an ad-hoc timeout begins, alongside
+   * the state flip to TimeoutActive.
+   */
   BreakDescription?: string;
   BreakNextMatchName?: string;
+  /**
+   * The alliance members NOT on the field this playoff match, resolved by
+   * the arena from GetOffFieldTeamIds and sent as whole team records.
+   *
+   * This is how a playoff alliance's fourth robot is actually knowable. The
+   * desk's types asserted it could only be found by joining playoff seeds
+   * against the rosters from alliance selection, which is not true against
+   * this build and left a desk that restarted through selection unable to
+   * name the backup at all. On the day an alliance subs its backup in, the
+   * graphic named three robots and left out the one about to play.
+   *
+   * Do not assume exactly one: model.Alliance.TeamIds is not capped at four.
+   */
+  RedOffFieldTeams?: (CheesyTeam | null)[];
+  BlueOffFieldTeams?: (CheesyTeam | null)[];
 }
 
 /**
@@ -189,12 +216,45 @@ export interface MatchTimingMessage {
 }
 
 export interface ScorePostedMessage {
-  MatchType?: string;
   Match?: CheesyMatch;
   RedScoreSummary?: ScoreSummary;
   BlueScoreSummary?: ScoreSummary;
   RedRankingPoints?: number;
   BlueRankingPoints?: number;
+  /**
+   * THE ARENA'S VERDICT, which the desk used to work out for itself by
+   * comparing the two totals.
+   *
+   * Comparing totals is wrong twice over in a playoff. Every double
+   * elimination match is created with useTiebreakCriteria, so a level score
+   * is resolved on major fouls, then auto fuel, then tower points, and the
+   * bracket advances the winner. And CorrectPlayoffScore sets PlayoffDq from
+   * a red card WITHOUT touching Score, so a disqualified alliance can hold
+   * the higher number.
+   *
+   * Either way the desk printed "TIE" on the audience screen, or "WINNER"
+   * under the alliance that was just disqualified, while the announcer and
+   * the bracket said otherwise. These two booleans are the answer, and they
+   * have been on the wire the whole time.
+   */
+  RedWon?: boolean;
+  BlueWon?: boolean;
+  /**
+   * Why, in the arena's own words: "TIEBREAK: MAJOR FOULS", "TIEBREAK: AUTO
+   * FUEL", "TIEBREAK: TOWER POINTS", or "TRUE TIE". Empty when the match was
+   * decided on points. Exactly what the hall wants to know.
+   */
+  TiebreakReason?: string;
+  /** Whether the event has the traversal bonus switched on at all. */
+  TraversalBonusEnabled?: boolean;
+  /** Series standing for a playoff matchup. */
+  RedWins?: number;
+  BlueWins?: number;
+  /** Where each alliance goes next, in the arena's bracket wording. */
+  RedDestination?: string;
+  BlueDestination?: string;
+  RedOffFieldTeamIds?: number[];
+  BlueOffFieldTeamIds?: number[];
 }
 
 /**

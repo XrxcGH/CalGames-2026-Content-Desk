@@ -146,6 +146,11 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         return {
           ...state,
           match: p,
+          // The last match's verdict is not this match's. Cleared with the
+          // score, or the Final screen would carry a stale TIEBREAK line
+          // into a match nobody has played.
+          officialWinner: null,
+          tiebreakReason: null,
           // Which run of this match is about to be played. The arena replays a
           // committed match under the same id, and the publish queue has to
           // tell that run from the one it threw away.
@@ -270,8 +275,19 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'match.score_posted': {
         const p = (ev.payload ?? {}) as Partial<Record<Alliance, {
           score?: unknown; officialRp?: AllianceScore['officialRp'];
-        }>>;
-        let s: DeskState = { ...state, scorePostedAt: ev.ts, screen: auto(state, 'score') };
+        }>> & { winner?: unknown; tiebreak?: unknown };
+        // The field's verdict, which is not the same question as which total
+        // is larger: a playoff tie is resolved on major fouls, then auto
+        // fuel, then tower points, and a disqualification never touches the
+        // score. Only adopted when the field actually said.
+        const winner = p.winner === 'red' || p.winner === 'blue' || p.winner === 'tie'
+          ? p.winner : null;
+        let s: DeskState = {
+          ...state, scorePostedAt: ev.ts, screen: auto(state, 'score'),
+          ...(winner ? { officialWinner: winner } : {}),
+          tiebreakReason: typeof p.tiebreak === 'string' && p.tiebreak
+            ? p.tiebreak : state.tiebreakReason,
+        };
         let official = false;
         for (const side of ['red', 'blue'] as Alliance[]) {
           // The committed bonuses, which are not always the last realtime

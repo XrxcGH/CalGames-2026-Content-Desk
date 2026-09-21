@@ -1241,3 +1241,133 @@ test('each display socket registers under its own id, because registering is a w
     await new Promise(r => server.close(r));
   }
 });
+
+test('a tiebroken playoff names the winner the bracket advanced, not "TIE"', () => {
+  /*
+   * Every double elimination match is created with useTiebreakCriteria, so a
+   * level score is resolved on major fouls, then auto fuel, then tower
+   * points, and the arena advances that alliance. The desk worked its verdict
+   * out by comparing the two totals, so it printed TIE on the audience screen
+   * and on the card people post, while the announcer and the bracket said Red
+   * advances.
+   *
+   * The arena has been sending RedWon, BlueWon and TiebreakReason on every
+   * posted score the whole time.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', { Match: { Id: 7, LongName: 'Match 7', Type: 3 } });
+
+  adapter.ingest('scorePosted', {
+    Match: { Id: 7 },
+    RedScoreSummary: { Score: 140, AutoFuelPoints: 20 },
+    BlueScoreSummary: { Score: 140, AutoFuelPoints: 12 },
+    RedWon: true, BlueWon: false,
+    TiebreakReason: 'TIEBREAK: AUTO FUEL',
+  });
+
+  assert.equal(bus.state.score.red.total, bus.state.score.blue.total, 'the totals ARE level');
+  assert.equal(bus.state.officialWinner, 'red', 'and red still won');
+  assert.equal(bus.state.tiebreakReason, 'TIEBREAK: AUTO FUEL');
+});
+
+test('a disqualified alliance does not get "winner" for holding the higher score', () => {
+  // CorrectPlayoffScore sets PlayoffDq from a red card WITHOUT touching Score,
+  // and a DQ beats any score. Comparing totals put WINNER under the alliance
+  // that had just been disqualified.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', { Match: { Id: 8, LongName: 'Match 8', Type: 3 } });
+
+  adapter.ingest('scorePosted', {
+    Match: { Id: 8 },
+    RedScoreSummary: { Score: 200, PlayoffDq: true },
+    BlueScoreSummary: { Score: 150 },
+    RedWon: false, BlueWon: true,
+  });
+
+  assert.ok(bus.state.score.red.total > bus.state.score.blue.total, 'red has more points');
+  assert.equal(bus.state.officialWinner, 'blue', 'and blue won the match');
+});
+
+test('a genuine tie is still a tie, and a new match clears the verdict', () => {
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', { Match: { Id: 9, LongName: 'Qualification 9', Type: 2 } });
+  adapter.ingest('scorePosted', {
+    Match: { Id: 9 },
+    RedScoreSummary: { Score: 100 }, BlueScoreSummary: { Score: 100 },
+    RedWon: false, BlueWon: false, TiebreakReason: 'TRUE TIE',
+  });
+  assert.equal(bus.state.officialWinner, 'tie');
+  assert.equal(bus.state.tiebreakReason, 'TRUE TIE');
+
+  // The last match's verdict is not this match's.
+  adapter.ingest('matchLoad', { Match: { Id: 10, LongName: 'Qualification 10', Type: 2 } });
+  assert.equal(bus.state.officialWinner, null);
+  assert.equal(bus.state.tiebreakReason, null);
+});
+
+test('a playoff alliance names its backup, from the field rather than a join', () => {
+  /*
+   * The arena resolves the off-field members on every playoff matchLoad and
+   * sends them as whole team records. The desk dropped them and believed the
+   * fourth member could only be found by joining playoff seeds against the
+   * rosters observed during alliance selection, so a desk that restarted
+   * through selection could not name the backup at all, and on the day an
+   * alliance subbed one in the graphic named three robots and left out the
+   * one about to play.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', {
+    Match: { Id: 11, LongName: 'Match 11', Type: 3, Red1: 254, Red2: 846, Red3: 100 },
+    RedOffFieldTeams: [{ Id: 1678, Nickname: 'Citrus Circuits' }],
+    BlueOffFieldTeams: [{ Id: 971, Nickname: 'Spartan Robotics' }, null],
+  });
+
+  assert.deepEqual(bus.state.match?.redOffField,
+    [{ number: 1678, name: 'Citrus Circuits' }]);
+  assert.deepEqual(bus.state.match?.blueOffField?.map(t => t.number), [971],
+    'a null slot is not a team zero');
+
+  // Qualification matches have nobody off the field, and must not carry an
+  // empty array that a surface would render as a heading with nothing under it.
+  adapter.ingest('matchLoad', { Match: { Id: 12, LongName: 'Qualification 12', Type: 2 } });
+  assert.equal(bus.state.match?.redOffField, undefined);
+});
+
+test('a break says what it is, when it ends, and what comes after', () => {
+  /*
+   * Starting a scheduled break or a timeout sets breakDescription and
+   * breakNextMatchName, fires matchLoad with both, fires matchTiming with the
+   * new TimeoutDurationSec, and only then flips the state. The desk read none
+   * of it, so through lunch, the awards break and every field repair the
+   * arena's own audience display showed the name, the next match and a live
+   * countdown while the venue screens and the stream showed an undescribed
+   * "timeout" with no clock.
+   */
+  const bus = new EventBus();
+  const seen: DeskEvent[] = [];
+  bus.subscribe(ev => seen.push(ev));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchTiming', {
+    AutoDurationSec: 20, TransitionShiftDurationSec: 10, ShiftDurationSec: 25,
+    EndgameDurationSec: 30, TimeoutDurationSec: 900,
+  });
+  adapter.ingest('matchLoad', {
+    Match: { Id: 20, LongName: 'Qualification 20', Type: 2 },
+    BreakDescription: 'Awards Break',
+    BreakNextMatchName: 'Match 11',
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.TimeoutActive });
+
+  const brk = seen.filter(e => e.type === 'break.started').at(-1)?.payload as {
+    kind: string; label?: string; nextMatch?: string; seconds?: number;
+  };
+  assert.equal(brk.label, 'Awards Break');
+  assert.equal(brk.nextMatch, 'Match 11');
+  assert.equal(brk.seconds, 900);
+});

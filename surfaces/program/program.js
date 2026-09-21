@@ -436,15 +436,42 @@ function paintFinal(state) {
    * Unofficial gets its own words and no gold cap: the cap is the thing people
    * photograph.
    */
-  $('finalRedSide').toggleAttribute('data-won', !estimated && r > b);
-  $('finalBlueSide').toggleAttribute('data-won', !estimated && b > r);
-  const verdict = (mine, theirs) => {
-    if (mine === theirs) return estimated ? 'Level, unofficial' : 'Tie';
-    if (mine < theirs) return '';
-    return estimated ? 'Leading, unofficial' : 'Winner';
+  /*
+   * The FIELD's answer when it has given one, and only then our arithmetic.
+   *
+   * Comparing the two totals is wrong twice over in a playoff. Every double
+   * elimination match applies tiebreak criteria, so a level score is resolved
+   * on major fouls, then auto fuel, then tower points, and the bracket
+   * advances that alliance. And a disqualification is recorded without
+   * touching the score, so a DQ'd alliance can hold the higher number. Either
+   * way this printed "Tie" in front of the hall, or "Winner" under the
+   * alliance that had just been disqualified, while the announcer and the
+   * bracket said the opposite.
+   *
+   * The fallback stays for a desk with no field attached, where it is already
+   * labelled unofficial and nobody is being told it is official.
+   */
+  const official = !estimated ? state.officialWinner : null;
+  const redWon = official ? official === 'red' : (!estimated && r > b);
+  const blueWon = official ? official === 'blue' : (!estimated && b > r);
+  const level = official ? official === 'tie' : r === b;
+
+  $('finalRedSide').toggleAttribute('data-won', redWon);
+  $('finalBlueSide').toggleAttribute('data-won', blueWon);
+  const verdict = (won) => {
+    if (won) return estimated ? 'Leading, unofficial' : 'Winner';
+    if (level) return estimated ? 'Level, unofficial' : 'Tie';
+    return '';
   };
-  $('finalRedVerdict').textContent = verdict(r, b);
-  $('finalBlueVerdict').textContent = verdict(b, r);
+  $('finalRedVerdict').textContent = verdict(redWon);
+  $('finalBlueVerdict').textContent = verdict(blueWon);
+
+  // Why a level score still has a winner. Only ever the field's wording, and
+  // only when the field gave one: inventing a reason would be worse than the
+  // silence it replaces.
+  const tb = !estimated ? state.tiebreakReason : null;
+  $('finalTiebreak').textContent = tb ?? '';
+  $('finalTiebreak').hidden = !tb;
   $('finalRedVerdict').dataset.est = String(estimated);
   $('finalBlueVerdict').dataset.est = String(estimated);
 }

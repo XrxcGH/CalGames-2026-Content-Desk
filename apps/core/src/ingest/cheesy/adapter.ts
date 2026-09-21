@@ -260,6 +260,11 @@ export class CheesyAdapter {
    * duplicate label and put the abandoned first run on the channel.
    */
   #runs = new Map<string, number>();
+  /** What the arena calls the break that is about to start, from matchLoad. */
+  #breakDescription = '';
+  #breakNextMatch = '';
+  /** The break's length, from matchTiming. Zero when the arena has not said. */
+  #timeoutSec = 0;
 
   constructor(opts: CheesyAdapterOpts) {
     this.#bus = opts.bus;
@@ -455,6 +460,10 @@ export class CheesyAdapter {
     // PauseDurationSec has no REBUILT counterpart: the desk's clock treats
     // teleop start as zero and never models the pause, so a change there
     // moves nothing on air.
+    // Not a mismatch, a fact: the arena sets this when a timeout begins, and
+    // it is the countdown the break card needs.
+    this.#timeoutSec = Math.max(0, msg.TimeoutDurationSec ?? 0);
+
     this.#timingMismatch = off.length ? off : null;
     if (off.length && !this.#timingWarned) {
       this.#timingWarned = true;
@@ -502,6 +511,12 @@ export class CheesyAdapter {
 
   #onMatchLoad(msg: MatchLoadMessage): void {
     const m = msg.Match ?? {};
+    // Held BEFORE the reconnect guards below, which return early. The arena
+    // sends these on the load that accompanies a timeout, and that load
+    // usually carries the same match id the desk already has, so anything
+    // read after the guards would never see a break at all.
+    this.#breakDescription = (msg.BreakDescription ?? '').trim();
+    this.#breakNextMatch = (msg.BreakNextMatchName ?? '').trim();
     const teamAt = (key: string, fallback: number | undefined): Team | null => {
       const t = msg.Teams?.[key];
       const number = t?.Id ?? fallback;
@@ -538,6 +553,28 @@ export class CheesyAdapter {
       ...((m.PlayoffBlueAlliance ?? 0) > 0 ? { blueAlliance: m.PlayoffBlueAlliance } : {}),
       ...(matchKind(m.Type) ? { kind: matchKind(m.Type)! } : {}),
     };
+
+    /*
+     * The rest of each playoff alliance: the members not on the field this
+     * match, which is where the backup robot lives.
+     *
+     * The arena resolves these for us on every playoff matchLoad. The desk
+     * used to believe the fourth member could only be found by joining
+     * playoff seeds against the rosters observed during alliance selection,
+     * so a desk that restarted through selection could not name the backup at
+     * all, and on the day an alliance subbed one in the graphic named three
+     * robots and left out the one about to play.
+     *
+     * Not capped at one: model.Alliance.TeamIds is not capped at four.
+     */
+    const offField = (list: MatchLoadMessage['RedOffFieldTeams']): Team[] =>
+      (list ?? [])
+        .filter((t): t is NonNullable<typeof t> => !!t?.Id)
+        .map(t => ({ number: t.Id!, name: t.Nickname ?? t.Name ?? '' }));
+    const redOff = offField(msg.RedOffFieldTeams);
+    const blueOff = offField(msg.BlueOffFieldTeams);
+    if (redOff.length) match.redOffField = redOff;
+    if (blueOff.length) match.blueOffField = blueOff;
 
     // Cheesy replays its matchLoad snapshot whenever a display (re)subscribes,
     // so a mid-match websocket reconnect delivers the SAME load again. Treating
@@ -675,7 +712,28 @@ export class CheesyAdapter {
         }
         break;
       case MatchState.TimeoutActive:
-        this.#emit({ type: 'break.started', payload: { kind: 'timeout' } });
+        /*
+         * The arena knows what this break IS, and says so.
+         *
+         * Starting a scheduled break or an ad-hoc timeout sets
+         * breakDescription and breakNextMatchName and fires matchLoad with
+         * both, along with the new TimeoutDurationSec on matchTiming, all
+         * before the state flips here. The desk read none of it and emitted a
+         * bare {kind:'timeout'}, so through lunch, the awards break and every
+         * field repair the arena's own audience display showed the break's
+         * name, the next match and a live countdown while the venue screens
+         * and the stream showed an undescribed "timeout" with no clock.
+         * Those are exactly the moments the room most needs telling.
+         */
+        this.#emit({
+          type: 'break.started',
+          payload: {
+            kind: 'timeout',
+            ...(this.#breakDescription ? { label: this.#breakDescription } : {}),
+            ...(this.#breakNextMatch ? { nextMatch: this.#breakNextMatch } : {}),
+            ...(this.#timeoutSec > 0 ? { seconds: this.#timeoutSec } : {}),
+          },
+        });
         break;
     }
   }
@@ -845,6 +903,26 @@ export class CheesyAdapter {
           rp: msg.BlueRankingPoints ?? 0,
           officialRp: bonusRp(msg.BlueScoreSummary),
         },
+        /*
+         * The arena's own verdict, which the desk used to work out by
+         * comparing the two totals. In a playoff that is wrong twice over.
+         *
+         * Every double elimination match is created with useTiebreakCriteria,
+         * so a level score is resolved on major fouls, then auto fuel, then
+         * tower points, and the bracket advances the winner. And
+         * CorrectPlayoffScore sets PlayoffDq from a red card WITHOUT touching
+         * Score, so a disqualified alliance can hold the higher number.
+         *
+         * Either way the desk printed TIE on the audience screen, or WINNER
+         * under the alliance that had just been disqualified, while the
+         * announcer and the bracket said otherwise.
+         */
+        winner: msg.RedWon === true ? 'red'
+          : msg.BlueWon === true ? 'blue'
+            : (msg.RedWon === false && msg.BlueWon === false) ? 'tie' : null,
+        // "TIEBREAK: AUTO FUEL", "TRUE TIE". Exactly what the hall wants to
+        // know, and the arena writes it for us.
+        tiebreak: (msg.TiebreakReason ?? '').trim() || null,
       },
     });
     // Standings and the remaining schedule both just changed. Pull them now

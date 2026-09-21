@@ -292,6 +292,17 @@ export interface MatchInfo {
    * CalGames", with a 0-0 score line and whoever was bypassed in.
    */
   kind?: 'test' | 'practice' | 'qualification' | 'playoff';
+  /**
+   * The alliance members NOT on the field this match: a playoff alliance's
+   * backup, and anyone else the captain is resting.
+   *
+   * The arena resolves this on every playoff matchLoad. It is the only
+   * reliable way to name a whole playoff alliance, and the desk was throwing
+   * it away in favour of a join against alliance selection that a restart
+   * could lose.
+   */
+  redOffField?: Team[];
+  blueOffField?: Team[];
 }
 
 /**
@@ -646,6 +657,19 @@ export interface DeskState {
    * channel was the run that was thrown away.
    */
   matchRun: number;
+  /**
+   * Who the FIELD says won, and why, when it has said.
+   *
+   * Never derived from the two totals, because in a playoff that is wrong
+   * twice over: a level score is resolved on major fouls, then auto fuel,
+   * then tower points, and a disqualification does not touch the score at
+   * all. Null until a score is posted, and for a desk running without a
+   * field, where the surfaces fall back to comparing totals and label the
+   * result unofficial anyway.
+   */
+  officialWinner: Alliance | 'tie' | null;
+  /** The arena's wording, e.g. "TIEBREAK: AUTO FUEL" or "TRUE TIE". */
+  tiebreakReason: string | null;
   /** The most recent event announcement, mirrored from Nexus. */
   announcement: { text: string; postedAt: number; from: string } | null;
   /** Live status card, or null. Operator-fired from the desk console. */
@@ -718,6 +742,8 @@ export const initialState = (): DeskState => ({
   upcoming: [],
   queueFrom: null,
   matchRun: 1,
+  officialWinner: null,
+  tiebreakReason: null,
   pace: { cycleSec: null, nextStartAt: null, behindMin: null, lastStartAt: null },
   nowQueuing: null,
   announcement: null,
