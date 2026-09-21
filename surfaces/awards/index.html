@@ -94,6 +94,11 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
    often than it is closed. */
 .lockbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin: 0 0 16px; }
+/* An author `display` beats the UA rule the `hidden` attribute relies on, so
+   this bar was on screen WHILE the page was locked: a "Lock this page" button
+   offering to do the thing already done, above a code prompt. The one control
+   on this tablet that protects the winners has to say which state it is in. */
+.lockbar[hidden] { display: none; }
 .lockbar .lock-why { flex: 1 1 250px; margin: 0; font-size: 13px; line-height: 1.5;
   color: var(--cg-white-dim); }
 .lock-note { font-size: 15px; line-height: 1.5; margin: 0 0 12px; color: var(--cg-gold); }
@@ -131,6 +136,14 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
 .aw-blurb { margin: 6px 0 8px; font-size: 16px; line-height: 1.5;
   color: var(--cg-white); border-left: 3px solid var(--cg-gold);
   padding-left: 12px; }
+/* A written line and a computed one are not the same claim, and the edge is
+   what carries the difference: solid gold for a line somebody approved,
+   dashed for one the desk worked out by itself. The note below spells it out,
+   because a border is not a sentence. */
+.aw-blurb[data-computed="true"] { border-left-style: dashed; }
+.aw-auto { display: block; margin-top: 4px; font-family: var(--font-cond);
+  font-weight: 700; font-size: 12px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--cg-white-dim); }
 .field-why { margin: 6px 0 0; font-size: 14px; line-height: 1.5;
   color: var(--cg-white-dim); }
 </style>
@@ -382,9 +395,26 @@ function awardCard(a, order, lastInDay) {
     if (order) head.append(el('span', 'aw-num', String(order)));
     head.append(el('h2', '', a.title));
     card.append(head);
-    // The line the hall actually sees, marked as such: the JA is proof-reading
-    // the broadcast here, not just the paperwork.
-    if (a.blurb) card.append(el('p', 'aw-blurb', a.blurb));
+    /*
+     * The line the hall actually sees, marked as such: the JA is proof-reading
+     * the broadcast here, not just the paperwork.
+     *
+     * `onAir`, not `blurb`. An award with no blurb still gets a plate line,
+     * computed from the first sentence of the definition, and this card used
+     * to show nothing at all in that case. The award most likely to have no
+     * blurb is a Judges' Award typed on the day, so the one line nobody had
+     * read was the one most likely to be wrong. Computed lines say so, so
+     * nobody reads this card as an approval.
+     */
+    if (a.onAir) {
+      const line = el('p', 'aw-blurb', a.onAir);
+      if (a.blurbComputed) {
+        line.dataset.computed = 'true';
+        line.append(el('span', 'aw-auto',
+          'taken from the definition, because no short line was written'));
+      }
+      card.append(line);
+    }
     card.append(el('p', 'aw-desc', a.description || ''));
 
     const state = el('div', 'aw-state');

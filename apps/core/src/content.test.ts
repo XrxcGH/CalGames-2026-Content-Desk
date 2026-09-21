@@ -143,3 +143,78 @@ test('uniqueSlug mints readable ids and never collides', () => {
   assert.equal(uniqueSlug('Team Spirit', taken), 'team-spirit-3');
   assert.equal(uniqueSlug('!!!', taken), 'item');
 });
+
+test('a burst of edits cannot quietly drop one of them', async () => {
+  /*
+   * The Judge Advisor reorders the ceremony with a pair of arrow buttons, and
+   * index.ts persists every change as an un-awaited `void content.set(...)`.
+   * Two presses inside one disk write is a double-click, not a stress test.
+   *
+   * Every save staged through a temp file with the same FIXED name and then
+   * renamed it into place. Rename is atomic against a READER and says nothing
+   * about a second writer: two overlapping saves write the one temp file, the
+   * first rename consumes it, and the second rename fails ENOENT on a path
+   * that no longer exists. That failure is caught and warned, which is the
+   * worst part: the route already answered 200, the page already repainted
+   * showing the award in its new place, and the edit reached no disk at all.
+   * Nobody finds out until the restart puts the old order back.
+   *
+   * So the assertion is on the warning. Content alone cannot see this: the
+   * surviving write is usually the right one, and the lost edit leaves no
+   * trace in the file it failed to become.
+   */
+  const dir = await scratch();
+  const warnings: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); };
+  try {
+    const config = fresh();
+    const content = new EventContent(dir);
+    await content.load();
+
+    const listOf = (n: number) => ({
+      list: Array.from({ length: n }, (_, i) => ({
+        id: `award-${i}`,
+        title: `Award number ${i} `.repeat(30).trim(),
+        description: `Why award ${i} exists. `.repeat(60).trim(),
+      })),
+    });
+
+    /*
+     * Fired with a gap, which is what makes this a race at all. Calling all
+     * of them in one synchronous pass would not: `set` mutates the in-memory
+     * overrides before its first await, so every writer would serialise the
+     * same final value and agree by accident. Real presses arrive a round
+     * trip apart, each starting a write while the one before is in flight.
+     * Descending sizes so the slowest write is also the earliest.
+     */
+    const pending: Promise<unknown>[] = [];
+    for (const n of [1500, 900, 400, 90, 12]) {
+      pending.push(content.set('awards', listOf(n), config));
+      await new Promise(r => setImmediate(r));
+    }
+    await Promise.all(pending);
+
+    assert.deepEqual(warnings, [],
+      'every edit reached the disk; none was swallowed by a failed rename');
+
+    // And what landed is the last edit, whole, agreeing with memory. A file
+    // that parses but disagrees with the desk is worse than one that does
+    // not parse, because nothing reports it.
+    const onDisk = await readFile(join(dir, 'data', 'event-content.json'), 'utf8');
+    const parsed = JSON.parse(onDisk) as { awards: { list: unknown[] } };
+    assert.equal(parsed.awards.list.length, 12);
+
+    const content2 = new EventContent(dir);
+    await content2.load();
+    const config2 = fresh();
+    content2.apply(config2);
+    assert.equal(config2.awards.list.length, 12, 'and it survives the restart');
+
+    // No temp file left to be read as content on the next boot.
+    await assert.rejects(() => readFile(join(dir, 'data', 'event-content.json.tmp'), 'utf8'));
+  } finally {
+    console.warn = realWarn;
+    await rm(dir, { recursive: true, force: true });
+  }
+});

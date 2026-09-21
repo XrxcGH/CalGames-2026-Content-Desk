@@ -386,6 +386,52 @@ test('an award with no blurb still gets a readable line, not a paragraph', async
   }
 });
 
+test('the computed line does not stop at an abbreviation', async () => {
+  /*
+   * The fallback used to take everything up to the first period followed by a
+   * space, which in prose that names a person is the period after their
+   * title. "Dr. Woodie Flowers believed..." put the two characters "Dr." on
+   * the plate, alone, in 38px type, under the award name, in front of the
+   * hall, for the length of the reveal. The JA never typed that line and no
+   * page showed it to them before it aired.
+   */
+  const dir = await scratch();
+  try {
+    const bus = new EventBus();
+    const seen = collect(bus);
+    const awards = new Awards(dir, bus, []);
+    const lineFor = (description: string) => {
+      seen.length = 0;
+      awards.show({ title: 'Test Award', description });
+      return (seen.find(e => e.type === 'award.show')!.payload as { blurb: string }).blurb;
+    };
+
+    assert.equal(
+      lineFor('Dr. Woodie Flowers believed in respect. The award carries his name.'),
+      'Dr. Woodie Flowers believed in respect.');
+    assert.equal(
+      lineFor('Named for J. F. Kennedy, an early supporter. It is given once.'),
+      'Named for J. F. Kennedy, an early supporter.');
+    assert.equal(
+      lineFor('For outreach, e.g. a school visit or a summer camp. Judged all weekend.'),
+      'For outreach, e.g. a school visit or a summer camp.');
+    assert.equal(
+      lineFor('Presented by Mrs. Chen and Mr. Alvarez of the WRRF board. Every year.'),
+      'Presented by Mrs. Chen and Mr. Alvarez of the WRRF board.');
+
+    // An ordinary sentence still ends where it always did.
+    assert.equal(
+      lineFor('For a team whose story fits no other award. The judges decide.'),
+      'For a team whose story fits no other award.');
+
+    // And a definition that is nothing but abbreviations still yields a line
+    // rather than an empty plate.
+    assert.equal(lineFor('Dr. Mr. Mrs.'), 'Dr. Mr. Mrs.');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('editing one award does not strip the day and blurb off the rest', async () => {
   // The Judge Advisor fixing a typo routes through the content sanitizer,
   // which drops any field it does not name. Before this was fixed, one edit

@@ -21,7 +21,7 @@
 import { spawn } from 'node:child_process';
 import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
@@ -561,7 +561,39 @@ function restoreOnExit(restore) {
   return once;
 }
 
+/**
+ * Put back anything a previous run was killed in the middle of.
+ *
+ * The restore below runs from `finally` and from every signal Node can catch,
+ * which covers Ctrl+C and a closed window. It does not cover the laptop losing
+ * power, or a volunteer reaching for Task Manager because a render looked
+ * stuck. In that window the live file is already deleted and the only copy is
+ * the .preview-backup beside it, which nothing has ever looked for: the
+ * operator finds an empty profile book and an empty shout-out queue, and no
+ * part of the system mentions that a complete copy is sitting right there.
+ *
+ * So look, before doing anything else, and say so out loud. Runs ahead of this
+ * render's own snapshot on purpose: taking a fresh backup of the blanked file
+ * first would overwrite the survivor and finish the job the crash started.
+ */
+function recoverAbandoned(files) {
+  for (const file of files) {
+    const backup = `${file}.preview-backup`;
+    if (!existsSync(backup)) continue;
+    if (existsSync(file)) {
+      // Both present: the live file won, so the copy is just litter.
+      rmSync(backup, { force: true });
+      continue;
+    }
+    copyFileSync(backup, file);
+    rmSync(backup, { force: true });
+    console.log(`[previews] put back ${basename(file)} from a render that was `
+      + 'killed before it could tidy up');
+  }
+}
+
 async function snapshot(files) {
+  recoverAbandoned(files);
   const saved = [];
   for (const file of files) {
     const had = existsSync(file);

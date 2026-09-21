@@ -59,6 +59,14 @@ data/profiles.json.tmp
 # data/ is committable until somebody adds it here. Add it here.
 data/captions/
 
+# The preview renderer's safety copies. It backs these files up, blanks them so
+# the screenshots carry no real data, and puts them back on the way out, so in
+# an ordinary run none of these exist for longer than a render. A run that is
+# hard-killed leaves them behind, and a .preview-backup holds byte for byte
+# what the file beside it holds: the profile book, the shout-out queue, the
+# staged winners. Every one of those is named above; the copy has to be too.
+data/*.preview-backup
+
 # Team media library. Robot cutouts are large and event-specific. The manifest
 # lives in memory, rebuilt from each team's meta.json on boot.
 media/teams/*/

@@ -202,7 +202,38 @@ export class EventContent {
     }
   }
 
-  async #save(): Promise<void> {
+  /**
+   * The tail of the write queue. Never rejects; see #save.
+   */
+  #writing: Promise<void> = Promise.resolve();
+
+  /**
+   * One writer at a time.
+   *
+   * #writeNow stages through a temp file with a FIXED name and renames it
+   * into place, which is atomic against a reader and not against another
+   * writer: two overlapping saves interleave their writes into the one temp
+   * file and then both rename it, so what lands is half of each.
+   *
+   * Nothing awaited a save either. The awards list persists through
+   * `onListChanged`, which index.ts fires as `void content.set(...)` on every
+   * change, and the JA reorders the running order with a pair of arrow
+   * buttons. Two presses inside one write is not a stress test, it is a
+   * double-click, and the file that tears is the one holding the ceremony.
+   *
+   * Chaining serialises them. Coalescing falls out for free: each link reads
+   * `#overrides` when its turn comes, so a burst of presses leaves the last
+   * state on disk rather than replaying every intermediate one.
+   */
+  #save(): Promise<void> {
+    this.#writing = this.#writing.then(
+      () => this.#writeNow(),
+      () => this.#writeNow(),   // a broken link must not stop the queue
+    );
+    return this.#writing;
+  }
+
+  async #writeNow(): Promise<void> {
     try {
       if (!Object.keys(this.#overrides).length) {
         await rm(this.#file, { force: true });

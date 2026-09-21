@@ -82,6 +82,36 @@ const clean = (v: unknown, max: number): string =>
   String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
+ * Words that end in a period without ending a sentence.
+ *
+ * Tested against the text ENDING at a candidate period, so each alternative
+ * anchors to the end. Single letters cover initials ("J. Smith Award") and
+ * the halves of a spelled-out abbreviation ("e.g." reaches here as "g.").
+ */
+const ABBREVIATION =
+  /(?:\s|^|\.)(?:[A-Za-z]|Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|al|Inc|Co|Ltd|Dept|Univ|No|Fig|Capt|Sgt|Gen|Rev|Hon|Ave|Blvd|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.$/;
+
+/**
+ * The first real sentence, skipping periods that only end an abbreviation.
+ *
+ * The old rule took everything up to the first period followed by a space,
+ * which is the first period in almost any prose that names a person: a
+ * definition opening "Dr. Woodie Flowers believed..." put the two characters
+ * "Dr." on the plate, alone, in 38px type, under the award title, in front of
+ * the hall. Walk the candidates instead and take the first that is not an
+ * abbreviation; if every one of them is, fall back to the whole text, which
+ * the caller then truncates.
+ */
+const firstSentenceOf = (text: string): string => {
+  const ends = /[.!?](?=\s|$)/g;
+  for (let m = ends.exec(text); m; m = ends.exec(text)) {
+    const head = text.slice(0, m.index + 1);
+    if (!ABBREVIATION.test(head)) return head;
+  }
+  return text;
+};
+
+/**
  * The on-air line for an award: the blurb if one was written, otherwise the
  * description's first sentence. Falling back to the first sentence means an
  * award nobody wrote a blurb for still gets a readable plate instead of a
@@ -90,7 +120,7 @@ const clean = (v: unknown, max: number): string =>
 const blurbFor = (blurb: string, description: string): string => {
   if (blurb) return blurb;
   if (!description) return '';
-  const firstSentence = /^[\s\S]*?[.!?](?=\s|$)/.exec(description)?.[0] ?? description;
+  const firstSentence = firstSentenceOf(description);
   return firstSentence.length <= MAX_BLURB
     ? firstSentence
     : `${firstSentence.slice(0, MAX_BLURB - 1).trimEnd()}\u2026`;
@@ -421,23 +451,43 @@ export class Awards {
    * loaded for Directors'" is itself timing information the desk does not
    * need before the ceremony.
    */
+  /**
+   * `onAir` is the line the plate will actually carry.
+   *
+   * It is the blurb when one was written and the definition's computed first
+   * sentence when one was not, and the awards page used to show only the
+   * former. So the one award most likely to have no blurb, a Judges' Award
+   * typed on the day, was also the one whose on-air line nobody could read
+   * until it was on the screen behind the presenter. Sent with every list so
+   * the page can show it, and marked `blurbComputed` so the page can say
+   * where it came from rather than implying somebody approved it.
+   */
   snapshot(full: boolean): {
     list: (AwardDef & {
       presented: PresentedAward | null;
       staged?: StagedWinner | null;
+      onAir: string;
+      blurbComputed: boolean;
     })[];
     live: string | null;
     pendingWinner?: boolean;
   } {
+    const withLine = (a: AwardDef) => ({
+      ...a,
+      onAir: blurbFor(a.blurb ?? '', a.description),
+      blurbComputed: !a.blurb,
+    });
     if (!full) {
       return {
-        list: this.#list.map(a => ({ ...a, presented: this.#presented.get(a.id) ?? null })),
+        list: this.#list.map(a => ({
+          ...withLine(a), presented: this.#presented.get(a.id) ?? null,
+        })),
         live: this.#live?.id ?? null,
       };
     }
     return {
       list: this.#list.map(a => ({
-        ...a,
+        ...withLine(a),
         presented: this.#presented.get(a.id) ?? null,
         staged: this.#staged.get(a.id) ?? null,
       })),
