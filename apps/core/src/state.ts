@@ -482,7 +482,9 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       // The awards ceremony, two stages. Show carries no winner: the state is
       // served openly, and the reveal is the GA's moment, not a JSON field's.
       case 'award.show': {
-        const p = ev.payload as { id?: unknown; title?: unknown; description?: unknown };
+        const p = ev.payload as {
+          id?: unknown; title?: unknown; description?: unknown; blurb?: unknown;
+        };
         const title = String(p.title ?? '').trim();
         if (!title) return state;
         return {
@@ -490,6 +492,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           award: {
             id: String(p.id ?? ''), title,
             description: String(p.description ?? '').trim(),
+            blurb: String(p.blurb ?? '').trim(),
             winner: null, team: null, revealed: false, at: ev.ts,
           },
           // A manual TAKE, not an auto() suggestion. The operator pressing
@@ -511,7 +514,8 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         // started mid-ceremony), so it builds the card it needs either way.
         const base = state.award ?? {
           id: String(p.id ?? ''), title: String(p.award ?? 'Award').trim(),
-          description: '', winner: null, team: null, revealed: false, at: ev.ts,
+          description: '', blurb: '',
+          winner: null, team: null, revealed: false, at: ev.ts,
         };
         return {
           ...state,

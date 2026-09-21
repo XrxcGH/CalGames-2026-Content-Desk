@@ -1374,32 +1374,65 @@ function paintAwards() {
       'the Judge Advisor builds it at /s/awards. Typing a custom title below works the same.</p>';
     return;
   }
-  box.replaceChildren(...list.map(a => {
-    const label = document.createElement('label');
-    const tick = document.createElement('input');
-    tick.type = 'radio';
-    tick.name = 'awardPick';
-    tick.checked = awardPicked === a.id;
-    tick.onchange = () => { awardPicked = a.id; };
-    const who = document.createElement('span');
-    who.className = 'who';
-    const name = document.createElement('b');
-    name.textContent = a.title;
-    who.append(name);
-    const sub = document.createElement('span');
-    // Priority: what is on screen beats everything; presented is history;
-    // "winner loaded" is the JA's staging, shown only once this session holds
-    // the JA code (the locked view never carries the flag at all).
-    sub.textContent = awardSnap.live === a.id
-      ? ' · ON SCREEN'
-      : a.presented
-        ? ` · presented: ${a.presented.winner}`
-        : (a.staged ? ' · winner loaded ' : '');
-    who.append(sub);
-    if (!a.presented && a.staged && awardSnap.live !== a.id) sub.append(iconEl('check'));
-    label.append(tick, who);
-    return label;
-  }));
+  /*
+   * Grouped by ceremony, numbered in running order.
+   *
+   * CalGames runs two ceremonies and the desk works one at a time. Flat, the
+   * operator hunts for tonight's three awards among Sunday's nine, mid-show,
+   * with the hall waiting. The heading also gives them the position in the
+   * running order, which is the thing they are actually tracking: "we are on
+   * four of nine".
+   */
+  const groups = [];
+  for (const a of list) {
+    const label = (a.day || '').trim();
+    const key = label.toLowerCase();
+    let g = groups.find(x => x.key === key);
+    if (!g) { g = { key, label, items: [] }; groups.push(g); }
+    g.items.push(a);
+  }
+
+  const rows = [];
+  for (const g of groups) {
+    if (groups.length > 1 || g.label) {
+      const done = g.items.filter(a => a.presented).length;
+      const head = document.createElement('div');
+      head.className = 'aw-day';
+      head.textContent = (g.label ? `${g.label} ceremony` : 'Not scheduled')
+        + ` · ${done} of ${g.items.length} presented`;
+      rows.push(head);
+    }
+    g.items.forEach((a, i) => {
+      const label = document.createElement('label');
+      const tick = document.createElement('input');
+      tick.type = 'radio';
+      tick.name = 'awardPick';
+      tick.checked = awardPicked === a.id;
+      tick.onchange = () => { awardPicked = a.id; };
+      const who = document.createElement('span');
+      who.className = 'who';
+      const num = document.createElement('i');
+      num.className = 'aw-n';
+      num.textContent = `${i + 1}.`;
+      const name = document.createElement('b');
+      name.textContent = a.title;
+      who.append(num, name);
+      const sub = document.createElement('span');
+      // Priority: what is on screen beats everything; presented is history;
+      // "winner loaded" is the JA's staging, shown only once this session
+      // holds the JA code (the locked view never carries the flag at all).
+      sub.textContent = awardSnap.live === a.id
+        ? ' · ON SCREEN'
+        : a.presented
+          ? ` · presented: ${a.presented.winner}`
+          : (a.staged ? ' · winner loaded ' : '');
+      who.append(sub);
+      if (!a.presented && a.staged && awardSnap.live !== a.id) sub.append(iconEl('check'));
+      label.append(tick, who);
+      rows.push(label);
+    });
+  }
+  box.replaceChildren(...rows);
 }
 
 $('awShow').onclick = async () => {

@@ -1009,7 +1009,7 @@ export function startServer(opts: ServerOpts) {
         try {
           const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
             { action?: string; id?: string; title?: string; description?: string;
-              winner?: string; team?: number };
+              blurb?: string; day?: string; winner?: string; team?: number };
           switch (body.action) {
             case 'show':
               awards.show(body);

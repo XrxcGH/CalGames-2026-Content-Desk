@@ -220,6 +220,15 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
   padding: 10px 12px; margin-bottom: 8px; }
 .setrow .row { margin-bottom: 0; }
 
+/* Award list: one heading per ceremony, and the running order beside each
+   title, because "which one are we on" is the question during a ceremony. */
+.aw-day { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+  margin: 12px 0 6px; }
+.aw-day:first-child { margin-top: 0; }
+#awList .aw-n { font-family: var(--font-num); font-style: normal;
+  color: var(--text-dim); margin-right: 6px; }
+
 .pbook .pline { display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
   align-items: center; padding: 7px 8px; margin: 0;
   font-family: var(--font-display); font-size: 14px; font-weight: 400;
@@ -582,7 +591,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           A winner the JA loaded rides along automatically; the winner box here
           is only for last-second corrections. Everything stays OFF every feed
           until you press <b>Reveal</b>. Presented awards tick off.</p>
-        <div id="awList" class="pbook" style="max-height:180px"></div>
+        <!-- Tall enough for a whole ceremony without scrolling: twelve awards
+             and two ceremony headings. At the old 180px the list clipped mid
+             row, so the operator walking the checklist during the one segment
+             that cannot be re-run could not see what was left. -->
+        <div id="awList" class="pbook" style="max-height:440px"></div>
         <div class="row" style="margin-top:8px">
           <input id="awCustomTitle" aria-label="Custom award title"
             placeholder="Or a custom award title" style="flex:2 1 180px">

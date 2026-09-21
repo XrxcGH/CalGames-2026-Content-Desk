@@ -83,6 +83,27 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
 .row .team { flex: 0 1 110px; }
 .row .act { flex: 0 0 auto; }
 .tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+/* Ceremony grouping: one heading per day, with how many winners are in. */
+.day-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin: 26px 2px 10px; }
+.day-head h2 { margin: 0; font-family: var(--font-cond); font-weight: 700;
+  font-size: 15px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--cg-gold); }
+.day-count { margin-left: auto; font-family: var(--font-cond); font-weight: 700;
+  font-size: 13px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--cg-white-dim); }
+.day-count[data-done="true"] { color: var(--st-ok); }
+
+/* The running order, so the number on the card is the order on stage. */
+.aw-head { display: flex; align-items: baseline; gap: 10px; }
+.aw-num { flex: none; font-family: var(--font-num); font-weight: 900;
+  font-size: 15px; color: var(--cg-gold); min-width: 1.4em; }
+.aw-blurb { margin: 6px 0 8px; font-size: 16px; line-height: 1.5;
+  color: var(--cg-white); border-left: 3px solid var(--cg-gold);
+  padding-left: 12px; }
+.field-why { margin: 6px 0 0; font-size: 14px; line-height: 1.5;
+  color: var(--cg-white-dim); }
 </style>
 </head>
 <body>
@@ -174,10 +195,43 @@ const sayErr = (note, err) => { note.className = 'err'; note.textContent = err.m
 
 function paint(snap) {
   const box = $('list');
-  const cards = snap.list.length
-    ? snap.list.map(a => awardCard(a))
-    : [emptyCard()];
-  box.replaceChildren(...cards, addCard());
+  if (!snap.list.length) {
+    box.replaceChildren(emptyCard(), addCard());
+    return;
+  }
+
+  /*
+   * Grouped by ceremony, in running order.
+   *
+   * CalGames presents two ceremonies: the volunteer and community awards on
+   * Saturday, the team awards on Sunday. Ungrouped, the Judge Advisor stands
+   * at the Saturday ceremony scrolling past nine Sunday awards to find the
+   * three that are tonight's. Order within a group is the order the list is
+   * in, which is the order they are presented, so the numbers on the cards
+   * are the running order and not decoration.
+   */
+  const groups = [];
+  for (const a of snap.list) {
+    const label = (a.day || '').trim();
+    const key = label.toLowerCase();
+    let g = groups.find(x => x.key === key);
+    if (!g) { g = { key, label, items: [] }; groups.push(g); }
+    g.items.push(a);
+  }
+
+  const out = [];
+  for (const g of groups) {
+    const loaded = g.items.filter(a => a.staged || a.presented).length;
+    const head = el('div', 'day-head');
+    head.append(el('h2', '', g.label ? `${g.label} ceremony` : 'Not scheduled yet'));
+    const count = el('span', 'day-count',
+      `${loaded} of ${g.items.length} ready`);
+    count.dataset.done = String(loaded === g.items.length);
+    head.append(count);
+    out.push(head);
+    g.items.forEach((a, i) => out.push(awardCard(a, i + 1)));
+  }
+  box.replaceChildren(...out, addCard());
 }
 
 function emptyCard() {
@@ -188,14 +242,21 @@ function emptyCard() {
   return card;
 }
 
-function awardCard(a) {
+function awardCard(a, order) {
   const card = el('div', 'card aw-row');
   const note = el('p');
   note.setAttribute('role', 'status');
 
   const paintView = () => {
     card.replaceChildren();
-    card.append(el('h2', '', a.title), el('p', 'aw-desc', a.description || ''));
+    const head = el('div', 'aw-head');
+    if (order) head.append(el('span', 'aw-num', String(order)));
+    head.append(el('h2', '', a.title));
+    card.append(head);
+    // The line the hall actually sees, marked as such: the JA is proof-reading
+    // the broadcast here, not just the paperwork.
+    if (a.blurb) card.append(el('p', 'aw-blurb', a.blurb));
+    card.append(el('p', 'aw-desc', a.description || ''));
 
     const state = el('div', 'aw-state');
     if (a.presented) {
@@ -245,7 +306,7 @@ function awardCard(a) {
     }
 
     const tools = el('div', 'tools');
-    const edit = quietBtn('Edit title or description');
+    const edit = quietBtn('Edit wording');
     edit.onclick = paintEdit;
     tools.append(edit);
     if (!a.presented) {
@@ -264,13 +325,18 @@ function awardCard(a) {
   const paintEdit = () => {
     card.replaceChildren();
     const t = textIn(a.title, 'Award title, exactly as read on stage', `Title of ${a.title}`);
+    const day = textIn(a.day || '', 'Saturday or Sunday', `Ceremony day for ${a.title}`);
+    const b = textIn(a.blurb || '',
+      'One line, or leave blank to use the first sentence below',
+      `On-air line for ${a.title}`);
     const d = areaIn(a.description || '',
-      'What the award means: the sentences the GA reads aloud', `Description of ${a.title}`);
+      'The full definition the GA reads aloud', `Full definition of ${a.title}`);
     const save = goBtn('Save');
     save.onclick = async () => {
       try {
         await api({ action: 'define', id: a.id,
-          title: t.value.trim(), description: d.value.trim() });
+          title: t.value.trim(), day: day.value.trim(),
+          blurb: b.value.trim(), description: d.value.trim() });
         await load();
       } catch (err) { sayErr(note, err); }
     };
@@ -278,7 +344,14 @@ function awardCard(a) {
     cancel.onclick = paintView;
     const row = el('div', 'tools');
     row.append(save, cancel);
-    card.append(labelEl('Title'), t, labelEl('Description'), d, row, note);
+    card.append(
+      labelEl('Title'), t,
+      labelEl('Ceremony day'), day,
+      labelEl('On-air line'), b,
+      el('p', 'field-why', 'This is the one line the broadcast shows. The full '
+        + 'definition below is what the GA reads aloud and what the slides show.'),
+      labelEl('Full definition'), d,
+      row, note);
   };
 
   paintView();
@@ -291,19 +364,28 @@ function addCard() {
   const note = el('p');
   note.setAttribute('role', 'status');
   const t = textIn('', 'Exactly as it will be read on stage', 'New award title');
-  const d = areaIn('', 'What it means: one or two sentences the GA reads aloud',
-    'New award description');
+  const day = textIn('', 'Saturday or Sunday', 'Ceremony day for the new award');
+  const b = textIn('', 'One line, or leave blank to use the first sentence below',
+    'On-air line for the new award');
+  const d = areaIn('', 'The full definition the GA reads aloud',
+    'Full definition of the new award');
   const add = goBtn('Add to the ceremony');
   add.onclick = async () => {
     if (!t.value.trim()) { sayErr(note, new Error('An award needs a title.')); return; }
     try {
-      await api({ action: 'define', title: t.value.trim(), description: d.value.trim() });
+      await api({ action: 'define', title: t.value.trim(), day: day.value.trim(),
+        blurb: b.value.trim(), description: d.value.trim() });
       await load();
     } catch (err) { sayErr(note, err); }
   };
   const row = el('div', 'tools');
   row.append(add);
-  card.append(labelEl('Title'), t, labelEl('Description'), d, row, note);
+  card.append(
+    labelEl('Title'), t,
+    labelEl('Ceremony day'), day,
+    labelEl('On-air line'), b,
+    labelEl('Full definition'), d,
+    row, note);
   return card;
 }
 

@@ -1067,11 +1067,19 @@
   font-size: 96px; line-height: 1.02; color: var(--cg-white);
   text-transform: uppercase; letter-spacing: .01em; max-width: 1500px;
 }
+/* One line under the title, read from across a gym: bigger than the old 32px
+   body size because it is now a single orienting line rather than a
+   paragraph. The clamp is the belt: an award typed on the day with a long
+   definition and no blurb falls back to a first sentence, and three lines is
+   the most the plate can give it with the reveal card also in frame. */
 .aw-desc {
   font-family: var(--font-display); font-weight: 500;
-  font-size: 32px; line-height: 1.45; color: var(--cg-white-dim);
-  max-width: 1180px; margin: 0;
+  font-size: 38px; line-height: 1.4; color: var(--cg-white-dim);
+  max-width: 1320px; margin: 0;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  line-clamp: 3; overflow: hidden;
 }
+.aw-desc[hidden] { display: none; }
 .aw-reveal {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
   margin-top: 26px; padding: 30px 70px 26px;

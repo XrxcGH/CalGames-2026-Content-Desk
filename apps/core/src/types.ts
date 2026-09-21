@@ -556,6 +556,8 @@ export interface DeskState {
    */
   award: {
     id: string; title: string; description: string;
+    /** The one line the plate shows. See AwardDef.blurb in awards.ts. */
+    blurb: string;
     winner: string | null; team: number | null; revealed: boolean; at: number;
   } | null;
   /** The slide on the program screen, when the screen is 'slide'. */

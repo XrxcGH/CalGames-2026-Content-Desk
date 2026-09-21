@@ -31,9 +31,46 @@ import { uniqueSlug } from './content.ts';
 export interface AwardDef {
   id: string;
   title: string;
-  /** What the award means, in the words the GA reads aloud. */
+  /**
+   * What the award means, in the committee's own words. This is what the GA
+   * reads aloud and what the projected ceremony deck shows. It is NOT what
+   * goes on the broadcast plate: the real definitions run to six hundred
+   * characters, and a paragraph that size on a 1080 frame is a wall nobody
+   * in the hall reads. See `blurb`.
+   */
   description: string;
+  /**
+   * One line for the broadcast plate: what this award is for, in a breath.
+   *
+   * The plate is read from across a gym while the GA is already speaking the
+   * full definition, so the screen's job is to name the award and orient the
+   * room, not to reprint the paragraph. Blank falls back to the description's
+   * first sentence, which is usually the right line anyway.
+   */
+  blurb?: string;
+  /**
+   * Which ceremony this award belongs to, as a display label ("Saturday",
+   * "Sunday"). CalGames runs two: the volunteer and community awards on
+   * Saturday, the team awards on Sunday. Grouping by it keeps the Judge
+   * Advisor and the desk looking at one ceremony at a time instead of
+   * scrolling past nine awards that are not tonight's.
+   *
+   * A free label rather than an enum on purpose: an event that adds a Friday
+   * ceremony should not need a code change. Grouping compares it
+   * case-insensitively; display uses it as typed.
+   */
+  day?: string;
 }
+
+/**
+ * Caps, sized to the real content rather than to a round number.
+ *
+ * The longest definition the 2026 committee wrote is the Founders' Award at
+ * 597 characters. The cap used to be 400, which silently cut five of the
+ * twelve awards off mid-sentence, on air, with nothing anywhere reporting it.
+ */
+const MAX_DESCRIPTION = 900;
+const MAX_BLURB = 150;
 
 export interface PresentedAward {
   winner: string;
@@ -43,6 +80,21 @@ export interface PresentedAward {
 
 const clean = (v: unknown, max: number): string =>
   String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/**
+ * The on-air line for an award: the blurb if one was written, otherwise the
+ * description's first sentence. Falling back to the first sentence means an
+ * award nobody wrote a blurb for still gets a readable plate instead of a
+ * six-line paragraph.
+ */
+const blurbFor = (blurb: string, description: string): string => {
+  if (blurb) return blurb;
+  if (!description) return '';
+  const firstSentence = /^[\s\S]*?[.!?](?=\s|$)/.exec(description)?.[0] ?? description;
+  return firstSentence.length <= MAX_BLURB
+    ? firstSentence
+    : `${firstSentence.slice(0, MAX_BLURB - 1).trimEnd()}\u2026`;
+};
 
 const teamOf = (v: unknown): number | null => {
   const n = Number(v);
@@ -81,7 +133,12 @@ export class Awards {
       const id = clean(item?.['id'], 40);
       const title = clean(item?.['title'], 80);
       if (!id || !title) return [];
-      return [{ id, title, description: clean(item?.['description'], 400) }];
+      return [{
+        id, title,
+        description: clean(item?.['description'], MAX_DESCRIPTION),
+        blurb: clean(item?.['blurb'], MAX_BLURB),
+        day: clean(item?.['day'], 20),
+      }];
     });
   }
 
@@ -162,10 +219,13 @@ export class Awards {
    * as winners. An award already presented keeps its id but can still have a
    * typo in its description fixed for the record.
    */
-  define(opts: { id?: string; title?: string; description?: string }): AwardDef {
+  define(opts: { id?: string; title?: string; description?: string;
+    blurb?: string; day?: string }): AwardDef {
     const title = clean(opts.title, 80);
     if (!title) throw new Error('An award needs a title.');
-    const description = clean(opts.description, 400);
+    const description = clean(opts.description, MAX_DESCRIPTION);
+    const blurb = clean(opts.blurb, MAX_BLURB);
+    const day = clean(opts.day, 20);
     const id = clean(opts.id, 40);
 
     const existing = id ? this.#list.find(a => a.id === id) : undefined;
@@ -174,9 +234,14 @@ export class Awards {
     if (existing) {
       existing.title = title;
       existing.description = description;
+      existing.blurb = blurb;
+      existing.day = day;
       def = existing;
     } else {
-      def = { id: uniqueSlug(title, new Set(this.#list.map(a => a.id))), title, description };
+      def = {
+        id: uniqueSlug(title, new Set(this.#list.map(a => a.id))),
+        title, description, blurb, day,
+      };
       this.#list.push(def);
     }
     this.onListChanged?.(this.definitions);
@@ -222,14 +287,18 @@ export class Awards {
    * for the award nobody wrote down in July: a judges' special award invented
    * on Sunday morning is a thing that actually happens.
    */
-  show(opts: { id?: string; title?: string; description?: string;
+  show(opts: { id?: string; title?: string; description?: string; blurb?: string;
     winner?: string; team?: number | null }): void {
     const fromList = opts.id ? this.#list.find(a => a.id === opts.id) : undefined;
     if (opts.id && !fromList) throw new Error(`There is no award "${opts.id}".`);
 
     const title = fromList?.title ?? clean(opts.title, 80);
     if (!title) throw new Error('An award needs a title.');
-    const description = fromList?.description ?? clean(opts.description, 400);
+    const description = fromList?.description ?? clean(opts.description, MAX_DESCRIPTION);
+    const blurb = blurbFor(
+      fromList?.blurb ?? clean(opts.blurb, MAX_BLURB),
+      description,
+    );
     const id = fromList?.id ?? `custom-${Date.now().toString(36)}`;
 
     // A winner typed now wins; otherwise the one the JA staged rides along.
@@ -240,11 +309,12 @@ export class Awards {
       : staged?.team ?? null;
     this.#live = { id, title, winner, team };
 
-    // No winner in this payload, ever. See the header.
+    // No winner in this payload, ever. See the header. The blurb rides along
+    // because the broadcast plate shows that rather than the full definition.
     this.#bus.emit({
       type: 'award.show',
       source: 'manual',
-      payload: { id, title, description },
+      payload: { id, title, description, blurb },
     });
   }
 

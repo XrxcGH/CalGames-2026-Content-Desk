@@ -790,9 +790,29 @@ function paintAward(award) {
   awardKey = key;
 
   $('awTitle').textContent = award.title;
-  $('awDesc').textContent = award.description;
+
+  /*
+   * The BLURB, not the definition.
+   *
+   * The committee's real definitions run to six hundred characters. At the
+   * plate's 32px over 1180px that is ten lines, and with the reveal card in
+   * frame it overflowed 1080 outright. It also duplicated the GA, who is
+   * reading that exact paragraph aloud while it sits there. The screen's job
+   * is to name the award and orient the hall in one line; the core supplies
+   * that line (falling back to the definition's first sentence when nobody
+   * wrote one).
+   */
+  const desc = $('awDesc');
+  desc.textContent = award.blurb || award.description || '';
+
   const reveal = $('awReveal');
   reveal.hidden = !award.revealed;
+  /*
+   * At the reveal the line goes away. The winner is the whole story from
+   * that moment, the hall is applauding rather than reading, and dropping it
+   * buys the reveal card its room on the frame instead of competing for it.
+   */
+  desc.hidden = !!award.revealed;
   if (award.revealed) {
     $('awWinner').textContent = award.winner ?? '';
     const team = $('awTeam');

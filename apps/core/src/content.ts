@@ -155,7 +155,17 @@ const SANITIZERS: Record<string, (v: unknown) => unknown> = {
       const id = line(r['id'], 40) || uniqueSlug(title, taken);
       if (taken.has(id)) continue;
       taken.add(id);
-      list.push({ id, title, description: line(r['description'], 400) });
+      // Every field the award model carries, or an edit through this path
+      // silently strips the ones it does not name: the Judge Advisor fixing
+      // one typo would have wiped the blurb and ceremony day off all twelve.
+      const blurb = line(r['blurb'], 150);
+      const day = line(r['day'], 20);
+      list.push({
+        id, title,
+        description: line(r['description'], 900),
+        ...(blurb ? { blurb } : {}),
+        ...(day ? { day } : {}),
+      });
     }
     return { list };
   },

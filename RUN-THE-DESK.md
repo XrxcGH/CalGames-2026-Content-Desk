@@ -500,12 +500,19 @@ is live.
 
 Awards involve a second code, and it is not yours.
 
+**CalGames runs two ceremonies.** Saturday presents the community and
+volunteer awards (Directors', Volunteer of the Year, Mentor of the Year).
+Sunday presents the team awards, nine of them, opening with the Founders'
+Award and closing with the Judges' Award. Both the Judge Advisor's page and
+your Awards section group by ceremony and number each award in running
+order, so you are only ever looking at tonight's list.
+
 The **Judge Advisor holds the awards code**. All day, as judging wraps up, the
 JA loads each award's winner from their own page (`ADDRESS/s/awards`, which
 takes only their code, not the desk PIN). That page is also where the award
 list itself gets built: **Add an award** for each judged award in ceremony
-order, **Edit title or description** to fix wording, **Remove from the
-ceremony** if plans change. No file editing, ever. While that is happening, your
+order, **Edit wording** to fix a typo, **Remove from the ceremony** if plans
+change. No file editing, ever. While that is happening, your
 Awards section shows only the lock and its code box; even the award titles
 wait behind it. That is deliberate. Nobody at the desk can see, type, or reveal a winner, so
 nobody at the desk can leak one, even by accident, even with a camera pointed
@@ -516,14 +523,26 @@ Awards section's unlock box. Then, for each award:
 
 1. Pick the award from the list. Ones marked **winner loaded** are ready:
    the JA's answer rides along invisibly.
-2. Press **Show the award**. The title and definition go up; the GA reads it.
-3. On the GA's cue ("...and the winner is"), press **Reveal the winner**.
-4. Press **Clear** before the next one. Presented awards tick off the list.
+2. Press **Show the award**. The title goes up with one line under it saying
+   what the award is for. The GA reads the full definition aloud from the
+   slides; the screen does not reprint it, because a paragraph on the big
+   screen is a wall nobody in the hall reads.
+3. On the GA's cue ("...and the winner is"), press **Reveal the winner**. The
+   line comes off and the winner takes the frame.
+4. Press **Clear** before the next one. Presented awards tick off the list,
+   and the ceremony heading counts down ("4 of 9 presented").
 
 The winner box on the desk is only for last-second corrections (the envelope
 on stage disagrees with what was loaded); leave it blank otherwise. The
 winner genuinely does not exist anywhere the audience can reach until Reveal,
 so there is nothing to leak. The lock means that now includes this console.
+
+Each award carries two pieces of text, and the difference matters. The
+**full definition** is the committee's wording: what the GA reads aloud and
+what the projected slides show. The **on-air line** is the single line the
+broadcast puts under the title. The JA can edit both; leaving the on-air line
+blank falls back to the definition's first sentence, which is usually the
+right line anyway.
 
 The desk ships with a default awards code (1357), so the lock exists from
 the first boot; change the code for the event, the same as the PIN. An event
@@ -898,7 +917,9 @@ Print this. Tick it off.
 - [ ] All three codes changed from the shipped defaults; settings code given
       to the content lead
 - [ ] Walk-up songs in place for playoff introductions
-- [ ] Award titles and definitions entered, in ceremony order (the JA's page, `/s/awards`)
+- [ ] Award list checked against this year's ceremony scripts, both days, in
+      running order (the JA's page, `/s/awards`). The twelve 2026 awards ship
+      with the desk; confirm the wording and the order before doors.
 - [ ] Awards code set and given to the Judge Advisor (and to nobody else);
       JA shown their page (`/s/awards`)
 - [ ] Recognition and info slides entered (setup crew names, session times)

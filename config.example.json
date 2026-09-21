@@ -94,8 +94,93 @@
     "//": "The judged awards, with the definition the GA reads on air while the plate is up. The desk shows title+definition first and reveals the winner on a second press; the winner never enters any feed until that press.",
     "//pin": "The Judge Advisor's code, NOT the desk PIN. Ships as 1357; change it for the event. The awards panel locks behind it: the JA loads winners from /s/awards all day (that page needs only this code), and the desk crew cannot see, type, or reveal a winner until the JA hands this code over before the ceremony. Explicitly empty = no separate tier, desk PIN covers awards. Env var JA_PIN overrides.",
     "pin": "1357",
-    "//example": "{ \"id\": \"directors\", \"title\": \"Directors' Award\", \"description\": \"For the team that best embodies the spirit of CalGames.\" }",
-    "list": []
+    "//list": "The ceremony, in the order it is presented. \"day\" groups the two ceremonies, and the Judge Advisor page and the desk panel both group by it. \"description\" is the committee's full definition: what the GA reads aloud and what the projected deck shows. \"blurb\" is the single line the BROADCAST plate shows, because a 600 character paragraph on a 1080 frame is a wall nobody in the hall reads; leave it blank and the plate falls back to the description's first sentence.",
+    "list": [
+      {
+        "id": "directors",
+        "day": "Saturday",
+        "title": "Directors' Award",
+        "blurb": "From the WRRF Board, for outstanding service to the regional robotics community.",
+        "description": "The Director's Award is presented by the WRRF Board of Directors to a person, organization, company, volunteer, or team that has contributed significantly to the mission of the Western Region Robotics Forum as a whole, in any outstanding way. It is WRRF's way of saying thank you to those who make the regional robotics community possible."
+      },
+      {
+        "id": "volunteer-of-the-year",
+        "day": "Saturday",
+        "title": "Volunteer of the Year Award",
+        "blurb": "For the volunteer whose sustained work and gracious professionalism set the standard.",
+        "description": "CalGames is very grateful to have many dedicated, supportive volunteers behind all its competitions, lending their time, effort, and expertise to make those events successful. This award recognizes one such individual who sets the standard: sustained contribution to CalGames, reliability in a lead or critical role, and gracious professionalism toward teams and fellow volunteers."
+      },
+      {
+        "id": "mentor-of-the-year",
+        "day": "Saturday",
+        "title": "Mentor of the Year Award",
+        "blurb": "For a mentor whose guidance shapes both their students and the wider community.",
+        "description": "A Mentor earns the Mentor of the Year Award with support from a team. An effective and successful mentoring relationship is characterized by mutual respect, trust, understanding, and empathy. Good Mentors share life experiences and wisdom, as well as technical, non-technical, and leadership expertise. They are good listeners, good observers, and good problem-solvers. They make efforts to know, accept, and respect the goals and interests of all students and also contribute to the wider robotics community."
+      },
+      {
+        "id": "founders",
+        "day": "Sunday",
+        "title": "Founders' Award",
+        "blurb": "CalGames' highest honor: a team's sustained impact beyond the field, down, across and up.",
+        "description": "The Founders' Award is CalGames' highest recognition of a team's impact beyond the field. This award honors outstanding, sustained effort in promoting and celebrating STEM: passing it DOWN to younger students, ACROSS to peer teams and the community, and UP to alumni, adults, and seniors. The team embodies the goal of inspiring respect and honor for science and technology while encouraging today's youth to become leaders in entrepreneurship, engineering, science, and technology. The award honors the accomplishments and measured successes that the team has sustained over the past three years."
+      },
+      {
+        "id": "rookie-inspiration",
+        "day": "Sunday",
+        "title": "Rookie Inspiration Award",
+        "blurb": "For a rookie team already inspiring its community and building to last.",
+        "description": "The Rookie Inspiration Award recognizes a team who may be new to the competition but already enthusiastically demonstrates the WRRF's mission of inspiring their community. They have begun forging partnerships, building sustainable processes, and establishing a lasting team foundation. Judges are impressed by this team's success and look forward to their bright future."
+      },
+      {
+        "id": "imagery",
+        "day": "Sunday",
+        "title": "Imagery Award",
+        "blurb": "For the team whose robot, pit, uniforms and media all tell one clear story.",
+        "description": "The Imagery Award highlights a team which builds a cohesive brand by integrating the design of their robot with their uniforms, pit, media and more. Imagery is more than looking good: this team executes a documented plan that leverages their identity to generate awareness and build interest in the team, its robot, and among students, sponsors, and the community."
+      },
+      {
+        "id": "highest-seeded-rookie",
+        "day": "Sunday",
+        "title": "Highest Seeded Rookie Award",
+        "blurb": "To the rookie team ranked highest at the end of qualification matches.",
+        "description": "The Highest Seeded Rookie Award is presented to the Rookie team with the highest ranking at the end of qualification matches."
+      },
+      {
+        "id": "autonomous-and-controls",
+        "day": "Sunday",
+        "title": "Autonomous and Controls Award",
+        "blurb": "For software that lets a robot sense, decide and act, on its own and all match long.",
+        "description": "Creating software that enables a robot to sense, decide, and act, both in an autonomous period and throughout a match, is one of the most complex challenges teams face during competition. This award recognizes the team whose students used software engineering practices to design, build, test, and refine effective autonomous routines and match-wide control systems, including sensing and vision, closed-loop control, and driver-assist automation."
+      },
+      {
+        "id": "innovation",
+        "day": "Sunday",
+        "title": "Innovation Award",
+        "blurb": "For a creative approach to a real problem, built this year and proven to work.",
+        "description": "The Innovation Award celebrates creativity with purpose. It recognizes a specific innovative and creative approach, implemented within the past year, to one of the following: (1) a partnership, (2) a manufacturing method, (3) a project other than the game-challenge robot, or (4) the use of technology on the robot. Innovation is judged on the need the team identified, the originality and rigor of their approach, and the level of success they can demonstrate. The team must be able to describe the need, how their approach specifically addresses that need, and how effective it was at its goal."
+      },
+      {
+        "id": "systems-design",
+        "day": "Sunday",
+        "title": "Systems Design Award",
+        "blurb": "For a robust, well documented machine and the engineering process behind it.",
+        "description": "The Systems Design Award recognizes an exceptional, robust, and well-documented robot or mechanism design and the engineering process that produced it. Great systems design incorporates components that work together as a whole, requirements that flow from strategy, disciplined prototyping and analysis, quality fabrication, maintainability under competition conditions, and a robot that performs the way its designers intended. Judges consider the design process the team can show, the quality of the machine in front of them, and how the robot performs on the field."
+      },
+      {
+        "id": "entrepreneurship",
+        "day": "Sunday",
+        "title": "Entrepreneurship Award",
+        "blurb": "For the team whose planning, management and leadership keep it thriving year on year.",
+        "description": "Fielding a successful and sustainable robotics team is a multi-faceted endeavor requiring engineering, management, and business skills. The Entrepreneurship Award recognizes that it takes extensive organizational management to build robots and compete in competitions year after year. This award highlights a team that has implemented processes that result in successful and sustained team growth and development: project management, financial, documentation, training, and leadership functions."
+      },
+      {
+        "id": "judges",
+        "day": "Sunday",
+        "title": "Judges' Award",
+        "blurb": "For a team whose story deserves recognition and fits no other award.",
+        "description": "During the competition the Judges may encounter a team whose unique efforts, performance, or dynamics merit recognition: a story that doesn't fit neatly into another award."
+      }
+    ]
   },
 
   "slides": {

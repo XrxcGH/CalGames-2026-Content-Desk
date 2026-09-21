@@ -335,3 +335,104 @@ test('a presented award cannot be removed, and removing one discards its staged 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('the committee\'s real definitions survive, and the plate gets a line instead', async () => {
+  // Five of the twelve 2026 definitions are longer than the old 400 character
+  // cap, so they were being cut off mid-sentence on air with nothing
+  // reporting it. The longest (Founders') is 597. The full text is kept for
+  // the GA and the slides; the BLURB is what the broadcast plate shows.
+  const dir = await scratch();
+  try {
+    const long = 'A'.repeat(597);
+    const bus = new EventBus();
+    const seen = collect(bus);
+    const awards = new Awards(dir, bus, [
+      { id: 'founders', title: "Founders' Award", day: 'Sunday',
+        blurb: 'The highest honor for impact beyond the field.', description: long },
+    ]);
+
+    assert.equal(awards.definitions[0]!.description.length, 597,
+      'the full definition must not be truncated');
+    assert.equal(awards.definitions[0]!.day, 'Sunday');
+
+    awards.show({ id: 'founders' });
+    const show = seen.find(e => e.type === 'award.show')!;
+    const payload = show.payload as { blurb: string; description: string };
+    assert.equal(payload.blurb, 'The highest honor for impact beyond the field.');
+    assert.equal(payload.description.length, 597, 'the definition still rides along');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an award with no blurb still gets a readable line, not a paragraph', async () => {
+  // The fallback: the definition's first sentence. A custom award typed at
+  // the desk on the day has no blurb, and the plate must not become a wall.
+  const dir = await scratch();
+  try {
+    const bus = new EventBus();
+    const seen = collect(bus);
+    const awards = new Awards(dir, bus, []);
+    awards.show({
+      title: 'Judges Special Award',
+      description: 'For a team whose story fits no other award. '
+        + 'The judges may encounter a team whose unique efforts merit recognition, '
+        + 'and this is where that recognition lives.',
+    });
+    const payload = seen.find(e => e.type === 'award.show')!.payload as { blurb: string };
+    assert.equal(payload.blurb, 'For a team whose story fits no other award.');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('editing one award does not strip the day and blurb off the rest', async () => {
+  // The Judge Advisor fixing a typo routes through the content sanitizer,
+  // which drops any field it does not name. Before this was fixed, one edit
+  // silently wiped the ceremony day and the on-air line off all twelve.
+  const { EventContent } = await import('./content.ts');
+  const { DEFAULTS } = await import('./config.ts');
+  const dir = await scratch();
+  try {
+    const config = structuredClone(DEFAULTS);
+    const content = new EventContent(dir);
+    const stored = await content.set('awards', {
+      list: [
+        { id: 'founders', title: "Founders' Award", day: 'Sunday',
+          blurb: 'Impact beyond the field.', description: 'The long one.' },
+        { id: 'judges', title: "Judges' Award", day: 'Sunday',
+          blurb: 'Fits no other award.', description: 'Another.' },
+      ],
+    }, config) as { list: { id: string; day?: string; blurb?: string }[] };
+
+    assert.equal(stored.list[0]!.day, 'Sunday');
+    assert.equal(stored.list[0]!.blurb, 'Impact beyond the field.');
+    assert.equal(stored.list[1]!.blurb, 'Fits no other award.');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the shipped ceremony list parses, in order, with nothing truncated', async () => {
+  // config.example.json is what a fresh event copies. If the ceremony order or
+  // a definition were wrong there, every event that starts from it is wrong.
+  const { readFile } = await import('node:fs/promises');
+  const cfg = JSON.parse(await readFile(
+    new URL('../../../config.example.json', import.meta.url), 'utf8')) as {
+      awards: { list: { id: string; day: string; title: string;
+        blurb: string; description: string }[] };
+    };
+  const list = cfg.awards.list;
+  assert.equal(list.length, 12);
+  assert.deepEqual(list.slice(0, 3).map(a => a.id),
+    ['directors', 'volunteer-of-the-year', 'mentor-of-the-year'],
+    'Saturday runs first, in deck order');
+  assert.equal(list[3]!.id, 'founders', 'Sunday opens with the Founders Award');
+  assert.equal(list[11]!.id, 'judges', 'and closes with the Judges Award');
+  for (const a of list) {
+    assert.ok(a.day === 'Saturday' || a.day === 'Sunday', `${a.id} has a ceremony day`);
+    assert.ok(a.description.length <= 900, `${a.id} description fits the cap`);
+    assert.ok(a.blurb.length <= 150, `${a.id} blurb is one line`);
+    assert.ok(!a.description.endsWith('...'), `${a.id} is not truncated`);
+  }
+});
