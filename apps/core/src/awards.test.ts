@@ -424,6 +424,18 @@ test('the computed line does not stop at an abbreviation', async () => {
       lineFor('For a team whose story fits no other award. The judges decide.'),
       'For a team whose story fits no other award.');
 
+    // An abbreviation that legitimately ENDS the sentence keeps its sentence.
+    // Testing the word before the period alone got this backwards and put two
+    // sentences on the plate, cut mid-word, which is worse than the bug the
+    // abbreviation list was added to fix.
+    assert.equal(
+      lineFor('Awarded by the volunteers of WRRF Inc. This award has been given '
+        + 'since 2009 to a rookie team.'),
+      'Awarded by the volunteers of WRRF Inc.');
+    assert.equal(
+      lineFor('Presented by Rockwell Co. of California, who fund it. Judged Sunday.'),
+      'Presented by Rockwell Co. of California, who fund it.');
+
     // And a definition that is nothing but abbreviations still yields a line
     // rather than an empty plate.
     assert.equal(lineFor('Dr. Mr. Mrs.'), 'Dr. Mr. Mrs.');

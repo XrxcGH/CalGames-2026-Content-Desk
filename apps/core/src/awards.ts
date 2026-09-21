@@ -82,14 +82,55 @@ const clean = (v: unknown, max: number): string =>
   String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
- * Words that end in a period without ending a sentence.
- *
- * Tested against the text ENDING at a candidate period, so each alternative
- * anchors to the end. Single letters cover initials ("J. Smith Award") and
- * the halves of a spelled-out abbreviation ("e.g." reaches here as "g.").
+ * Titles that are never the last word of a sentence. A period after one of
+ * these is always mid-sentence, whatever follows it.
  */
-const ABBREVIATION =
-  /(?:\s|^|\.)(?:[A-Za-z]|Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|al|Inc|Co|Ltd|Dept|Univ|No|Fig|Capt|Sgt|Gen|Rev|Hon|Ave|Blvd|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.$/;
+const TITLE = /(?:^|[\s.])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Capt|Sgt|Gen|Rev|Hon)\.$/;
+
+/**
+ * Abbreviations that CAN end a sentence. "Presented by WRRF Inc." is a whole
+ * sentence; "Inc. of California" is not. Only the text after the period can
+ * tell the two apart, so these are skipped only when the sentence visibly
+ * carries on in lower case.
+ */
+const MAYBE = /(?:^|[\s.])(?:etc|al|vs|Inc|Co|Ltd|Dept|Univ|No|Fig|Ave|Blvd|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.$/;
+
+/** A single letter before the period: an initial, or part of "e.g." */
+const LETTER = /(^|[\s.])([A-Za-z])\.$/;
+
+/**
+ * Does this period end an abbreviation rather than a sentence?
+ *
+ * `head` is the text up to and including the period; `rest` is what follows.
+ *
+ * The first version of this tested `head` alone against one list, which
+ * over-corrected: an award definition reading "Awarded by the volunteers of
+ * WRRF Inc. This award has been given since 2009 and is the highest honour
+ * the event confers" lost its real first sentence and put both of them on the
+ * plate, cut at 149 characters with an ellipsis, which is worse than the bug
+ * the list was added to fix. Whether a period ends a sentence is not a
+ * property of the word before it alone.
+ */
+const endsAbbreviation = (head: string, rest: string): boolean => {
+  if (TITLE.test(head)) return true;             // "Dr. Woodie Flowers ..."
+  const next = rest.trim().charAt(0);
+  const carriesOn = next !== '' && next === next.toLowerCase() && next !== next.toUpperCase();
+  if (MAYBE.test(head)) return carriesOn;        // "Inc. of ..." yes, "Inc. This" no
+  const letter = LETTER.exec(head);
+  if (letter) {
+    // "e.g." and "i.e." reach here as the "g." and the "e.": the period before
+    // the letter is what marks them as one spelled-out abbreviation.
+    if (letter[1] === '.') return true;
+    // Otherwise a lone letter: an initial when a name follows ("J. F. Kennedy"),
+    // and the end of a sentence when it does not. A sentence that genuinely
+    // ends on a capital letter followed by another capital ("the team earns an
+    // A. The judges then ...") is read as an initial and runs on; it is the one
+    // case this cannot separate, and it is rarer in an award definition than a
+    // person's initials, so it is the one to lose.
+    return next !== '' && next === next.toUpperCase() && next !== next.toLowerCase();
+  }
+  return false;
+};
 
 /**
  * The first real sentence, skipping periods that only end an abbreviation.
@@ -98,15 +139,14 @@ const ABBREVIATION =
  * which is the first period in almost any prose that names a person: a
  * definition opening "Dr. Woodie Flowers believed..." put the two characters
  * "Dr." on the plate, alone, in 38px type, under the award title, in front of
- * the hall. Walk the candidates instead and take the first that is not an
- * abbreviation; if every one of them is, fall back to the whole text, which
- * the caller then truncates.
+ * the hall. If every candidate looks like an abbreviation, fall back to the
+ * whole text, which the caller then truncates.
  */
 const firstSentenceOf = (text: string): string => {
   const ends = /[.!?](?=\s|$)/g;
   for (let m = ends.exec(text); m; m = ends.exec(text)) {
     const head = text.slice(0, m.index + 1);
-    if (!ABBREVIATION.test(head)) return head;
+    if (!endsAbbreviation(head, text.slice(m.index + 1))) return head;
   }
   return text;
 };
