@@ -1928,6 +1928,47 @@ export function startServer(opts: ServerOpts) {
         }
       }
 
+      /*
+       * The tab icon, drawn rather than stored.
+       *
+       * Two things wanted this. Every browser asks for /favicon.ico whether a
+       * page links one or not, so every surface was logging a 404 on load,
+       * including the OBS Browser Sources and the pit-TV kiosks that reload
+       * themselves all weekend. And a desk manager runs six consoles at once:
+       * desk, replay, talent, trivia host, house audio, cards. Chrome gives a
+       * background tab about fifteen pixels of title and an icon, and the
+       * titles all begin the same way, so the icon is the only thing that
+       * tells them apart at a glance mid-show.
+       *
+       * Generated as an SVG so it costs no binary asset and can carry the
+       * surface's own letter: /favicon.svg?l=R for the replay console. Gold on
+       * the brand purple, chamfered like everything else.
+       */
+      if (path === '/favicon.svg' || path === '/favicon.ico') {
+        const raw = (url.searchParams.get('l') ?? '').trim().slice(0, 2);
+        // Letters only, and drawn as a path-free <text>: anything else that
+        // reached this would be echoed into markup the browser parses.
+        const letter = /^[A-Za-z0-9]{1,2}$/.test(raw) ? raw.toUpperCase() : '';
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">`
+          + `<path d="M0 0 H52 L64 12 V64 H12 L0 52 Z" fill="#560f6b"/>`
+          + `<path d="M0 0 H52 L64 12 V64 H12 L0 52 Z" fill="none" `
+          + `stroke="#f0af00" stroke-width="6"/>`
+          + (letter
+            ? `<text x="32" y="33" fill="#f0af00" font-family="Arial Narrow,`
+              + ` Helvetica, sans-serif" font-weight="700" `
+              + `font-size="${letter.length > 1 ? 30 : 42}" text-anchor="middle" `
+              + `dominant-baseline="central">${letter}</text>`
+            : '')
+          + `</svg>`;
+        res.writeHead(200, {
+          'content-type': 'image/svg+xml',
+          // A whole event on one icon; it never changes within a session.
+          'cache-control': 'public, max-age=86400',
+        });
+        res.end(svg);
+        return;
+      }
+
       // ---- Static mounts -------------------------------------------------
       const mounts: [string, string][] = [
         ['/theme/',  join(root, 'packages', 'theme')],
