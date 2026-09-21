@@ -785,11 +785,15 @@ function paintBook() {
       'or put a name on air and it is remembered.</p>';
     return;
   }
-  list.replaceChildren(...book.map(p => {
+  // Same reason as paintOnAir: ticking a name rebuilds this whole list, so a
+  // keyboard operator ticking three people lost the list twice.
+  keepingFocus(list, 'book', () => list.replaceChildren(...book.map(p => {
     const label = document.createElement('label');
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = onAir.includes(p.id);
+    box.dataset.book = p.id;
+    box.dataset.act = 'tick';
     box.onchange = () => toggle(p.id, box.checked);
 
     const who = document.createElement('span');
@@ -862,7 +866,7 @@ function paintBook() {
 
     label.append(box, who, stu, kill);
     return label;
-  }));
+  })));
 }
 
 function toggle(id, on) {
@@ -891,6 +895,36 @@ function move(id, delta) {
   paintOnAir();
 }
 
+/**
+ * Rebuild a list without throwing the keyboard out.
+ *
+ * replaceChildren destroys the focused node, so focus falls to <body> and the
+ * next Tab restarts at the top of a twenty-section console. On the On camera
+ * panel that happened on EVERY press: the move-left and move-right buttons
+ * repaint the list they live in, so an operator ordering five people by
+ * keyboard lost their place five times, on a console whose first line of copy
+ * is "Keyboard-first". The cue list already solved this; this is that solution
+ * with the identifying attributes passed in.
+ *
+ * Falls through to the same row's other control, then to anything enabled in
+ * the box, because landing somewhere always beats landing nowhere.
+ */
+function keepingFocus(box, keyAttr, rebuild) {
+  const active = document.activeElement;
+  const held = active && box.contains(active) && active.dataset[keyAttr]
+    ? { key: active.dataset[keyAttr], act: active.dataset.act }
+    : null;
+  rebuild();
+  if (!held) return;
+  const attr = keyAttr.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);
+  const esc = v => (window.CSS && CSS.escape ? CSS.escape(v) : v);
+  const target =
+    box.querySelector(`[data-${attr}="${esc(held.key)}"][data-act="${held.act}"]:not([disabled])`)
+    ?? box.querySelector(`[data-${attr}="${esc(held.key)}"]:not([disabled])`)
+    ?? box.querySelector('button:not([disabled]), input:not([disabled])');
+  if (target) target.focus();
+}
+
 function paintOnAir() {
   const box = $('panelOnAir');
   if (!onAir.length) {
@@ -898,7 +932,7 @@ function paintOnAir() {
     $('panelHint').textContent = 'Tick a name to put them on. Six maximum.';
     return;
   }
-  box.replaceChildren(...onAir.map((id, i) => {
+  keepingFocus(box, 'seat', () => box.replaceChildren(...onAir.map((id, i) => {
     const p = book.find(b => b.id === id);
     const row = document.createElement('div');
     row.className = 'seat';
@@ -916,6 +950,7 @@ function paintOnAir() {
     left.title = 'Move one seat left';
     left.setAttribute('aria-label', `Move ${p ? p.name : 'this person'} one seat left`);
     left.disabled = i === 0;
+    left.dataset.seat = id; left.dataset.act = 'left';
     left.onclick = () => move(id, -1);
 
     const right = document.createElement('button');
@@ -924,6 +959,7 @@ function paintOnAir() {
     right.title = 'Move one seat right';
     right.setAttribute('aria-label', `Move ${p ? p.name : 'this person'} one seat right`);
     right.disabled = i === onAir.length - 1;
+    right.dataset.seat = id; right.dataset.act = 'right';
     right.onclick = () => move(id, 1);
 
     const off = document.createElement('button');
@@ -931,11 +967,12 @@ function paintOnAir() {
     off.append(iconEl('x'));
     off.title = 'Take off air';
     off.setAttribute('aria-label', `Take ${p ? p.name : 'this person'} off air`);
+    off.dataset.seat = id; off.dataset.act = 'off';
     off.onclick = () => toggle(id, false);
 
     row.append(n, who, left, right, off);
     return row;
-  }));
+  })));
   $('panelHint').textContent = `${onAir.length} on air, seat 1 on the audience's left. ` +
     `Press Put on air to update the graphic.`;
 }

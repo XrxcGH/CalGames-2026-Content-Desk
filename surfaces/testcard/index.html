@@ -128,11 +128,20 @@ body {
      to whatever this wall is, so the sample must scale the same way. Fixed
      pixels let a 768-line projector pass a readability test the real
      graphics then failed (the sample drew 40% larger than broadcast type),
-     and made a 4K wall fail one it would pass. */
-  font-size: calc(28 / 1080 * 100vh);
+     and made a 4K wall fail one it would pass.
+
+     min() of both axes, not height alone. The stage is scaled to FIT, which
+     is min(vw/1920, vh/1080), so on any display narrower than 16:9 the
+     height-only form over-sized the sample by the whole difference in aspect:
+     11% on 16:10, 33% on 4:3. A projector in a school gym is very often 16:10
+     or 4:3, and this is the one screen whose entire job is to be measured
+     against, so it was sending exactly the wrong answer to exactly the rooms
+     most likely to have a problem. */
+  font-size: min(calc(28 / 1920 * 100vw), calc(28 / 1080 * 100vh));
 }
 #floor small { display: block; font-family: var(--font-cond); font-weight: 600;
-  font-size: calc(14 / 1080 * 100vh); color: var(--cg-white-dim); letter-spacing: .12em;
+  font-size: min(calc(14 / 1920 * 100vw), calc(14 / 1080 * 100vh));
+  color: var(--cg-white-dim); letter-spacing: .12em;
   text-transform: uppercase; margin-top: 4px; }
 </style>
 </head>
