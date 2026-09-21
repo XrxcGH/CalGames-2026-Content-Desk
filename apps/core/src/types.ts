@@ -396,6 +396,26 @@ export interface CardState {
   byTeam: Record<number, { yellows: number; reds: number; phase: TournamentPhase }>;
   /** Issued in the match currently loaded, for the post-match graphic. */
   thisMatch: { team: number; color: CardColor; alliance: Alliance }[];
+  /**
+   * Every card already counted, as "match|team|colour".
+   *
+   * The same key CardLedger uses, and for the same reason: the field re-sends
+   * its whole card map on every arena update, so a card has to be recognised
+   * as one it has already seen. Deduping on `thisMatch` looked equivalent and
+   * was not, because match.loaded empties thisMatch, so the two cases where a
+   * card arrives across a load both went wrong.
+   *
+   * A scorekeeper REPLAY of a match reloads it, the card stands, the field
+   * re-sends it, and the reducer counted it twice: one yellow silently became
+   * two, which is a red on the graphic, while /api/discipline still correctly
+   * said one. And the boot rebuild replays card.issued with no load between
+   * them, so the whole day's cards collapsed onto one entry per team and
+   * colour: a team's second yellow of the day was swallowed, and the desk
+   * disagreed with the ledger for the rest of quals.
+   *
+   * Cleared at a phase boundary with byTeam, since no card crosses one.
+   */
+  seen: string[];
 }
 
 /**
@@ -633,7 +653,7 @@ export const initialState = (): DeskState => ({
   announcement: null,
   status: null,
   emergency: null,
-  cards: { byTeam: {}, thisMatch: [] },
+  cards: { byTeam: {}, thisMatch: [], seen: [] },
   cardCall: null,
   award: null,
   slide: null,

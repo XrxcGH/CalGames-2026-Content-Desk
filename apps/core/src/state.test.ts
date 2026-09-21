@@ -589,3 +589,63 @@ test('a hold on the Final screen does not survive into the next match', () => {
   assert.equal(s.screen, 'arcade', 'an arcade hold still means something next match');
   assert.equal(s.screenHold, true);
 });
+
+test('a replayed match does not turn one yellow into two', () => {
+  /*
+   * The field re-sends its whole card map on every arena update, so the
+   * reducer has to recognise a card it has already counted. It did that by
+   * looking in cards.thisMatch, which match.loaded empties.
+   *
+   * So: 846 picks up a yellow in Q43, the score posts, and the scorekeeper
+   * replays Q43. The card stands, the field re-sends it, thisMatch has just
+   * been emptied by the reload, and the reducer counts it again. One yellow
+   * becomes two, and two yellows is a red on the graphic, while
+   * /api/discipline still correctly says one.
+   */
+  const card = (m: string, team: number, color: string) =>
+    ({ team, card: color, alliance: 'red', match: m });
+
+  let s = initialState();
+  s = reduce(s, ev('match.loaded', T0, { id: 'q43', displayName: 'Qualification 43', red: [], blue: [] }));
+  s = reduce(s, ev('card.issued', T0 + 1, card('Qualification 43', 846, 'yellow')));
+  assert.equal(s.cards.byTeam[846]?.yellows, 1);
+
+  // The field re-sends it inside the same match, as it does constantly.
+  s = reduce(s, ev('card.issued', T0 + 2, card('Qualification 43', 846, 'yellow')));
+  assert.equal(s.cards.byTeam[846]?.yellows, 1, 'a repeat inside the match is still ignored');
+
+  // The scorekeeper replays the match. The card stands, so it arrives again.
+  s = reduce(s, ev('match.loaded', T0 + 3, { id: 'q43', displayName: 'Qualification 43', red: [], blue: [] }));
+  s = reduce(s, ev('card.issued', T0 + 4, card('Qualification 43', 846, 'yellow')));
+  assert.equal(s.cards.byTeam[846]?.yellows, 1,
+    'a replayed match must not promote a yellow to a red');
+
+  // A yellow in a DIFFERENT match is a real second yellow.
+  s = reduce(s, ev('match.loaded', T0 + 5, { id: 'q44', displayName: 'Qualification 44', red: [], blue: [] }));
+  s = reduce(s, ev('card.issued', T0 + 6, card('Qualification 44', 846, 'yellow')));
+  assert.equal(s.cards.byTeam[846]?.yellows, 2, 'and the second match still counts');
+});
+
+test('a restart rebuilds the day without swallowing the second yellow', () => {
+  /*
+   * The boot rebuild replays card.issued and deliberately does NOT replay
+   * match.loaded, so nothing cleared thisMatch between them. Deduping on
+   * thisMatch therefore collapsed the whole day onto one entry per team and
+   * colour: a team's second yellow of the day disappeared, and the snapshot
+   * disagreed with /api/discipline for the rest of quals. Every card issued
+   * today also piled into thisMatch, which is what the final-score screen
+   * draws as chips, so a desk restarted at lunchtime put the day's entire
+   * discipline record on the next final score.
+   */
+  const card = (m: string, team: number, color: string) =>
+    ({ team, card: color, alliance: 'red', match: m });
+
+  let s = initialState();
+  s = reduce(s, ev('card.issued', T0 + 1, card('Qualification 5', 846, 'yellow')));
+  s = reduce(s, ev('card.issued', T0 + 2, card('Qualification 20', 846, 'yellow')));
+
+  assert.equal(s.cards.byTeam[846]?.yellows, 2,
+    'two yellows in two matches is two yellows, which is a red');
+  assert.deepEqual(s.cards.thisMatch, [],
+    'and none of the day lands on the next match’s final-score chips');
+});

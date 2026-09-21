@@ -159,6 +159,11 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
             byTeam: Object.fromEntries(Object.entries(state.cards.byTeam)
               .filter(([, c]) => c.phase === phaseOf(p?.displayName ?? ''))),
             thisMatch: [],
+            // Survives the load, because the field re-sends a standing card
+            // after a replay and it must not be counted again. Dropped at a
+            // phase boundary with byTeam, since no card crosses one.
+            seen: state.cards.seen.filter(k =>
+              phaseOf(k.slice(0, k.indexOf('|'))) === phaseOf(p?.displayName ?? '')),
           },
           cardCall: null,
           // Still validated rather than trusted: the payload arrives off a
@@ -441,24 +446,33 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       /**
        * A card is a state a team carries, so it accumulates here.
        *
-       * Deduped by team and colour WITHIN the loaded match: the field re-sends
-       * its whole card map on every arena update, and counting one yellow
-       * twice would silently promote it to a red on the graphic.
+       * Deduped by MATCH, team and colour, which is the key CardLedger uses.
+       * The field re-sends its whole card map on every arena update, so a
+       * repeat has to be recognised; deduping on `thisMatch` did that only
+       * until something reset thisMatch, and match.loaded resets it. See
+       * CardState.seen for the two ways that went wrong.
        */
       case 'card.issued': {
-        const p = ev.payload as { team?: unknown; card?: unknown; alliance?: unknown };
+        const p = ev.payload as {
+          team?: unknown; card?: unknown; alliance?: unknown; match?: unknown;
+        };
         const team = Number(p.team);
         if (!Number.isInteger(team) || team <= 0) return state;
         if (p.card !== 'yellow' && p.card !== 'red') return state;
         const color = p.card;
-        if (state.cards.thisMatch.some(c => c.team === team && c.color === color)) return state;
+        // The match the card belongs to: from the event when the emitter said
+        // so, which is what lets a boot-time restore of card.issued alone
+        // rebuild this, and otherwise the loaded match.
+        const cardMatch = String(p.match ?? '') || (state.match?.displayName ?? '');
+        const key = `${cardMatch}|${team}|${color}`;
+        if (state.cards.seen.includes(key)) return state;
 
         // The phase comes from the event when the emitter said so (which is
         // what makes a boot-time restore of card.issued alone reconstruct
         // this correctly), falling back to the loaded match. A prior entry
         // from an OLDER phase starts over rather than accumulating: the
         // manual's rule is that no card crosses a phase boundary.
-        const phase = phaseOf(String((p as { match?: unknown }).match ?? state.match?.displayName ?? ''));
+        const phase = phaseOf(cardMatch);
         const prior0 = state.cards.byTeam[team];
         const prior = prior0 && prior0.phase === phase ? prior0 : { yellows: 0, reds: 0, phase };
         return {
@@ -472,8 +486,20 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
                 phase,
               },
             },
-            thisMatch: [...state.cards.thisMatch,
-              { team, color, alliance: p.alliance === 'blue' ? 'blue' : 'red' }],
+            /*
+             * Only when the card belongs to the match that is loaded.
+             *
+             * thisMatch drives the post-match card chips, and the boot rebuild
+             * replays the whole day's card.issued events with no match loaded
+             * at all. Every card issued today used to land here, so a desk
+             * restarted mid-afternoon put the day's entire discipline record
+             * on the next final-score screen.
+             */
+            thisMatch: cardMatch === (state.match?.displayName ?? '')
+              ? [...state.cards.thisMatch,
+                { team, color, alliance: p.alliance === 'blue' ? 'blue' : 'red' }]
+              : state.cards.thisMatch,
+            seen: [...state.cards.seen, key],
           },
         };
       }
