@@ -38,6 +38,7 @@
     "auth:spotify": "node --experimental-strip-types apps/core/src/audio/spotify-auth.ts",
     "previews": "node tools/render-previews.mjs",
     "handbook": "node tools/make-handbook.mjs",
+    "fix:logos": "node --experimental-strip-types tools/fix-logo-black.mjs",
     "check:launcher": "powershell -ExecutionPolicy Bypass -File tools/launcher/check-build.ps1"
   },
   "dependencies": {

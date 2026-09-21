@@ -14,6 +14,14 @@ html {
   background-size: var(--tex-perf-size), var(--geo-size), cover;
   background-attachment: fixed;
   min-height: 100%;
+  /* This one is driven by a stick PC nobody touches again after Friday, so
+     without this the mouse pointer sits parked on the pit TV all weekend.
+     Cheesy Arena does the same on its own queueing display for the same
+     reason. Selection and scrollbars go with it: there is no user here. */
+  cursor: none;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Venue side screens: pit TVs and the queueing area, read from 20-60ft.
@@ -40,6 +48,22 @@ html {
 
 .panel-screen { position: absolute; inset: 0; display: none; padding: var(--safe-y) var(--safe-x); }
 .panel-screen[data-active] { display: flex; flex-direction: column; }
+
+/* An entrance, because this is the one surface where nobody has audio and
+   nobody is looking directly at the screen.
+   The panes used to swap on bare display:none/flex, so the pit TV and the
+   queueing screen changed content every 14 seconds with no cue whatsoever.
+   docs/08 derives the travel for this exact surface: 320px, or nobody in the
+   back half of the gym registers the change. Transform only, so it stays
+   cheap on a stick PC. */
+@keyframes cg-side-in {
+  from { opacity: 0; transform: translateY(var(--travel-lg)); }
+  to   { opacity: 1; transform: none; }
+}
+.panel-screen[data-active] { animation: cg-side-in var(--dur-in) var(--ease-enter) both; }
+@media (prefers-reduced-motion: reduce) {
+  .panel-screen[data-active] { animation: none; }
+}
 
 /* Line heights are pinned rather than left to the font's default leading.
    At 72-84px a default 1.4 line box adds ~90px of invisible padding to the
@@ -758,6 +782,10 @@ fetch('/api/urls').then(r => r.json()).then(({ base }) => {
 }).catch(() => { /* QR is a bonus, never a blocker */ });
 
 // A new match loading is the one thing worth interrupting the rotation for.
+// restart() removes and re-adds data-active to re-trigger the entrance. Until
+// this pane HAD an entrance, that was a one-frame flicker and nothing else:
+// the single moment this surface deliberately tries to draw attention, on the
+// screen a queueing line is watching for exactly that, produced no cue at all.
 desk.on('match.loaded', () => {
   show(true);
   restart($('scr-deck'), 'data-active');

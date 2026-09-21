@@ -83,9 +83,13 @@
 .ov-robots { flex: 1; min-height: 0; display: grid;
   grid-template-rows: repeat(var(--n, 3), minmax(0, 1fr));
   gap: var(--gap); }
+/* Above the robots, not below: the band is the alliance, and it has to be
+   read before the teams rather than after them. The gold cap on top then
+   lines up with the gold cap on the header tick, so the column reads as one
+   object starting at its own edge. */
 .ov-band {
   position: relative;
-  margin-top: var(--gap); padding: 12px 0; text-align: center;
+  margin-bottom: var(--gap); padding: 12px 0; text-align: center;
   font-family: var(--font-cond); font-weight: 700;
   font-size: var(--t-label); letter-spacing: .2em; text-transform: uppercase;
   text-indent: .2em;
@@ -192,6 +196,18 @@
 /* ==========================================================================
    Score bar
    ========================================================================== */
+/* The scorebug SLIDES UP out of frame rather than blinking on.
+   It used to carry no entrance at all, so it appeared fully formed at the
+   sweep's midpoint: the overview-to-match transition, which is the most-used
+   transition of the weekend at six to eight an hour, was indistinguishable
+   from arcade-to-sponsor. The bar already sits at bottom:0, so the
+   nearest-edge rule in docs/08 picks the direction, and this animates
+   transform only, which is what keeps it cheap in a browser source. */
+@keyframes cg-bar-in { from { transform: translateY(100%); } to { transform: none; } }
+.screen[data-active] > .bar { animation: cg-bar-in var(--dur-in) var(--ease-enter) both; }
+@media (prefers-reduced-motion: reduce) {
+  .screen[data-active] > .bar { animation: none; }
+}
 .bar {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--bar-h);
   display: grid; grid-template-columns: 1fr 420px 1fr;
@@ -363,13 +379,27 @@
   letter-spacing: .14em; text-transform: uppercase; color: var(--cg-white);
   white-space: nowrap;
 }
+/* The SAME purple as the bar it grows out of, and the same gradient.
+   The tab's face was flat --cg-purple against the bar's
+   purple-lo-to-purple-deep, so the two visibly differed exactly where they
+   meet and the tab read as a chip sitting ON the scorebug rather than part
+   of it, which is the one thing the +3px offset above was reaching for. */
 .hub::before {
   content: ""; position: absolute; inset: 3px 3px 0;
-  background-color: var(--cg-purple);
-  background-image: var(--tex-perf); background-size: var(--tex-perf-size);
+  background-color: var(--cg-purple-deep);
+  background-image: var(--tex-perf),
+    linear-gradient(180deg, var(--cg-purple-lo), var(--cg-purple-deep));
+  background-size: var(--tex-perf-size), cover;
   --ch: 12px;
   clip-path: polygon(var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
                      100% 100%, 0 100%, 0 var(--ch));
+}
+/* Luma mode flattens the bar to a single fill; the tab has to follow it there
+   too, or the join reappears on the one output where it matters most. */
+:root[data-key="luma"] .hub::before {
+  background-color: var(--cg-purple);
+  background-image: var(--tex-perf);
+  background-size: var(--tex-perf-size);
 }
 .hub > * { position: relative; }
 /* The trailing letter-space widens the label's box past its ink, so the

@@ -10,6 +10,36 @@ weekend.
 
 ---
 
+## Pure black keys out
+
+A luma downstream keyer cuts on brightness, so black anywhere in a graphic
+becomes a hole with live field video showing through it. A robot photographed
+against a dark pit curtain carries a lot of near-black; a sponsor wordmark
+delivered as black-on-transparent PNG, which is how most of them arrive, is
+black end to end.
+
+Cheesy Arena hits the same wall and ships a script for it
+(`fix_avatar_colors_for_overlay`, an ImageMagick pass replacing `#000` with
+`#222` across every downloaded team avatar). The desk does the same thing in
+two places:
+
+- **Robot photos** are floored on import. Nothing to remember: upload as usual
+  and any pixel darker than `#222` comes up to it, alpha untouched, so a
+  cutout's transparent surround stays transparent.
+- **Sponsor logos and slides** are dropped into `media/` by hand and never pass
+  through that path, so they need the pre-event pass:
+
+      npm run fix:logos
+
+  Run it on Friday once the logos are in and before doors. It is safe to run
+  twice. An SVG cannot be fixed this way, because its black is `fill="#000"`
+  rather than a pixel; the tool lists any it finds so somebody can change them
+  by hand or re-export a PNG.
+
+`#222` is dark enough to still read as black in the room and far enough off the
+floor that no sane keyer takes it.
+
+
 ## The screen
 
 ```

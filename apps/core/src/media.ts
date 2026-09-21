@@ -128,6 +128,62 @@ function hasTrns(buf: Buffer): boolean {
 type Sharp = (typeof import('sharp'))['default'];
 let sharpMod: Sharp | null | undefined;
 
+/**
+ * The darkest any opaque pixel is allowed to be once it is on air.
+ *
+ * A luma downstream keyer cuts on brightness, so PURE BLACK anywhere in a
+ * graphic becomes a hole with live field video showing through it. Cheesy
+ * Arena hits the same wall and answers it the same way: it ships a
+ * `fix_avatar_colors_for_overlay` script that does a pre-event ImageMagick
+ * pass replacing #000 with #222 across every downloaded team avatar.
+ *
+ * The desk has the identical hazard at far greater area. A robot photographed
+ * against a dark pit curtain carries a lot of near-black, and a sponsor
+ * wordmark delivered as black-on-transparent PNG, which is how most of them
+ * arrive, is ENTIRELY black. The sponsor case is the worse one: the graphic
+ * whose whole purpose is to show somebody's mark would have shown the match
+ * through the letterforms instead.
+ *
+ * 0x22 matches the arena's number. It is below --cg-purple-deep in luma, so
+ * it still reads as black in the room, and it is far enough off the floor
+ * that no sane keyer takes it.
+ */
+export const KEY_FLOOR = 0x22;
+
+/**
+ * Raise pure and near-pure black to KEY_FLOOR, leaving alpha alone.
+ *
+ * Only the RGB channels move, so a cut-out's transparent surround stays
+ * transparent: this is about what happens to pixels that are DRAWN, not about
+ * the shape of the cut. Applied at import rather than at render because it
+ * has to reach the file the browser source loads, and because doing it once
+ * per upload costs nothing where doing it per frame would.
+ */
+export async function floorBlack(sharp: Sharp, png: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(png)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let touched = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    // Transparent pixels are not on air, whatever their RGB says.
+    if (data[i + 3] === 0) continue;
+    if (data[i]! < KEY_FLOOR && data[i + 1]! < KEY_FLOOR && data[i + 2]! < KEY_FLOOR) {
+      data[i] = Math.max(data[i]!, KEY_FLOOR);
+      data[i + 1] = Math.max(data[i + 1]!, KEY_FLOOR);
+      data[i + 2] = Math.max(data[i + 2]!, KEY_FLOOR);
+      touched++;
+    }
+  }
+  // Nothing to do is the common case for a well-lit cutout; skip the re-encode.
+  if (touched === 0) return png;
+
+  return await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: 4 },
+  }).png().toBuffer();
+}
+
 async function getSharp(): Promise<Sharp | null> {
   if (sharpMod !== undefined) return sharpMod;
   try {
@@ -238,7 +294,10 @@ export class MediaLibrary {
       w = trimmed.info.width;
       h = trimmed.info.height;
 
-      const { perimeter, area } = await this.#opacity(sharp, trimmed.data);
+      // Pure black keys out. See KEY_FLOOR.
+      const keyed = await floorBlack(sharp, trimmed.data);
+
+      const { perimeter, area } = await this.#opacity(sharp, keyed);
       // Perimeter is the discriminating signal, not area. Plenty of FRC robots
       // are boxy enough to fill their own bounding box, so an area test flags
       // perfectly good cutouts. An *uncut* photo is the one whose edges are
@@ -253,10 +312,10 @@ export class MediaLibrary {
           'have been cut out. Worth a second look.');
       }
 
-      await writeFile(join(dir, `robot.v${version}.png`), trimmed.data);
+      await writeFile(join(dir, `robot.v${version}.png`), keyed);
       for (const width of WIDTHS) {
         if (width > w) continue;
-        await sharp(trimmed.data).resize({ width }).webp({ quality: 88 })
+        await sharp(keyed).resize({ width }).webp({ quality: 88 })
           .toFile(join(dir, `robot.v${version}@${width}.webp`));
       }
     } else {
