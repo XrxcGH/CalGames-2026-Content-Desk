@@ -368,6 +368,17 @@ $('statusShowCustom').onclick = () => {
   const message = $('statusCustom').value.trim();
   if (message) showStatus('custom', message);
 };
+/*
+ * How much room is left, counted where the operator is typing rather than
+ * discovered on the program feed. The plate holds three lines of display type,
+ * which is 90 characters even in capitals, and the reducer keeps the same 90.
+ * Quiet until the last stretch: a counter that shouts from character one is a
+ * counter nobody reads.
+ */
+$('statusCustom').addEventListener('input', () => {
+  const left = 90 - $('statusCustom').value.length;
+  $('statusLeft').textContent = left <= 30 ? `${left} left` : '';
+});
 $('statusClear').onclick = () => { emit('status.hide'); $('statusMin').value = ''; };
 
 /** Shadow scoring publishes at `estimated`. The overlay renders it outlined. */
@@ -1597,7 +1608,16 @@ function paintAwards() {
       tick.type = 'radio';
       tick.name = 'awardPick';
       tick.checked = awardPicked === a.id;
-      tick.onchange = () => { awardPicked = a.id; };
+      tick.onchange = () => {
+        awardPicked = a.id;
+        // The list and the custom box are two ways to say the same thing, so
+        // choosing one clears the other. They used to be able to hold
+        // conflicting answers at once, which Show could only refuse.
+        if ($('awCustomTitle').value || $('awCustomDesc').value) {
+          $('awCustomTitle').value = '';
+          $('awCustomDesc').value = '';
+        }
+      };
       const who = document.createElement('span');
       who.className = 'who';
       const num = document.createElement('i');
@@ -1624,17 +1644,29 @@ function paintAwards() {
   box.replaceChildren(...rows);
 }
 
+/*
+ * Typing a custom title releases the list selection.
+ *
+ * A radio group cannot be deselected by clicking, and nothing else ever set
+ * awardPicked back to null, so once any listed award had been picked, the
+ * Show handler's both-are-set refusal was inescapable: it told the operator
+ * to "clear the selection" using a control that does not exist on this page.
+ * Mid ceremony, with the hall waiting, the only way out was reloading the
+ * console. Clearing it here means the two inputs can never disagree, so the
+ * refusal is gone rather than merely escapable.
+ */
+for (const el of [$('awCustomTitle'), $('awCustomDesc')]) {
+  el.addEventListener('input', () => {
+    if (!awardPicked) return;
+    awardPicked = null;
+    if (awardSnap) paintAwards();
+    $('awHint').textContent = 'Using the custom award below. '
+      + 'Pick from the list again to go back to it.';
+  });
+}
+
 $('awShow').onclick = async () => {
   const custom = $('awCustomTitle').value.trim();
-  // A leftover custom title used to win silently over the picked award, so
-  // the plate showed one award while the list highlighted another, mid
-  // ceremony. If both are set the operator has to say which they meant.
-  if (custom && awardPicked) {
-    $('awHint').textContent = 'Both a picked award and a custom title are set. '
-      + 'Clear the custom title box to show the picked award, or clear the '
-      + 'selection to show the custom one.';
-    return;
-  }
   const body = {
     action: 'show',
     ...(custom ? { title: custom, description: $('awCustomDesc').value.trim() }
@@ -1653,6 +1685,12 @@ $('awShow').onclick = async () => {
     });
     const out = await res.json();
     if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    if (custom) {
+      // Otherwise the title sits in the box and silently becomes the next
+      // award too, which is the same collision in reverse.
+      $('awCustomTitle').value = '';
+      $('awCustomDesc').value = '';
+    }
     $('awHint').textContent = $('awWinnerIn').value.trim()
       ? 'On screen. The winner is loaded and hidden: press Reveal on the GA\'s cue.'
       : 'On screen. Type the winner, then press Reveal.';

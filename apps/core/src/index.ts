@@ -115,7 +115,16 @@ try {
   // lifecycles, and an untagged log fed them to the next boot's rebuild as
   // the day's history (rehearsal cards on the ledger, phantom coverage,
   // inflated sponsor counts). Tagged names are refused by isFromDay().
-  const rehearsalTag = has('demo') || has('replay') ? 'rehearsal' : undefined;
+  //
+  // --rehearsal is the same promise for a session driven BY HAND. The
+  // handbook tells the desk manager to run a practice match end to end, and
+  // to practise the ceremony, before doors; done on the real desk with no
+  // flag those presses are indistinguishable from the show, so the next boot
+  // replayed them. A practice award reveal is the worst of them: it marks
+  // that award presented, to a team that did not win it, on the checklist
+  // the crew walks during the one segment that cannot be re-run.
+  const rehearsalTag = has('demo') || has('replay') || has('rehearsal')
+    ? 'rehearsal' : undefined;
   await bus.openLog(logPathFor(join(ROOT, 'data', 'events'), new Date(), rehearsalTag));
   if (rehearsalTag) {
     console.log('[bus] rehearsal session: logging to a .rehearsal file the ' +

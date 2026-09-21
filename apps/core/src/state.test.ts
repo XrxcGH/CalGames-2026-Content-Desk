@@ -204,6 +204,41 @@ test('the automatic timeout card never overwrites the producer', () => {
   assert.equal(s.status?.kind, 'fault');
 });
 
+test('the status card is built field by field, not taken as sent', () => {
+  // This plate floats over the live field picture and is the one thing the
+  // hall reads during a stoppage. It used to be whatever arrived, cast onto
+  // the state, which is how each of these reached air.
+
+  // A message longer than the plate holds is cut here, where the cut is
+  // deliberate and bounded, rather than by a CSS clamp that drops the tail
+  // silently and tells nobody.
+  let s = reduce(initialState(), ev('status.show', T0,
+    { kind: 'delay', message: 'x'.repeat(400), backAt: null }));
+  assert.equal(s.status?.message.length, 90);
+
+  // "Back at Invalid Date", in 44px type, in front of the room.
+  s = reduce(initialState(), ev('status.show', T0,
+    { kind: 'delay', message: 'Field delay', backAt: 'soon' }));
+  assert.equal(s.status?.backAt, null, 'a backAt that is not a time is no time');
+
+  // An unknown kind fell through to a label no surface had a colour for.
+  s = reduce(initialState(), ev('status.show', T0,
+    { kind: 'meltdown', message: 'Field delay', backAt: null }));
+  assert.equal(s.status?.kind, 'custom', 'unknown kinds land on the styled fallback');
+
+  // An empty card is a gold plate with nothing on it: worse than no card.
+  const before = reduce(initialState(), ev('status.show', T0,
+    { kind: 'delay', message: 'Field delay', backAt: null }));
+  const after = reduce(before, ev('status.show', T0 + 1, { kind: 'delay', message: '   ' }));
+  assert.equal(after.status?.message, 'Field delay', 'a blank message changes nothing');
+
+  // And nothing else in the payload rides along onto the open state feed.
+  s = reduce(initialState(), ev('status.show', T0,
+    { kind: 'delay', message: 'Field delay', backAt: null, winner: 'Team 254' }));
+  assert.equal(JSON.stringify(s.status).includes('254'), false,
+    'only the three fields of a status card reach the surfaces');
+});
+
 test('the live camera is tracked separately from the graphic', () => {
   // Screens follow the match on their own; the shot does not. Keeping them
   // separate is what lets the graphics stay right when a three-person crew is

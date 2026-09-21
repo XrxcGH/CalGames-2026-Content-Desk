@@ -951,10 +951,30 @@ Print this. Tick it off.
 - [ ] Announcer mics tested through the stream, listening on a phone
 - [ ] Confirmed music does **not** appear on the stream
 
+**Practising without leaving a trace**
+
+The desk rebuilds the day from the day's event log every time it starts. A
+practice run on the event machine therefore comes back as if it really
+happened: practice cards on the announcer's ledger, matches nobody played in
+the coverage report, and a practised award reveal ticking that award off as
+presented, to a team that did not win it.
+
+**START-PRACTICE.cmd is already safe**: the pretend match it runs is tagged,
+and the desk sets its log aside. What needs the flag is a rehearsal you drive
+by hand on the real desk, which looks identical to the show. Start it with:
+
+```
+START-DESK.cmd /rehearsal
+```
+
+Everything behaves exactly as it does on the day; only the log is set aside.
+The desk says so at startup. Start it normally again before doors.
+
 **People**
 
 - [ ] Everyone has read their chapter
-- [ ] Desk manager has run a practice match end to end
+- [ ] Desk manager has run a practice match end to end, started in practice
+      mode so it does not become the day's history (see below)
 - [ ] Desk manager has run one match with the field disconnected, on purpose
 - [ ] Talent has seen the talent view and knows what an outlined number means
 

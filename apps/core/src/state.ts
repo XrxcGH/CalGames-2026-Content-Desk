@@ -14,7 +14,12 @@ import {
   type DeskEvent, type DeskState,
   type PanelState,
   type RpThresholds,
+  type StatusCard,
 } from './types.ts';
+
+/** The card kinds every surface has a colour scheme and a label for. */
+const STATUS_KINDS: readonly StatusCard['kind'][] =
+  ['delay', 'review', 'fault', 'replay', 'custom'];
 
 /** Sums, totals, and bonus RPs are always derived, never trusted from the
  *  wire. The auto/teleop parts are the source of truth; fuel and tower are
@@ -633,8 +638,42 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'pace.updated':
         return { ...state, pace: ev.payload as DeskState['pace'] };
 
-      case 'status.show':
-        return { ...state, status: ev.payload as DeskState['status'] };
+      /*
+       * Built field by field, like every other operator-typed string, rather
+       * than cast wholesale onto the state. This one used to be the exception:
+       * whatever arrived became the card. Three things came of that.
+       *
+       * A message had no cap while emergency has 200 and a card reason 160, so
+       * the only thing standing between a pasted paragraph and the program
+       * feed was a CSS clamp, which silently drops the overflow. 90 is what
+       * the plate holds, measured rather than reasoned: three lines of 44px
+       * display type in a 1100px box take 110 characters of ordinary prose but
+       * only 95 of all-caps, and an operator shouting into the box is exactly
+       * the case that would have clipped. The clamp stays as a backstop and
+       * should now never be reached. surfaces/desk keeps the same number.
+       *
+       * `backAt` was whatever was sent. A string put "Invalid Date" on the
+       * plate, in front of the hall, on the one line the room is reading.
+       *
+       * And an unknown `kind` printed the fallback "Update" over a card whose
+       * colour scheme it never matched, so it now falls back to 'custom',
+       * which every surface already styles.
+       */
+      case 'status.show': {
+        const p = ev.payload as Partial<StatusCard>;
+        const message = String(p.message ?? '').trim();
+        if (!message) return state;
+        const backAt = Number(p.backAt);
+        return {
+          ...state,
+          status: {
+            kind: STATUS_KINDS.includes(p.kind as StatusCard['kind'])
+              ? p.kind as StatusCard['kind'] : 'custom',
+            message: message.slice(0, 90),
+            backAt: Number.isFinite(backAt) && backAt > 0 ? backAt : null,
+          },
+        };
+      }
 
       case 'status.hide':
         return { ...state, status: null };

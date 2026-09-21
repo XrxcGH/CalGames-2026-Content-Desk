@@ -504,7 +504,13 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <div class="row">
           <label class="in" for="statusMin" style="font-family:var(--font-cond);font-weight:600;font-size: 14px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim)">Back in</label>
           <input id="statusMin" type="number" min="0" max="120" placeholder="min" style="width:70px">
-          <input id="statusCustom" placeholder="Custom message..." aria-label="Custom status message" style="flex:1;min-width:180px">
+          <!-- maxlength matches the 90 the reducer keeps and the plate holds
+               at three lines. Without it the box took a pasted paragraph, said
+               nothing, and the operator found out what fits by watching the
+               program feed. -->
+          <input id="statusCustom" placeholder="Custom message..." aria-label="Custom status message"
+            maxlength="90" style="flex:1;min-width:180px">
+          <span class="hint" id="statusLeft" aria-live="polite" style="min-width:86px"></span>
           <button class="btn needs-link" id="statusShowCustom">Show custom</button>
           <button class="btn needs-link" id="statusClear">Hide card</button>
         </div>

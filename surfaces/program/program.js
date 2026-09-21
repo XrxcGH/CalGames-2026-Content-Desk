@@ -446,11 +446,15 @@ function paintStatus(status) {
   }
   clearTimeout(statusLeaveTimer);
   delete card.dataset.leaving;
-  const back = status.backAt
-    ? ` (back ~${new Date(status.backAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`
-    : '';
   $('statusKind').textContent = STATUS_KIND[status.kind] ?? 'Update';
-  $('statusMsg').textContent = `${status.message}${back}`;
+  $('statusMsg').textContent = status.message;
+  // Its own element, not a suffix on the clamped message. See .sc-back.
+  const backEl = $('statusBack');
+  backEl.hidden = !status.backAt;
+  if (status.backAt) {
+    backEl.textContent = `Back ~${new Date(status.backAt)
+      .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  }
   card.hidden = false;
 }
 

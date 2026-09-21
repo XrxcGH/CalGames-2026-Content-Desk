@@ -242,7 +242,14 @@ export class Awards {
         id: uniqueSlug(title, new Set(this.#list.map(a => a.id))),
         title, description, blurb, day,
       };
-      this.#list.push(def);
+      // Inserted after the last award of its own ceremony, not at the end of
+      // the list. Appending put a new Saturday award behind every Sunday one,
+      // which reads wrong in config.json and used to break reorder outright.
+      const lastOfDay = day
+        ? this.#list.map(a => (a.day ?? '').toLowerCase()).lastIndexOf(day.toLowerCase())
+        : -1;
+      if (lastOfDay >= 0) this.#list.splice(lastOfDay + 1, 0, def);
+      else this.#list.push(def);
     }
     this.onListChanged?.(this.definitions);
     return { ...def };
@@ -262,10 +269,31 @@ export class Awards {
     if (from < 0) throw new Error(`There is no award "${id}".`);
     const step = delta < 0 ? -1 : 1;
     const day = (this.#list[from]!.day ?? '').toLowerCase();
-    const to = from + step;
-    if (to < 0 || to >= this.#list.length) return this.definitions;
-    // Only swap with a neighbour from the same ceremony.
-    if ((this.#list[to]!.day ?? '').toLowerCase() !== day) return this.definitions;
+
+    /*
+     * Swap with the neighbour IN THIS CEREMONY, which is not always the
+     * physical neighbour.
+     *
+     * This used to compare against `from + step` and refuse when that
+     * element belonged to another day. That held only while each day's
+     * awards sat together in the array, and define() appends a new award to
+     * the END of the list: add one Saturday award to the shipped twelve and
+     * it lands behind all nine Sunday awards, so its physical neighbour is a
+     * Sunday award and every press was refused. The page enables its buttons
+     * from the award's position inside its DAY GROUP, so both buttons at
+     * that seam looked live, answered 200, repainted identically, and the
+     * award could never be moved at all: the one thing the control exists
+     * for. Walking to the next same-day index instead makes the two agree
+     * however the array is arranged.
+     */
+    const peers: number[] = [];
+    this.#list.forEach((a, i) => {
+      if ((a.day ?? '').toLowerCase() === day) peers.push(i);
+    });
+    const k = peers.indexOf(from);
+    const to = peers[k + step];
+    if (to === undefined) return this.definitions;   // already first or last tonight
+
     const moved = this.#list[from]!;
     this.#list[from] = this.#list[to]!;
     this.#list[to] = moved;

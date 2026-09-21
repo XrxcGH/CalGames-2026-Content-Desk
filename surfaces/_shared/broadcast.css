@@ -35,6 +35,14 @@
   pointer-events: none;
 }
 #sweep[data-run] { animation: cg-sweep var(--dur-sweep) var(--ease-sweep) both; }
+/* tokens.css retires the `.sweep` class version under reduced motion but not
+   this one, which is the version program and trivia actually use: a viewer who
+   has asked for less motion still got a gold wedge thrown across the whole
+   frame on every screen change. The pane swap is on its own timer, so nothing
+   is lost but the wipe: the screen cuts instead. */
+@media (prefers-reduced-motion: reduce) {
+  #sweep[data-run] { animation: none; }
+}
 
 /* ==========================================================================
    Alliance overview: RSN-style, three robots a side. docs/07-team-media.md
@@ -217,19 +225,18 @@
    number carrying a card AND a surrogate mark (141px): the 1fr track grows
    11px, which slides the clock 11px off centre rather than clipping anything,
    and FRC has not issued a 5-digit number. */
-.bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px; }
+/* The FILL bleeds to the bottom edge; the INK is lifted off it. The alliance
+   ink ended 29.3px from the frame bottom, 8.5px inside the same 3.5%
+   action-safe line the outer edges were just pulled back to, so an
+   overscanning display cropped into the team numbers. The lift lives in each
+   column's OWN padding shorthand rather than in a shared `.bar > *` rule:
+   that selector weighs exactly what `.bar-side` and `.bar-center` weigh, so
+   it was settled by source order, and .bar-center's shorthand further down
+   the file quietly took the lift back off the clock. */
+.bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px 18px; }
 .bar-side--red  { padding-left: var(--safe-x);  background: var(--alliance-red);  border-right: var(--rule); }
 .bar-side--blue { padding-right: var(--safe-x); background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; }
 
-/* The FILL bleeds to the bottom edge; the INK is lifted off it.
-   The alliance ink ended 29.3px from the frame bottom, 8.5px inside the same
-   3.5% action-safe line the outer edges were just pulled back to, so an
-   overscanning display cropped into the team numbers. Padding the three
-   COLUMNS rather than the bar leaves the bar's height, border and bleed
-   exactly as they were, and lifts all three together so the clock stays
-   level with the teams. Declared AFTER .bar-side because the two selectors
-   weigh the same and that rule's `padding` shorthand resets this to zero. */
-.bar > * { padding-bottom: 18px; }
 
 .bar-teams {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
@@ -293,7 +300,20 @@
 .bar-rp .rp { background: rgba(0, 0, 0, .30); box-shadow: none; color: rgba(255, 255, 255, .72); }
 .bar-rp .rp[data-earned="true"] { background: var(--cg-green-hi); color: var(--cg-white); }
 
-.bar-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 0 12px; }
+/* The same 18px lift the alliance columns take, so this column's stack stays
+   level with the team numbers (both centre on y=993, measured).
+
+   KNOWN, and a decision rather than an oversight: the clock plus the phase
+   chip is a 130px stack (64 + 10 + 56) in a 159px bar whose top is y=921, so
+   only 121px of it can sit above the 3.5% action-safe line at y=1042. The
+   chip's bottom lands at y=1058, 22px off frame. It cannot be fixed from
+   here: lifting this column alone breaks the alignment above, and shrinking
+   the chip to fit puts it under the project's own 28px broadcast type floor,
+   which the test card measures against. Clearing it properly needs the bar
+   about 16px taller, which moves --bar-h and everything positioned off it
+   (the lower third sits at calc(var(--bar-h) + 28px)). The team numbers, the
+   critical content, do clear it at 38.3px. */
+.bar-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 0 12px 18px; }
 .clock {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
   font-weight: 900; font-size: var(--t-clock); line-height: 1;
@@ -365,6 +385,8 @@
   transition: opacity var(--dur-out) linear,
               transform var(--dur-out) cubic-bezier(.4, 0, .2, 1);
 }
+/* translateY alone: the card is no longer centred by a transform, so the
+   exit does not have to carry an translateX(-50%) along with it. */
 .status-card[data-leaving="true"] {
   opacity: 0; transform: translateY(10px); pointer-events: none;
 }
@@ -372,7 +394,15 @@
   .status-card[data-leaving="true"] { transform: none; }
 }
 .status-card {
-  position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
+  /* Centred by margin, NOT by left:50% + translateX(-50%). Under the old
+     rule the card's shrink-to-fit width could only reach the frame's right
+     edge, so it topped out at 1920 - 960 = 960px and the message box at
+     840px: the two-line clamp then bit at about 68 characters rather than
+     the 86 the .sc-msg budget assumes. Left and right at the safe margin
+     with `width: fit-content` and auto margins centres it just as exactly
+     and lets it use the width it was designed for. */
+  position: absolute; top: 44px; left: var(--safe-x); right: var(--safe-x);
+  width: fit-content; max-width: 100%; margin-inline: auto;
   z-index: 45;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 22px 60px 20px;
@@ -392,17 +422,25 @@
   letter-spacing: .2em; text-indent: .2em; text-transform: uppercase;
   color: var(--cg-gold);
 }
-/* Two lines, hard, and words that break anywhere.
+/* Three lines, hard, and words that break anywhere.
    This card floats at z-index 45 over the live field picture, and its message
-   is the one operator-typed string the reducer passes through with no length
-   cap (emergency is capped at 200, a card reason at 160, an announcement at
-   280) from a desk input with no maxlength. At 44px Archivo in 1100px that is
-   about 43 characters a line, so a 150-character note was four lines and a
-   300-character one seven, growing the plate down through the top half of the
-   frame, which is exactly where the wide shot has the field. Clamping rather
-   than stepping the size down is deliberate: this plate says why nothing is
-   happening, the announcer is saying the same thing out loud, and a paragraph
-   over live video is worse for the viewer than a sentence plus an ellipsis.
+   is operator-typed. At 44px Archivo in 1100px that is about 43 characters a
+   line, so an uncapped note ran four lines at 150 characters and seven at 300,
+   growing the plate down through the top half of the frame, which is exactly
+   where the wide shot has the field.
+
+   Three rather than two, matched to the 90-character cap the reducer now
+   applies: the clamp is a backstop against a runaway string, not a second,
+   invisible limit sitting under the first. At two lines a 98-character
+   message, inside what the desk let an operator type, lost its last line on
+   air with nothing anywhere saying so. Three lines hold 110 characters of
+   prose and 95 of all-caps, measured in this box at this size, so 90 clears
+   even a shouted message. The card's bottom edge lands at y=325: still the
+   top third, still clear of where the wide shot has the field.
+
+   Clamping rather than stepping the size down is deliberate: this plate says
+   why nothing is happening, the announcer is saying the same thing out loud,
+   and a paragraph over live video is worse for the viewer than a sentence.
    `anywhere` is the other half: with the default wrapping a single pasted
    unbreakable token (a stream URL) set one ~90-character line that ran out
    through both frame edges instead of wrapping at all. */
@@ -412,8 +450,23 @@
   color: var(--cg-white); text-align: center; max-width: 1100px;
   overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
 }
+/* The one thing the hall actually wants from a delay card, on its own line
+   where the message's clamp cannot reach it. Appended to the message it was
+   the LAST thing in the clamped string and therefore the first thing lost,
+   which is exactly backwards: a long explanation that loses "back ~2:15 PM"
+   has dropped the only part anyone can act on. */
+.sc-back {
+  font-family: var(--font-cond); font-weight: 700;
+  font-size: var(--t-label); letter-spacing: .1em; text-transform: uppercase;
+  /* White, like every other secondary line on a purple plate. Black at .78
+     composited to rgb(19,3,24) on this fill: 1.59:1, which is not text, it is
+     a smudge. The line says when the show comes back, which is the one thing
+     on this card an audience can act on. 9.9:1 now. */
+  color: var(--cg-white); opacity: .92; white-space: nowrap;
+}
+.sc-back[hidden] { display: none; }
 
 /* ==========================================================================
    Lower third: slides fully off-screen, never fades. A fade is invisible in

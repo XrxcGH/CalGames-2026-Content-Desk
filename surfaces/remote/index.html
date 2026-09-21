@@ -251,12 +251,13 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
          have fired 3x" taught a first-timer nothing: not that a cue is show
          automation, not what arming one hands over, not what the count is
          counting. Every other section on this page that needs a line of
-         helper text has one. This one needs it most, because it is the only
-         place in the whole project where automation can be switched on. -->
+         helper text has one. This one needs it most, because arming a cue
+         hands the show over and the name alone does not say that. -->
     <p class="hint" style="margin:0 4px 10px">Cues are the show's automation.
       <b>Armed</b> means the desk does that thing by itself from now on; off
-      means it only counts the times it would have fired. This phone is the
-      only place cues can be armed: the desk console has no cue controls.</p>
+      means it only counts the times it would have fired. The desk console's
+      <b>Show automation</b> panel has the same switches, plus a Run now for
+      firing one by hand.</p>
     <div class="grid" id="cues"></div>
   </section>
 </div>
@@ -617,8 +618,8 @@ async function loadCues() {
       // The sentence the server already sends, and this page used to throw
       // away. CueStatus carries `does` for exactly this moment: engine.ts
       // calls it "What the producer sees when deciding whether to trust it",
-      // every default cue supplies one, /api/cues returns it, and no surface
-      // in the project rendered it. Without it, arming is a coin flip on a
+      // every default cue supplies one, and /api/cues returns it. Without it,
+      // arming is a coin flip on a
       // name: "On deck" says nothing about the fact that pressing it hands
       // the program screen and the camera cuts to the desk.
       if (c.does) {

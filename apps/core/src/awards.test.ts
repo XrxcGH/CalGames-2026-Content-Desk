@@ -471,3 +471,70 @@ test('the Judge Advisor can change the running order, within one ceremony', asyn
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a newly added award can still be moved within its own ceremony', async () => {
+  // The regression this pins: reorder used to swap PHYSICAL neighbours while
+  // the Judge Advisor's page enabled its buttons from the award's position
+  // inside its DAY GROUP. define() appends, so one award added for the first
+  // of two ceremonies landed behind the whole second ceremony, its physical
+  // neighbour belonged to the other day, and every press was refused with a
+  // 200 and an identical repaint. The award could never be moved at all.
+  const dir = await scratch();
+  try {
+    const awards = new Awards(dir, new EventBus(), [
+      { id: 'a', title: 'Alpha', day: 'Saturday' },
+      { id: 'b', title: 'Bravo', day: 'Saturday' },
+      { id: 'c', title: 'Charlie', day: 'Sunday' },
+      { id: 'd', title: 'Delta', day: 'Sunday' },
+    ]);
+    const added = awards.define({ title: 'Echo', day: 'Saturday' });
+    const order = () => awards.definitions.map(a => a.id);
+    const saturday = () => awards.definitions
+      .filter(a => (a.day ?? '') === 'Saturday').map(a => a.id);
+
+    assert.deepEqual(saturday(), ['a', 'b', added.id],
+      'the new award joins the end of ITS OWN ceremony, not the end of the list');
+    assert.deepEqual(order(), ['a', 'b', added.id, 'c', 'd'],
+      'and the two ceremonies stay contiguous in the stored list');
+
+    awards.reorder(added.id, -1);
+    assert.deepEqual(saturday(), ['a', added.id, 'b'],
+      'the new award moves up its own ceremony');
+    awards.reorder(added.id, -1);
+    assert.deepEqual(saturday(), [added.id, 'a', 'b']);
+
+    // At the edges it stops, and never crosses into the other evening.
+    awards.reorder(added.id, -1);
+    assert.deepEqual(saturday(), [added.id, 'a', 'b'], 'first stays first');
+    awards.reorder('b', 1);
+    assert.deepEqual(order(), [added.id, 'a', 'b', 'c', 'd'],
+      'the last Saturday award cannot fall into Sunday');
+    assert.deepEqual(awards.definitions.filter(a => a.day === 'Sunday').map(a => a.id),
+      ['c', 'd'], 'and Sunday is untouched throughout');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a peer that is not physically adjacent is still the one that moves', async () => {
+  // The same bug from the other side: even with a list whose days interleave,
+  // moving an award swaps it with its neighbour IN THAT CEREMONY.
+  const dir = await scratch();
+  try {
+    const awards = new Awards(dir, new EventBus(), [
+      { id: 's1', title: 'Sat one', day: 'Saturday' },
+      { id: 'u1', title: 'Sun one', day: 'Sunday' },
+      { id: 's2', title: 'Sat two', day: 'Saturday' },
+      { id: 'u2', title: 'Sun two', day: 'Sunday' },
+    ]);
+    awards.reorder('s2', -1);
+    assert.deepEqual(
+      awards.definitions.filter(a => a.day === 'Saturday').map(a => a.id),
+      ['s2', 's1'], 'the two Saturday awards swapped across the Sunday one between them');
+    assert.deepEqual(
+      awards.definitions.filter(a => a.day === 'Sunday').map(a => a.id),
+      ['u1', 'u2'], 'Sunday order is untouched');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

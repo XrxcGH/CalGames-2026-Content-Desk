@@ -635,6 +635,7 @@ internal static class Launcher
         args.Append("--port ").Append(port);
         if (fieldHost != null) args.Append(" --cheesy --cheesy-host ").Append(fieldHost);
         if (_opt.Demo) args.Append(" --demo");
+        if (_opt.Rehearsal) args.Append(" --rehearsal");
         // Layer 1 of tying the desk to this window: see TieToThisWindow below.
         args.Append(" --exit-with-parent");
 
@@ -1181,6 +1182,7 @@ internal static class Launcher
         Console.WriteLine("    /cheesy-host:ip:8080   skip the scan, use this field address");
         Console.WriteLine("    /no-cheesy             do not look for the field at all");
         Console.WriteLine("    /demo                  practice mode: a pretend match on a loop, no field needed");
+        Console.WriteLine("    /rehearsal             practising by hand: keeps the practice out of the day's history");
         Console.WriteLine("    /no-browser            do not open a browser window");
         Console.WriteLine("    /no-wait               do not pause before closing the window");
         Console.WriteLine();
@@ -1194,6 +1196,12 @@ internal static class Launcher
         public string CheesyHost;
         public bool NoCheesy;
         public bool Demo;
+        /// A practice run the crew drives BY HAND on the event machine. The
+        /// desk rebuilds the day from the day's log at boot, so an untagged
+        /// rehearsal comes back as history: practice cards on the ledger,
+        /// phantom matches in coverage, a practised award marked presented to
+        /// a team that did not win it. /demo implies it.
+        public bool Rehearsal;
         public bool NoBrowser;
         public bool NoWait;
         public bool ShowHelp;
@@ -1211,6 +1219,7 @@ internal static class Launcher
                 if (lower == "/?" || lower == "/help" || lower == "-h") o.ShowHelp = true;
                 else if (lower == "/no-cheesy") o.NoCheesy = true;
                 else if (lower == "/demo") o.Demo = true;
+                else if (lower == "/rehearsal" || lower == "/practice") o.Rehearsal = true;
                 else if (lower == "/no-browser") o.NoBrowser = true;
                 else if (lower == "/no-wait") o.NoWait = true;
                 else if (lower.StartsWith("/pin:", StringComparison.Ordinal)) o.Pin = a.Substring(5);

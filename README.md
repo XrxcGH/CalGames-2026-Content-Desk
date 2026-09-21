@@ -154,6 +154,14 @@ The window prints a banner and stays running; leave it open. Then open
 <http://localhost:8720>. `--demo` runs a simulated match loop so graphics can be
 built without a field. Drop it to run on desk input alone.
 
+Use `--rehearsal` for a practice run driven BY HAND on the event machine. The
+desk rebuilds the day's ledgers from the day's event log at boot, so an
+untagged rehearsal comes back as history: practice cards on the announcer's
+ledger, phantom matches in the coverage report, and a practised award reveal
+marking that award presented to a team that did not win it. `--demo` and
+`--replay` already imply it; `--rehearsal` covers the sessions that look
+exactly like the show because a human is driving them.
+
 | Surface | URL | Runs on |
 | --- | --- | --- |
 | Program overlay | `/s/program` | OBS Browser Source, 1920×1080 |

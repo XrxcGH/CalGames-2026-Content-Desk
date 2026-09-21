@@ -653,6 +653,14 @@ async function capture(chrome, shot, cookie) {
       // won and this one mostly lost. The REST first-paint in desk-client
       // narrows the window; the bigger budget covers the rest.
       '--virtual-time-budget=12000',
+      // A still of a transition is a picture of a bug. The trivia sheet shipped
+      // with the Gold Sweep frozen a third of the way across it, covering the
+      // question and two of the four answers, because the snapshot that drives
+      // the pane change arrives over the socket in real time and can land in
+      // the last moments of the virtual-time budget. These are stills of
+      // finished states, so ask for the finished states: every entrance
+      // animation on the broadcast surfaces retires under reduced motion.
+      '--force-prefers-reduced-motion',
       `--screenshot=${out}`,
       BASE + shot.url,
     ];
