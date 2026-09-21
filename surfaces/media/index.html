@@ -249,6 +249,26 @@ async function loadConsent() {
       state.dataset.v = m.consent ?? 'unknown';
       state.textContent = m.consent ?? 'unknown';
       row.append(num, state);
+
+      /*
+       * Consent is not the only reason a photo stays off the screen, and this
+       * page used to imply it was. A cutout too small to render is held back
+       * too: at about 700px tall on the overview, anything under 320px on its
+       * long edge is a smear rather than a robot, and the designed fallback
+       * beats it. Without this line the operator sees "unknown", assumes the
+       * photo is airing, and never finds out it is not. Kept in step with
+       * airsOnScreen in apps/core/src/media.ts.
+       */
+      const longEdge = Math.max(Number(m.w) || 0, Number(m.h) || 0);
+      if (longEdge > 0 && longEdge < 320) {
+        const why = document.createElement('span');
+        why.className = 'sub';
+        why.style.flexBasis = '100%';
+        why.textContent = `Not airing: only ${m.w}x${m.h}. The overview draws a robot `
+          + 'about 700px tall, so this would be a blur. Re-upload at 3000px on the long '
+          + 'edge, or leave it and the team gets the gold number plate instead.';
+        row.append(why);
+      }
       for (const value of ['granted', 'unknown', 'declined']) {
         const b = document.createElement('button');
         b.className = 'btn';

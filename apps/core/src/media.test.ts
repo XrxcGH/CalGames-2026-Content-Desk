@@ -6,13 +6,15 @@ import { join } from 'node:path';
 import { MediaLibrary, readPngHeader } from './media.ts';
 
 /** A team directory with a meta.json, which is what scan() rebuilds from. */
-async function libraryWith(entries: { team: number; consent?: string }[]) {
+async function libraryWith(
+  entries: { team: number; consent?: string; w?: number; h?: number }[],
+) {
   const dir = await mkdtemp(join(tmpdir(), 'cg-media-'));
   for (const e of entries) {
     const teamDir = join(dir, 'teams', String(e.team));
     await mkdir(teamDir, { recursive: true });
     await writeFile(join(teamDir, 'meta.json'), JSON.stringify({
-      team: e.team, version: 1, w: 1200, h: 800,
+      team: e.team, version: 1, w: e.w ?? 1200, h: e.h ?? 800,
       src: `/media/teams/${e.team}/robot.v1.png`,
       uploadedAt: Date.now(), warnings: [],
       ...(e.consent ? { consent: e.consent } : {}),
@@ -108,4 +110,39 @@ test('a declined team is off the airable set, and that is what the server checks
       await rm(dir, { recursive: true, force: true });
     }
   })();
+});
+
+test('a cutout too small to render is not put on air', async () => {
+  /*
+   * ingest() warns below 900px on the long edge, and that warning is advice
+   * to whoever is uploading: it changed nothing about what went on screen.
+   * The only airing gate was consent, so a 200x150 test image sat in a real
+   * manifest for a month with consent "unknown" and would have gone on the
+   * alliance overview for a team that is actually attending, rendered about
+   * 700px tall, which is a smear of pixels with a team number under it.
+   *
+   * The tier-3 fallback, a gold number on a chamfered plinth, is a designed
+   * state that most teams at an offseason event get anyway. Showing it beats
+   * showing a blur.
+   */
+  const { lib, dir } = await libraryWith([
+    { team: 1678, w: 139, h: 109 },          // the real thing that was found
+    { team: 254, w: 2400, h: 1600 },         // a proper cutout
+    { team: 971, w: 320, h: 240 },           // exactly at the floor
+    { team: 846, w: 319, h: 240 },           // one pixel under it
+  ]);
+  try {
+    const air = lib.airable;
+    assert.equal(air[254] !== undefined, true, 'a real cutout airs');
+    assert.equal(air[971] !== undefined, true, 'the floor itself airs');
+    assert.equal(air[1678], undefined, 'a 139px blob does not');
+    assert.equal(air[846], undefined, 'and neither does one pixel under the floor');
+
+    // Still in the FULL manifest, because the team media page has to be able
+    // to show the operator what is there and why it is not airing.
+    assert.equal(lib.manifest[1678] !== undefined, true,
+      'the record survives; only its airing does not');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

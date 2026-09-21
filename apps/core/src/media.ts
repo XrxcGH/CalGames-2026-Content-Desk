@@ -44,6 +44,30 @@ export interface RobotMedia {
 
 export type Manifest = Record<number, RobotMedia>;
 
+/**
+ * Below this on the long edge, the designed fallback is the better picture.
+ *
+ * The overview renders a robot about 700px tall at 1080p, so a stored image
+ * under this is being blown up more than twice its size: not a soft robot, a
+ * smear of pixels with a team number under it. The tier-3 fallback, a gold
+ * number on a chamfered plinth, is a deliberate piece of design that most
+ * teams at an offseason event will get anyway, and it looks correct. Showing
+ * it is strictly better than showing a blur.
+ *
+ * ingest() already WARNS below 900px, which is the quality target. That
+ * warning is advice to whoever is uploading and it changed nothing about what
+ * went on air: a 200x150 test image sat in this manifest for a month with
+ * consent "unknown", which the only airing gate let straight through, and it
+ * would have gone on the alliance overview for a real team.
+ */
+export const AIRABLE_MIN_EDGE = 320;
+
+/** Whether this record is fit to put on the overview. */
+export function airsOnScreen(m: RobotMedia): boolean {
+  if (m.consent === 'declined') return false;
+  return Math.max(m.w, m.h) >= AIRABLE_MIN_EDGE;
+}
+
 const WIDTHS = [400, 800, 1600] as const;
 
 // ---------------------------------------------------------------------------
@@ -133,7 +157,7 @@ export class MediaLibrary {
   get airable(): Manifest {
     const out: Manifest = {};
     for (const [team, m] of Object.entries(this.#manifest)) {
-      if (m.consent === 'declined') continue;
+      if (!airsOnScreen(m)) continue;
       out[Number(team)] = m;
     }
     return out;
