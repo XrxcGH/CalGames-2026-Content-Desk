@@ -267,6 +267,21 @@ async function post(action, body) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   });
+  /*
+   * A dead session is not a generic failure. Every route on this page sits
+   * behind the desk PIN, so after a desk restart each button threw the bare
+   * string "PIN required" while the header dot still said "linked". The one
+   * human-readable signed-out sentence on the page was attached to a route
+   * that cannot return 401. Say the fleet-standard sentence, and stop the
+   * header claiming a link that is gone.
+   */
+  if (res.status === 401) {
+    const dot = $('dot'), word = $('linkText');
+    if (dot) dot.dataset.up = 'false';
+    if (word) word.textContent = 'signed out';
+    throw new Error('The desk restarted and signed this page out. '
+      + 'Reload this page to sign back in.');
+  }
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? 'Request failed');
   if (mine === reqSeq) paint(json);
@@ -509,7 +524,24 @@ $('startSet').onclick = async () => {
   } catch (e) { say(e.message, true); }
 };
 
-$('endSet').onclick = () => post('end').then(() => say('Set ended.')).catch(e => say(e.message, true));
+/*
+ * Report what actually happened, not that the request returned.
+ *
+ * Both routes answer 200 with an unchanged snapshot when there was nothing to
+ * do, so "Set ended." appeared with no set running and "Last race removed."
+ * appeared with no races recorded. On a console whose whole job is keeping a
+ * bracket honest, a confirmation for something that did not happen is how a
+ * scorer loses track of where the bracket actually is.
+ */
+$('endSet').onclick = async () => {
+  const before = snap?.set?.state ?? null;
+  try {
+    const after = await post('end');
+    if (!after?.set) say('There was no set running.', true);
+    else if (before === 'complete') say('That set had already ended.', true);
+    else say('Set ended.');
+  } catch (e) { say(e.message, true); }
+};
 
 $('startGp').onclick = async () => {
   const racers = $('gpRacers').value.split(',').map(s => s.trim()).filter(Boolean).map(parseRacer);
@@ -534,7 +566,15 @@ $('recordRace').onclick = async () => {
   catch (e) { say(e.message, true); }
 };
 
-$('undoRace').onclick = () => post('undo').then(() => say('Last race removed.')).catch(e => say(e.message, true));
+$('undoRace').onclick = async () => {
+  const before = snap?.gp?.races?.length ?? 0;
+  if (!before) return say('There are no races to undo.', true);
+  try {
+    const after = await post('undo');
+    const now = after?.gp?.races?.length ?? 0;
+    say(now < before ? 'Last race removed.' : 'There was nothing to undo.', now >= before);
+  } catch (e) { say(e.message, true); }
+};
 $('setUpNext').onclick = () => post('upnext', { text: $('upNext').value })
   .then(() => say('Up next set.')).catch(e => say(e.message, true));
 $('clearAll').onclick = () => {

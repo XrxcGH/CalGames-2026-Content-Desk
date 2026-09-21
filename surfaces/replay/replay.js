@@ -311,7 +311,13 @@ $('take').onclick = take;
 for (const b of document.querySelectorAll('[data-nudge]')) {
   b.onclick = () => {
     const [edge, delta] = b.dataset.nudge.split(':');
-    if (inClock === null) return;
+    // Answer rather than no-op. With no in-point these four buttons did
+    // nothing at all and said nothing, which on a console being driven in the
+    // sixty seconds after a match reads as a broken page. Cut clip already
+    // refuses out loud; this is the same sentence.
+    if (inClock === null) {
+      return say('Pick an in-point on the timeline first, or click a marker.', true);
+    }
     if (edge === 'in') setBounds(inClock + Number(delta), outClock);
     else setBounds(inClock, outClock + Number(delta));
   };

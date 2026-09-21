@@ -48,6 +48,8 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
 
 /* Capped so the step buttons stay on screen: a ref reviewing a call should
    never have to scroll between looking and stepping. */
+/* While the label and the picture disagree, the picture is not evidence. */
+.viewer[data-stale="true"] { opacity: .55; outline: 3px dashed var(--st-warn); }
 .viewer { background: var(--cg-black); aspect-ratio: 16 / 9; max-height: 46vh; margin: 0 auto;
   display: grid; place-items: center;
   clip-path: var(--chamfer); --ch: 10px; overflow: hidden; }
@@ -134,6 +136,9 @@ kbd { font-family: var(--font-num); background: var(--surface-sunken); padding: 
   <section>
     <h2>Review</h2>
     <div class="viewer" id="viewer"><p>Pick a moment below, or jump to a marker.</p></div>
+    <!-- Said in words, not by dimming alone: the whole hazard is that a stale
+         frame under a fresh timecode looks completely normal. -->
+    <p class="err" id="staleNote" role="status" hidden></p>
 
     <div class="at">
       <span class="big num" id="atLabel">0:00</span>
@@ -186,9 +191,37 @@ let startedAt = null;         // wall clock of the match under review
 let at = 0;                   // match clock, seconds
 let busy = false;
 
+/**
+ * The match this page is reviewing, latched.
+ *
+ * It used to be re-derived from the live state on every frame, as
+ * `matchStartedAt ?? lastMatchStartedAt`, and match.loaded nulls BOTH. So the
+ * moment the next match was queued, this page decided no match had ever
+ * started and refused to seek with "No match has started, so there is no
+ * clock to seek against." That is false, and it arrived at the exact moment a
+ * review of the match just played is wanted: the field loads the next match
+ * within seconds of a result, and a referee reaching for this page after a
+ * disputed call found it dead.
+ *
+ * Latched instead: the anchor survives a match change and is only replaced
+ * when a NEW match actually starts, which is the first moment the old
+ * recording stops being the thing under review. The heading names the match
+ * the frames belong to, so a referee cannot mistake which one they are
+ * looking at.
+ */
+let reviewing = null;         // display name of the match the anchor belongs to
 desk.on('state', s => {
-  startedAt = s.matchStartedAt ?? s.lastMatchStartedAt ?? null;
-  $('matchName').textContent = s.match?.displayName ?? 'no match loaded';
+  const live = s.matchStartedAt ?? s.lastMatchStartedAt ?? null;
+  if (live !== null && live !== startedAt) {
+    startedAt = live;
+    reviewing = s.match?.displayName ?? null;
+  }
+  const loaded = s.match?.displayName ?? null;
+  $('matchName').textContent = reviewing
+    ? (loaded && loaded !== reviewing
+      ? `reviewing ${reviewing} (${loaded} is loaded)`
+      : reviewing)
+    : (loaded ?? 'no match loaded');
 });
 
 // ---- camera list ----------------------------------------------------------
@@ -209,15 +242,39 @@ if (sources?.sources?.length) {
 }
 
 // ---- position -------------------------------------------------------------
+/** The clock position the frame currently on screen was taken at. */
+let shownAt = null;
+
+/** Mark the viewer when the label and the picture disagree. */
+function markStale() {
+  const stale = shownAt !== null && shownAt !== at;
+  $('viewer').dataset.stale = stale ? 'true' : 'false';
+  $('staleNote').hidden = !stale;
+  if (stale) {
+    $('staleNote').textContent = `Showing ${clockLabel(shownAt)}. Let go of the `
+      + 'scrubber, or press Grab frame, to move the picture.';
+  }
+}
+
 function setAt(next) {
   at = Math.max(-20, Math.min(150, Math.round(next * 1000) / 1000));
   $('scrub').value = String(at);
   $('atLabel').textContent = clockLabel(at);
   $('atSub').textContent = PHASE_LABEL[phaseAt(at)] ?? 'match clock';
   $('scrub').setAttribute('aria-valuetext', `${clockLabel(at)} ${PHASE_LABEL[phaseAt(at)] ?? ''}`.trim());
+  markStale();
 }
 
+/*
+ * `input` fires continuously through a drag and `change` once when it is let
+ * go, so the label tracks the thumb and exactly one frame is fetched. Without
+ * the second handler the viewer kept whatever frame it had while the timecode
+ * above it moved: a referee dragged to 1:42, read "1:42", and studied the
+ * frame from wherever they happened to have been. On a review tool that is
+ * the worst possible failure, because nothing about it looks wrong.
+ */
 $('scrub').oninput = e => setAt(Number(e.target.value));
+$('scrub').onchange = () => void grab();
 
 for (const b of document.querySelectorAll('[data-step]')) {
   b.onclick = () => { setAt(at + Number(b.dataset.step)); void grab(); };
@@ -260,6 +317,8 @@ async function grab() {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     $('viewer').innerHTML = `<img alt="Frame at ${clockLabel(wanted)}" src="${body.url}?t=${Date.now()}">`;
+    shownAt = wanted;
+    markStale();
   } catch (err) {
     fail(err.message);
   } finally {

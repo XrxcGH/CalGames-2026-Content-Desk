@@ -117,6 +117,19 @@ body {
 :root .tool:focus-visible, :root .ink:focus-visible, :root .tag:focus-visible {
   outline: 3px solid var(--focus-ring); outline-offset: -3px;
 }
+/* --focus-ring is the brand gold, and three of these faces are gold or white:
+   the pressed tool, the pressed team tag, and the gold and white ink swatches.
+   A gold ring inset into a gold button is not a focus indicator, it is a
+   slightly different gold, so the CURRENTLY SELECTED control, which is the one
+   a keyboard user is most likely to be on, had no visible focus at all. Black
+   reads on every face this pad uses. Same specificity as the rule above and
+   later in the file, which is what makes it win. */
+:root .tool[aria-pressed="true"]:focus-visible,
+:root .tag[aria-pressed="true"]:focus-visible,
+:root .ink[data-ink="gold"]:focus-visible,
+:root .ink[data-ink="white"]:focus-visible {
+  outline-color: var(--cg-black);
+}
 
 /* Link state: a quiet dot in the corner, not a labeled readout. Spectators
    glancing at the pad shouldn't be reading production plumbing. The word only
@@ -427,8 +440,11 @@ $('hide').onclick = doHide;
 function buildTags(state) {
   const red = state?.match?.red ?? [];
   const blue = state?.match?.blue ?? [];
+  // aria-pressed from the start, so a screen reader announces these as the
+  // toggles they are rather than as plain buttons.
   const tagBtn = (t, side) =>
-    `<button class="tag" data-alliance="${side}" data-team="${t.number}" aria-label="Team ${t.number}, ${side} alliance">${t.number}</button>`;
+    `<button class="tag" data-alliance="${side}" data-team="${t.number}" `
+    + `aria-pressed="false" aria-label="Team ${t.number}, ${side} alliance">${t.number}</button>`;
   // The gap between the two groups is a real divider, not just a color
   // change: alliance-only-by-color is the one thing this palette can't do.
   $('tags').innerHTML = red.map(t => tagBtn(t, 'red')).join('')
@@ -437,6 +453,22 @@ function buildTags(state) {
   for (const b of document.querySelectorAll('.tag')) {
     b.onclick = () => { tagTeam = Number(b.dataset.team); setTool('tag'); };
   }
+  /*
+   * A match load rebuilds these buttons, and the rebuild used to leave the pad
+   * stranded: `tool` was still 'tag' and `tagTeam` still held a number from
+   * the match that just finished, while every new button rendered without
+   * aria-pressed, so nothing on screen showed which tool was live. The next
+   * stroke went out tagged for a team that is not on the field.
+   *
+   * Drop a tag team that has left the field, then reassert the selection so
+   * the buttons agree with the state they are drawn from.
+   */
+  const onField = new Set([...red, ...blue].map(t => Number(t.number)));
+  if (tagTeam !== null && !onField.has(tagTeam)) {
+    tagTeam = null;
+    if (tool === 'tag') tool = 'pen';
+  }
+  setTool(tool);
 }
 
 // ---- frozen frame ----------------------------------------------------------
