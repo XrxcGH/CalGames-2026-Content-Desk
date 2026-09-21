@@ -143,3 +143,51 @@ test('house audio: none armed warns, two armed fails', async () => {
   // Two armed players usually means one of them is the machine OBS captures.
   assert.equal(find(await new Vitals(base({ audio: withPlayers(2) })).report(), 'house').level, 'fail');
 });
+
+test('a stream that drops mid-match turns the health page red', async () => {
+  /*
+   * outputReconnecting is declared on StreamStatus and was read by nobody. If
+   * OBS lost its RTMP connection, the OBS vital reported "connected, not
+   * streaming" and stream health reported "not streaming", and NEITHER is a
+   * failure: both are exactly what the normal between-days state looks like.
+   * So the desk's health page stayed green through a stream outage in the
+   * finals.
+   */
+  const obs = {
+    connected: true,
+    streamStatus: async () => ({ outputActive: false, outputReconnecting: true }),
+    request: async () => ({ inputs: [] }),
+  } as unknown as VitalsDeps['obs'];
+
+  const r = await new Vitals(base({ obs })).report();
+  assert.equal(find(r, 'obs').level, 'fail');
+  assert.match(find(r, 'obs').detail, /RECONNECT/i);
+  assert.equal(find(r, 'stream-health').level, 'fail');
+  assert.ok(r.blockers.some(c => c.id === 'obs'), 'and it blocks');
+  assert.equal(r.worst, 'fail');
+});
+
+test('"not streaming" is fine on Friday and an emergency during a match', async () => {
+  // The same reading means opposite things, and the desk could not tell them
+  // apart: OBS idle between days looks identical to OBS idle during a final.
+  const obs = {
+    connected: true,
+    streamStatus: async () => ({ outputActive: false }),
+    request: async () => ({ inputs: [] }),
+  } as unknown as VitalsDeps['obs'];
+
+  const quiet = await new Vitals(base({ obs })).report();
+  assert.equal(find(quiet, 'stream-health').level, 'off', 'nothing is on the field');
+
+  // Now a match is loaded and running.
+  const bus = new EventBus();
+  bus.emit({
+    type: 'match.loaded', source: 'cheesy',
+    payload: { id: 'q42', displayName: 'Qualification 42', red: [], blue: [] },
+  });
+  bus.emit({ type: 'match.start', source: 'cheesy', payload: {} });
+
+  const live = await new Vitals(base({ obs, bus })).report();
+  assert.equal(find(live, 'stream-health').level, 'fail');
+  assert.match(find(live, 'stream-health').detail, /match is underway/i);
+});

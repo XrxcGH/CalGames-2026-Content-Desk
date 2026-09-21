@@ -26,6 +26,23 @@ You need a Google Cloud project with the YouTube Data API v3 enabled and an
 OAuth 2.0 Client ID of type "Desktop app".
 
 Add this redirect URI to that client:  ${REDIRECT}
+
+BEFORE YOU GO ON, check the consent screen's publishing status.
+
+  Google Cloud console > APIs & Services > OAuth consent screen
+
+If it says "Testing", set it to "In production" and come back. A project left
+in Testing issues refresh tokens that EXPIRE AFTER SEVEN DAYS, whatever
+access_type says, and this helper asks for sensitive scopes, which is the
+case where that rule bites.
+
+Nothing looks wrong until the event. If the token is minted during setup the
+week before, every upload on the Saturday fails with "invalid_grant", the
+desk reports it as a credentials problem with no hint why, and every video in
+the queue marches to failed while somebody tries to work out what changed.
+
+If the screen is already In production, you are fine. Either way, queue one
+throwaway segment end to end on the Friday and watch it reach done.
 `);
 
 const clientId = (await rl.question('Client ID: ')).trim();
@@ -97,4 +114,8 @@ Done. Paste these into config.json under "youtube":
   "refreshToken": "${body.refresh_token}"
 
 config.json is gitignored. Keep it that way.
+
+Last check: if that Google Cloud project's consent screen is still in
+"Testing", this token stops working in seven days and every upload at the
+event fails with invalid_grant. Set it to "In production" and run this again.
 `);

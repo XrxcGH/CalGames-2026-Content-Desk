@@ -78,7 +78,26 @@ export class YouTubeClient {
 
     const body = await res.json() as { access_token?: string; expires_in?: number; error_description?: string; error?: string };
     if (!res.ok || !body.access_token) {
-      throw new Error(`YouTube token refresh failed: ${body.error_description ?? body.error ?? res.status}`);
+      const why = body.error_description ?? body.error ?? String(res.status);
+      /*
+       * invalid_grant on a refresh token that worked last week is almost
+       * always one thing: the Google Cloud project's consent screen is in
+       * "Testing", which expires refresh tokens after SEVEN DAYS whatever
+       * access_type says, and it bites hardest on the sensitive scopes this
+       * client asks for. Mint the token during setup the week before, and
+       * every upload on the Saturday fails.
+       *
+       * Worth saying here rather than only in the auth helper, because the
+       * person reading this line is at the event with a queue full of failed
+       * items and no idea what changed. The bare error tells them nothing.
+       */
+      const hint = /invalid_grant/i.test(why)
+        ? ' This usually means the Google Cloud project OAuth consent ' +
+          'screen is still in "Testing", which expires refresh tokens after ' +
+          'seven days. Set it to "In production" and run `npm run auth:youtube` ' +
+          'again.'
+        : '';
+      throw new Error(`YouTube token refresh failed: ${why}.${hint}`);
     }
     this.#token = body.access_token;
     this.#tokenExpiry = Date.now() + (body.expires_in ?? 3600) * 1000;

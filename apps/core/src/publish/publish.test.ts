@@ -528,3 +528,65 @@ test('a replay after the first run is already uploaded says so instead of hiding
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a score corrected after the commit reaches the description', async () => {
+  /*
+   * Cheesy guards its score-posted notifier with `if !isMatchReviewEdit`, so
+   * a correction made on /match_review republishes matches and rankings to
+   * TBA and sends the desk NOTHING. The description is baked at queue time
+   * and, in deferred mode, not written to YouTube until hours later, long
+   * after the correction: the desk would upload a score line it already knew
+   * was wrong, sitting under a TBA match page that disagreed with it.
+   */
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const bus = matchBus({
+      match: {
+        id: '42', displayName: 'Qualification 42',
+        red: [{ number: 254 }, { number: 846 }], blue: [{ number: 971 }],
+      },
+      score: { red: { total: 552 }, blue: { total: 527 } },
+    });
+    const q = new PublishQueue(root, structuredClone(DEFAULTS), bus, null);
+    await q.load();
+
+    const item = await q.queueMatch();
+    assert.match(item!.meta.description, /Red \(Teams 254, 846\) - 552/);
+
+    // The head referee changes it on match review twenty minutes later.
+    assert.equal(await q.correctScore('Qualification 42', 548, 527), true);
+    assert.match(item!.meta.description, /Red \(Teams 254, 846\) - 548/);
+    assert.doesNotMatch(item!.meta.description, /552/);
+    assert.match(item!.meta.description, /Blue \(Teams 971\) - 527/, 'the other side is untouched');
+
+    // Idempotent: a poll that sees the same corrected score again is not news.
+    assert.equal(await q.correctScore('Qualification 42', 548, 527), false);
+
+    // It survives a restart, because the parts are on the item.
+    const again = new PublishQueue(root, structuredClone(DEFAULTS), bus, null);
+    await again.load();
+    assert.equal(await again.correctScore('Qualification 42', 500, 527), true);
+    assert.match(again.items[0]!.meta.description, /- 500/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a correction to a video that is already up says so rather than pretending', async () => {
+  // Once a video exists the description is YouTube's copy, not ours. Silently
+  // rewriting our record would leave the desk believing it had fixed
+  // something it had not.
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const q = new PublishQueue(root, structuredClone(DEFAULTS), matchBus(), null);
+    await q.load();
+    const item = await q.queueMatch();
+    (item as { videoId: string | null }).videoId = 'already-up';
+    const before = item!.meta.description;
+
+    assert.equal(await q.correctScore('Qualification 42', 1, 2), false);
+    assert.equal(item!.meta.description, before, 'our copy is not the one on air');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

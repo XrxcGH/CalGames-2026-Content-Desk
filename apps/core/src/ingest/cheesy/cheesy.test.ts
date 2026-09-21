@@ -1583,3 +1583,142 @@ test('the field loading its test match does not put "Test Match" on air', () => 
   assert.equal(bus.state.match?.displayName, 'Qualification 60',
     'the last real match stays on screen, and the operator moves it on');
 });
+
+test('the schedule is not pulled from the arena while a match is running', async () => {
+  /*
+   * GET /api/matches/{type} is O(N-squared) over the arena's bbolt database:
+   * matchesApiHandler calls GetMatchResultForMatch once per match, and that
+   * has no index, so it calls getAll() every time and walks the whole bucket
+   * doing a json.Unmarshal per record, each carrying two full score structs,
+   * then summarizes twice per match. For an 80-match schedule with results
+   * that is thousands of unmarshals for ONE request.
+   *
+   * The desk issued two of those every sixty seconds on a bare timer with no
+   * check on match state, in the same process as the arena's Run loop, which
+   * warns above 5ms per iteration and above 550ms between driver station
+   * packets. Expected symptom: "Arena loop iteration took a long time" in the
+   * FTA's log at a steady one a minute, correlated with the new box on their
+   * network.
+   */
+  const asked: string[] = [];
+  const server = createServer((req, res) => {
+    asked.push(req.url ?? '');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(req.url?.includes('rankings') ? '{"Rankings":[]}' : '[]');
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: `127.0.0.1:${port}`, displayId: 'test' });
+  try {
+    // Mid-teleop.
+    adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 2 });
+    adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 40 });
+    await adapter.pollNow();
+
+    assert.ok(asked.some(u => u.includes('rankings')),
+      'rankings are cheap and are wanted the moment they move');
+    assert.equal(asked.some(u => u.includes('/api/matches/')), false,
+      'the schedule is not worth a table walk mid-match');
+
+    // The buzzer. Now it is fair game, and it is also when the schedule has
+    // actually changed.
+    asked.length = 0;
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+    await adapter.pollNow();
+    assert.ok(asked.some(u => u.includes('/api/matches/qualification')));
+  } finally {
+    adapter.stop();
+    await new Promise(r => server.close(r));
+  }
+});
+
+test('the playoff schedule is not asked for before a bracket exists', async () => {
+  // Asking costs the same full table walk as a real answer, and the answer is
+  // an empty array right up until alliance selection finalizes.
+  const asked: string[] = [];
+  const server = createServer((req, res) => {
+    asked.push(req.url ?? '');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(req.url?.includes('rankings') ? '{"Rankings":[]}' : '[]');
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: `127.0.0.1:${port}`, displayId: 'test' });
+  try {
+    await adapter.pollNow();
+    assert.ok(asked.some(u => u.includes('/api/matches/qualification')));
+    assert.equal(asked.some(u => u.includes('/api/matches/playoff')), false,
+      'there is no bracket on Saturday morning');
+
+    // Alliance selection happens.
+    asked.length = 0;
+    adapter.ingest('allianceSelection', {
+      Alliances: [{ Id: 1, TeamIds: [254, 846, 1678, 100] }],
+    });
+    await adapter.pollNow();
+    assert.ok(asked.some(u => u.includes('/api/matches/playoff')));
+  } finally {
+    adapter.stop();
+    await new Promise(r => server.close(r));
+  }
+});
+
+test('a score changed after the commit is noticed from the schedule poll', async () => {
+  /*
+   * commitMatchScore guards ScorePostedNotifier.Notify() with
+   * `if !isMatchReviewEdit`, so a correction made on /match_review
+   * republishes matches and rankings to TBA and tells the desk NOTHING. The
+   * only thing that changes on the desk's side is the committed result on the
+   * schedule route, which it is already polling.
+   */
+  let score = { red: 552, blue: 527 };
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.url?.includes('rankings')) return res.end('{"Rankings":[]}');
+    if (req.url?.includes('qualification')) {
+      return res.end(JSON.stringify([{
+        Id: 42, Type: 2, TypeOrder: 42, ShortName: 'Q42',
+        LongName: 'Qualification 42', Status: MatchStatus.RedWon,
+        Result: { RedSummary: { Score: score.red }, BlueSummary: { Score: score.blue } },
+      }]));
+    }
+    res.end('[]');
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const bus = new EventBus();
+  const seen: { label: string; red: number; blue: number }[] = [];
+  bus.subscribe(ev => {
+    if (ev.type === 'match.score_corrected') {
+      seen.push(ev.payload as { label: string; red: number; blue: number });
+    }
+  });
+  const adapter = new CheesyAdapter({ bus, host: `127.0.0.1:${port}`, displayId: 'test' });
+
+  try {
+    // First sight of a played match is not a correction: it is just a result.
+    await adapter.pollNow();
+    assert.equal(seen.length, 0);
+
+    // Polling again with nothing changed is not news either.
+    await adapter.pollNow();
+    assert.equal(seen.length, 0);
+
+    // The head referee changes it on match review.
+    score = { red: 548, blue: 527 };
+    await adapter.pollNow();
+    assert.deepEqual(seen, [{ label: 'Qualification 42', red: 548, blue: 527 }]);
+
+    // And once is enough.
+    await adapter.pollNow();
+    assert.equal(seen.length, 1);
+  } finally {
+    adapter.stop();
+    await new Promise(r => server.close(r));
+  }
+});

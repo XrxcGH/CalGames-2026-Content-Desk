@@ -679,6 +679,26 @@ if (config.publish.autoQueueMatches && !rehearsalTag) {
   });
 }
 
+// A score the field changed AFTER committing it. Cheesy guards its
+// score-posted notifier with `if !isMatchReviewEdit`, so a correction made on
+// /match_review republishes to TBA and tells the desk nothing; the bridge
+// notices it by watching its own schedule poll disagree with what it
+// recorded. In deferred mode the description is not written to YouTube until
+// hours later, so without this the desk uploads a score line it already knew
+// was wrong, under a TBA match page that disagrees with it.
+//
+// Not gated on autoQueueMatches: a hand-queued item needs the correction just
+// as much. Rehearsal is excluded for the same reason the auto-queue is.
+if (!rehearsalTag) {
+  bus.subscribe(ev => {
+    if (ev.type !== 'match.score_corrected') return;
+    const p = ev.payload as { label?: string; red?: number; blue?: number };
+    if (!p.label || typeof p.red !== 'number' || typeof p.blue !== 'number') return;
+    void publish.correctScore(p.label, p.red, p.blue)
+      .catch(err => console.warn('[publish] correction failed:', (err as Error).message));
+  });
+}
+
 // Arcade sets queue themselves the same way: set_end closes the video's
 // bounds, and the set has carried its own startedAt since it began. A set
 // shorter than the segment QC floor queues held, which is the right answer

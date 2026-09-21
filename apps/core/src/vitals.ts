@@ -29,6 +29,7 @@ import type { PublishQueue } from './publish/queue.ts';
 import type { Recorder } from './recorder.ts';
 import type { CheesyAdapter } from './ingest/cheesy/adapter.ts';
 import { publishReadiness, type Config } from './config.ts';
+import { matchUnderway } from './publish/queue.ts';
 
 export type VitalLevel = 'ok' | 'warn' | 'fail' | 'unknown' | 'off';
 
@@ -263,17 +264,50 @@ export class Vitals {
     try {
       const status = await obs.streamStatus();
       const live = status.outputActive === true;
+      /*
+       * OBS trying to get its RTMP connection back. Declared on StreamStatus
+       * and read by nobody: if the stream dropped mid-match, OBS reported
+       * "connected, not streaming" and stream health reported "not
+       * streaming", and NEITHER is a failure. Both are exactly what the
+       * normal between-days state looks like, so the desk's health page
+       * stayed green through a stream outage in the finals.
+       */
+      const reconnecting = status.outputReconnecting === true;
+      // Whether anybody is watching right now. "Not streaming" is fine on
+      // Friday morning and is an emergency during a match, and until now the
+      // desk could not tell those apart.
+      const onAir = matchUnderway(this.#d.bus.state);
       const dropped = Number(status.outputSkippedFrames ?? 0);
       const total = Math.max(1, Number(status.outputTotalFrames ?? 0));
       const pct = (dropped / total) * 100;
+
+      const obsLevel: VitalLevel = reconnecting ? 'fail' : 'ok';
+      const streamLevel: VitalLevel = reconnecting ? 'fail'
+        : !live ? (onAir ? 'fail' : 'off')
+          : pct > 5 ? 'fail' : pct > 1 ? 'warn' : 'ok';
+
       return [{
-        id: 'obs', label: 'OBS', level: 'ok',
-        detail: live ? `streaming, ${pct.toFixed(1)}% frames dropped` : 'connected, not streaming',
+        id: 'obs', label: 'OBS', level: obsLevel,
+        ...(reconnecting ? { blocking: true } : {}),
+        detail: reconnecting ? 'RECONNECTING: the stream has dropped'
+          : live ? `streaming, ${pct.toFixed(1)}% frames dropped`
+            : 'connected, not streaming',
+        ...(reconnecting ? {
+          fix: 'OBS has lost the RTMP connection and is retrying. Check the ' +
+            'uplink. If it does not come back, stop and restart the stream ' +
+            'rather than leaving it retrying.',
+        } : {}),
       }, {
         id: 'stream-health',
         label: 'Stream health',
-        level: !live ? 'off' : pct > 5 ? 'fail' : pct > 1 ? 'warn' : 'ok',
-        detail: live ? `${dropped} dropped of ${total}` : 'not streaming',
+        level: streamLevel,
+        detail: reconnecting ? 'dropped, reconnecting'
+          : live ? `${dropped} dropped of ${total}`
+            : onAir ? 'NOT STREAMING, and a match is underway' : 'not streaming',
+        ...(streamLevel === 'fail' && !live && !reconnecting ? {
+          fix: 'A match is on the field and nothing is going out. Start the ' +
+            'stream in OBS.',
+        } : {}),
         ...(live && pct > 1 ? {
           fix: 'The uplink is struggling. Drop the bitrate, or shed the second ' +
             'program feed (docs/11 degraded-uplink runbook).',

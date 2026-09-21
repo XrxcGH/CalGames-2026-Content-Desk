@@ -84,6 +84,10 @@ export type DeskEventType =
   | 'match.start' | 'match.auto_end' | 'match.teleop_start'
   | 'match.shift_change' | 'match.endgame'
   | 'match.end' | 'match.aborted' | 'match.score_posted'
+  // A score the field CHANGED after committing it. The arena suppresses its
+  // score-posted notifier for a match-review edit, so the only way the desk
+  // learns is by noticing the schedule poll disagree with what it recorded.
+  | 'match.score_corrected'
   // live state
   | 'score.realtime' | 'score.delta' | 'hub.state' | 'arena.status'
   | 'card.issued' | 'foul.called'

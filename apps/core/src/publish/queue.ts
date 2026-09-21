@@ -17,7 +17,10 @@ import type { EventBus } from '../bus.ts';
 import type { DeskState } from '../types.ts';
 import { matchCut, type ClipStore, type Range } from '../clips.ts';
 import { TbaClient } from './tba.ts';
-import { description, identify, isPractice, segmentDescription, segmentName, videoTitle } from './naming.ts';
+import {
+  description, identify, isPractice, segmentDescription, segmentName, videoTitle,
+  type DescriptionInput,
+} from './naming.ts';
 import { YouTubeClient, watchUrl, type VideoMeta } from './youtube.ts';
 import { findSidecar } from './captions.ts';
 
@@ -52,6 +55,14 @@ export interface QueueItem {
   run?: number;
   /** Set when a later run replaced this one, so a stale upload is findable. */
   supersededBy?: number;
+  /**
+   * What the description was built from, so a corrected score can rebuild it.
+   *
+   * The description is baked at queue time and, in deferred mode, not written
+   * to YouTube until hours later. A match-review correction lands in that gap
+   * and reaches the desk through no notifier at all.
+   */
+  descriptionInput?: DescriptionInput;
   meta: { title: string; description: string };
   state: ItemState;
   /**
@@ -355,6 +366,19 @@ export class PublishQueue {
     const teams = (side: 'red' | 'blue'): number[] =>
       (st.match?.[side] ?? []).map(t => t.number);
 
+    // Kept on the item, not just rendered: the description is baked here and,
+    // in deferred mode, not written to YouTube until hours later. A
+    // match-review correction lands in that gap and arrives through no
+    // notifier at all, so correctScore() needs the parts to rebuild from.
+    const descInput: DescriptionInput = {
+      title,
+      red: { teams: teams('red'), score: st.score.red.total },
+      blue: { teams: teams('blue'), score: st.score.blue.total },
+      resultsUrl: this.#cfg.event.resultsUrl,
+      credit: this.#cfg.publish.credit,
+      copyright: this.#cfg.publish.copyright,
+    };
+
     // A cut whose duration is implausible goes up HELD, not published. The
     // operator eyeballs it and releases, reusing the deferred-mode go-ahead.
     const hold = qcHold('match', ranges.reduce((s, r) => s + (r.toMs - r.fromMs) / 1000, 0));
@@ -366,17 +390,8 @@ export class PublishQueue {
       ranges,
       matchKey: key,
       run,
-      meta: {
-        title,
-        description: description({
-          title,
-          red: { teams: teams('red'), score: st.score.red.total },
-          blue: { teams: teams('blue'), score: st.score.blue.total },
-          resultsUrl: this.#cfg.event.resultsUrl,
-          credit: this.#cfg.publish.credit,
-          copyright: this.#cfg.publish.copyright,
-        }),
-      },
+      descriptionInput: descInput,
+      meta: { title, description: description(descInput) },
     }, hold);
   }
 
@@ -505,6 +520,46 @@ export class PublishQueue {
     item.error = null;
     await this.#save();
     this.kick();
+  }
+
+  /**
+   * A score the field changed after committing it.
+   *
+   * Cheesy guards its score-posted notifier with `if !isMatchReviewEdit`, so
+   * a correction made on /match_review republishes matches and rankings to
+   * TBA and tells the desk nothing. The description here was baked at queue
+   * time, and in deferred mode it is not written to YouTube until hours
+   * later: the desk would upload a score line it already knew was wrong,
+   * under a TBA match page that disagreed with it.
+   *
+   * Rewritten while the item has not been uploaded, which in deferred mode
+   * is the whole evening. Once a video exists the description is YouTube's
+   * copy, not ours, so this says so rather than silently doing nothing.
+   */
+  async correctScore(label: string, red: number, blue: number): Promise<boolean> {
+    const name = identify(label).name;
+    const item = this.#items.find(i => i.kind === 'match' && i.label === name);
+    if (!item || !item.descriptionInput) return false;
+
+    const next = { ...item.descriptionInput };
+    next.red = { ...next.red, score: red };
+    next.blue = { ...next.blue, score: blue };
+    const rebuilt = description(next);
+    if (rebuilt === item.meta.description) return false;
+
+    item.descriptionInput = next;
+    if (item.videoId) {
+      console.warn(`[publish] ${name} was corrected to ${red}-${blue}, but its ` +
+        `video (${item.videoId}) is already up with the old score line. Edit ` +
+        'the description on YouTube by hand.');
+      await this.#save();
+      return false;
+    }
+    item.meta.description = rebuilt;
+    item.updatedAt = Date.now();
+    await this.#save();
+    console.log(`[publish] ${name}: description updated to ${red}-${blue}`);
+    return true;
   }
 
   /**

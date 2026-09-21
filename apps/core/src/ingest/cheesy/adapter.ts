@@ -256,6 +256,20 @@ export class CheesyAdapter {
    */
   #loadedType: number | string | null = null;
   #loadedTypeOrder: number | null = null;
+  /**
+   * Committed score per match, as last seen on the schedule poll.
+   *
+   * Cheesy guards its score-posted notifier with `if !isMatchReviewEdit`, so
+   * a correction made on /match_review republishes to TBA and tells the desk
+   * NOTHING. The video description was baked at queue time, and in deferred
+   * mode it is not written to YouTube until hours later, long after the
+   * correction: the desk would upload a score line it already knew was wrong,
+   * sitting under a TBA match page that disagreed with it.
+   *
+   * The poll already carries the committed result, so the correction is
+   * visible without asking the arena for anything new.
+   */
+  #committed = new Map<string, string>();
   /** Non-null while the field's period lengths disagree with REBUILT. */
   #timingMismatch: string[] | null = null;
   #timingWarned = false;
@@ -384,8 +398,40 @@ export class CheesyAdapter {
    * field network is already slow, which is exactly when you don't want a
    * second request stacked on the first.
    */
+  /** Run one poll now. Exposed for tests; the event loop uses the timer. */
+  pollNow(): Promise<void> { return this.#poll(); }
+
   async #poll(): Promise<void> {
     if (this.#polling) { this.#refreshSoon(); return; }
+
+    /*
+     * NOT WHILE A MATCH IS RUNNING.
+     *
+     * GET /api/matches/{type} is O(N-squared) over the arena's database.
+     * matchesApiHandler calls GetMatchResultForMatch once per match, and that
+     * function has no index: it calls getAll() every time, which walks the
+     * whole bucket doing a json.Unmarshal on every record, each carrying two
+     * full score structs, and then summarizes twice per match. For an 80
+     * match qualification schedule with results that is thousands of
+     * unmarshals for ONE request, and the desk was issuing two of them every
+     * sixty seconds on a bare timer with no check on match state.
+     *
+     * It runs in the same process as the arena's Run loop, which warns above
+     * 5ms per iteration and above 550ms between driver station packets. The
+     * expected symptom is "Arena loop iteration took a long time" in the
+     * FTA's log at a steady one a minute, correlated with us, and the FTA
+     * reasonably blaming the new box on their network.
+     *
+     * Nothing is lost by waiting. The schedule does not change during a
+     * match, and the moment it DOES change, a score commit, is already
+     * covered by #refreshSoon. Rankings are cheap by comparison and are
+     * genuinely wanted the moment they move, so they are not gated.
+     */
+    const live = this.#matchState === MatchState.StartMatch
+      || this.#matchState === MatchState.AutoPeriod
+      || this.#matchState === MatchState.PausePeriod
+      || this.#matchState === MatchState.TeleopPeriod;
+
     this.#polling = true;
     try {
       try {
@@ -395,6 +441,8 @@ export class CheesyAdapter {
         console.warn('[cheesy] rankings poll failed:', (err as Error).message);
       }
 
+      if (live) return;
+
       try {
         const qual = await this.#client.get<MatchWithResult[]>('/api/matches/qualification');
         // Playoff matches live under their own type. Polling qualification
@@ -402,10 +450,19 @@ export class CheesyAdapter {
         // played, nothing in that list is Scheduled any more. Sequential, to
         // hold the one-concurrent-request budget.
         let playoff: MatchWithResult[] = [];
-        try {
-          playoff = await this.#client.get<MatchWithResult[]>('/api/matches/playoff');
-        } catch {
-          // No bracket yet. Quals alone is still a correct queue.
+        // Not before there is a bracket. Asking costs the same full table
+        // walk as a real answer, and the answer is an empty array until
+        // alliance selection has finalized. The alliance board is the desk's
+        // own witness to that, and the loaded match type is the other: once
+        // the field is playing playoffs there is certainly a bracket.
+        const bracketExists = this.#loadedType === MatchType.Playoff
+          || (this.#bus.state.selection?.alliances ?? []).some(a => a.teams.length > 0);
+        if (bracketExists) {
+          try {
+            playoff = await this.#client.get<MatchWithResult[]>('/api/matches/playoff');
+          } catch {
+            // Quals alone is still a correct queue.
+          }
         }
         // The arena's rule, applied per list because TypeOrder only orders
         // within a type: a qual floor means nothing to a playoff row.
@@ -436,11 +493,43 @@ export class CheesyAdapter {
         if (!nexusFresh || this.#bus.state.upcoming.length === 0) {
           this.#emit({ type: 'queue.updated', payload: { upcoming } });
         }
+
+        this.#noticeCorrections([...qual, ...playoff]);
       } catch (err) {
         console.warn('[cheesy] schedule poll failed:', (err as Error).message);
       }
     } finally {
       this.#polling = false;
+    }
+  }
+
+  /**
+   * A committed score that has CHANGED since the desk last looked.
+   *
+   * Only fires on a change, and only for a match that already had a score, so
+   * the first sight of a played match is not a correction. Silent on the
+   * first poll of the day by construction: every match is new then, and
+   * nothing is a change from a value we never had.
+   */
+  #noticeCorrections(rows: MatchWithResult[]): void {
+    for (const row of rows) {
+      const name = (row.LongName ?? row.ShortName ?? '').trim();
+      const red = row.Result?.RedSummary?.Score;
+      const blue = row.Result?.BlueSummary?.Score;
+      if (!name || typeof red !== 'number' || typeof blue !== 'number') continue;
+
+      const key = `${red}:${blue}`;
+      const was = this.#committed.get(name);
+      this.#committed.set(name, key);
+      if (was === undefined || was === key) continue;
+
+      console.warn(`[cheesy] ${name} was corrected after it was committed: ` +
+        `${was.replace(':', '-')} is now ${key.replace(':', '-')}. ` +
+        'Anything already uploaded for it carries the old line.');
+      this.#emit({
+        type: 'match.score_corrected',
+        payload: { label: name, red, blue },
+      });
     }
   }
 
