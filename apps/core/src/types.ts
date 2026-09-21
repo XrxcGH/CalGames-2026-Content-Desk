@@ -279,6 +279,19 @@ export interface MatchInfo {
    * a real event no matter what.
    */
   surrogates?: number[];
+  /**
+   * Which part of the tournament this is, from the field, when there is one.
+   *
+   * Carried mainly so a TEST match can be recognised. Cheesy skips the
+   * database work for a test match but fires the score-posted notifier
+   * anyway, outside the guard, and loads one as
+   * `{Type: Test, ShortName: "T", LongName: "Test Match", Id: 0}`. The desk's
+   * naming cannot key "Test Match", and it is not a practice match either, so
+   * the practice gate did not apply: the FTA's Friday field checkout would
+   * have become a public video on the WRRF channel titled "Test Match - 2026
+   * CalGames", with a 0-0 score line and whoever was bypassed in.
+   */
+  kind?: 'test' | 'practice' | 'qualification' | 'playoff';
 }
 
 /**
@@ -624,6 +637,15 @@ export interface DeskState {
    * when what it is showing is theirs.
    */
   queueFrom: 'nexus' | 'field' | null;
+  /**
+   * Which run of the loaded match this is. 1 unless the field replayed it.
+   *
+   * Cheesy re-runs a committed match under the SAME Match.Id and both commits
+   * fire the score-posted notifier, so the publish queue needs to tell the
+   * abandoned run from the one that counted. Without it the video on the
+   * channel was the run that was thrown away.
+   */
+  matchRun: number;
   /** The most recent event announcement, mirrored from Nexus. */
   announcement: { text: string; postedAt: number; from: string } | null;
   /** Live status card, or null. Operator-fired from the desk console. */
@@ -695,6 +717,7 @@ export const initialState = (): DeskState => ({
   highestPlayedMatch: '',
   upcoming: [],
   queueFrom: null,
+  matchRun: 1,
   pace: { cycleSec: null, nextStartAt: null, behindMin: null, lastStartAt: null },
   nowQueuing: null,
   announcement: null,

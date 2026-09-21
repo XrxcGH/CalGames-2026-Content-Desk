@@ -973,6 +973,29 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="chapState" aria-live="polite"></p>
       </section>
 
+<!--
+        The desk ships in deferred mode, which parks every cut video waiting
+        for a go-ahead. Nothing on any surface could give one: the routes all
+        existed and nothing called them, so the only way to start the day's
+        uploads was a hand-built authenticated POST, and the only way to clear
+        a failure was one more of those per item, with the ids read out of a
+        JSON blob. Realistically the weekend's videos never went up.
+      -->
+      <section id="sec-publish">
+        <h2>Videos <span class="hint" id="pubSum">·</span></h2>
+        <p class="hint">Cut clips wait here until somebody says go. That is on
+          purpose: uploading during playoffs competes with the stream for the
+          same uplink. The usual answer is to press <b>Publish everything</b>
+          once, after the last award.</p>
+        <div id="pubList"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="pubRefresh">Refresh</button>
+          <button class="btn" id="pubRelease">Publish everything waiting</button>
+          <button class="btn" id="pubRetry">Retry everything failed</button>
+        </div>
+        <p class="hint" id="pubNote" role="status"></p>
+      </section>
+
 <section>
         <h2>Event content</h2>
         <p class="hint">The event's name, sponsors, run of show, thresholds and

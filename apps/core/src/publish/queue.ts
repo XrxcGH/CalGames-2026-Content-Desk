@@ -42,6 +42,16 @@ export interface QueueItem {
   ranges: Range[];
   /** TBA match key, when this is a match video. */
   matchKey: string | null;
+  /**
+   * Which run of this match this video is. 1 unless the field replayed it.
+   *
+   * A replayed match commits twice under the same Match.Id, and without this
+   * the second commit was dropped as a duplicate label: the video that went
+   * up was the run that was thrown away.
+   */
+  run?: number;
+  /** Set when a later run replaced this one, so a stale upload is findable. */
+  supersededBy?: number;
   meta: { title: string; description: string };
   state: ItemState;
   /**
@@ -253,6 +263,27 @@ export class PublishQueue {
     if (!startedAt) return null;
 
     const displayName = st.match?.displayName ?? 'Match';
+
+    /*
+     * A TEST match is never content, however it was asked for.
+     *
+     * Cheesy skips the database work for a test match but fires
+     * ScorePostedNotifier anyway, outside that guard, and loads one as
+     * {Type: Test, Id: 0, LongName: "Test Match"}. The desk's identity gate
+     * passes (String(0) matches the loaded id), "Test Match" keys to nothing,
+     * and it is not a practice match, so neither existing gate applied. The
+     * FTA's Friday field checkout would have gone up on the WRRF channel as
+     * "Test Match - 2026 CalGames" with a 0-0 score line and whoever was
+     * bypassed in.
+     *
+     * No manual override, unlike the practice gate: there is no version of
+     * "publish the field checkout" that anybody means.
+     */
+    if (st.match?.kind === 'test' || /^test\s*match$/i.test(displayName)) {
+      console.warn('[publish] refusing to queue a test match');
+      return null;
+    }
+
     // Practice matches publish like anything else; only the AUTOMATIC path is
     // gated, because Friday load-in runs dozens of them and an event may not
     // want each one on the channel. An operator pressing the button knows
@@ -261,22 +292,60 @@ export class PublishQueue {
       return null;
     }
 
-    // Official FIRST-channel naming: "Qualification 42 - CalGames".
-    const { name, key } = identify(displayName);
+    // Official FIRST-channel naming: "Qualification 42 - CalGames". The
+    // bracket size decides how playoff matches number into rounds, and a
+    // four-alliance bracket rounds differently from an eight; the alliance
+    // board is the desk's only witness to which one is being played.
+    const alliances = st.selection?.alliances.length || 8;
+    const { name, key } = identify(displayName, alliances);
     const title = videoTitle(name, this.#cfg.event.name, this.#cfg.event.year);
 
-    // A failed item may be re-queued (that is the point of excluding it), but
-    // NOT one that already has a video on the channel. An item that uploaded
-    // fine and then exhausted its TBA-link retries (a two-minute outage does
-    // it) sits in `failed` holding a live videoId, and score corrections
-    // re-emit match.score_posted, as does pressing the desk's Post score twice.
-    // Without this the queue re-cut and re-uploaded, putting a second copy of
-    // the match on the channel. Never doing that is the one invariant this
-    // whole file is built around. retry(id) is the path for that item, and it
-    // reuses the videoId.
-    if (this.#items.some(i => i.kind === 'match' && i.label === name
-      && (i.state !== 'failed' || i.videoId))) {
+    /*
+     * A failed item may be re-queued (that is the point of excluding it), but
+     * NOT one that already has a video on the channel. An item that uploaded
+     * fine and then exhausted its TBA-link retries (a two-minute outage does
+     * it) sits in `failed` holding a live videoId, and score corrections
+     * re-emit match.score_posted, as does pressing the desk's Post score twice.
+     * Without this the queue re-cut and re-uploaded, putting a second copy of
+     * the match on the channel. Never doing that is the one invariant this
+     * whole file is built around. retry(id) is the path for that item, and it
+     * reuses the videoId.
+     *
+     * The exception is a REPLAY, and getting it wrong is worse than a
+     * duplicate. Cheesy can re-run a committed match: IsReplay goes true, the
+     * match is played again and re-committed with the same Match.Id, and both
+     * commits fire the notifier. Keyed on the label alone, the first commit
+     * won and the second was silently dropped, so the video on the channel and
+     * the video linked to qm42 on TBA was the run that was THROWN AWAY,
+     * showing a score that does not match the official result, while the
+     * replay that counted was never cut, never uploaded, and reported as
+     * covered by the ledger because a matching label existed.
+     *
+     * So the identity is the label plus which run of it this is. A later run
+     * of the same match is a different video. If the earlier one has already
+     * reached the channel it still gets superseded, and says so loudly,
+     * because the operator needs to know there is a wrong video up to pull.
+     */
+    const run = st.matchRun ?? 1;
+    const prior = this.#items.find(i => i.kind === 'match' && i.label === name);
+    if (prior && (prior.run ?? 1) >= run
+        && (prior.state !== 'failed' || prior.videoId)) {
       return null;                                   // already queued
+    }
+    if (prior && (prior.run ?? 1) < run) {
+      prior.supersededBy = run;
+      if (prior.videoId) {
+        console.warn(`[publish] ${name} was REPLAYED after run ${prior.run ?? 1} ` +
+          `was already uploaded as ${prior.videoId}. That video shows a result ` +
+          'that did not count and should be pulled from the channel.');
+      } else {
+        console.warn(`[publish] ${name} was replayed; superseding run ${prior.run ?? 1}`);
+      }
+      // Drop the abandoned run unless it is already on the channel, where the
+      // record of it is the thing the operator needs to act on.
+      if (!prior.videoId) {
+        this.#items = this.#items.filter(i => i.id !== prior.id);
+      }
     }
 
     const ranges = matchCut({
@@ -296,6 +365,7 @@ export class PublishQueue {
       sourceId: this.#cfg.publish.sourceId,
       ranges,
       matchKey: key,
+      run,
       meta: {
         title,
         description: description({
@@ -435,6 +505,31 @@ export class PublishQueue {
     item.error = null;
     await this.#save();
     this.kick();
+  }
+
+  /**
+   * Retry everything that failed, and report how many.
+   *
+   * The realistic failure at an event is not one bad item. It is a YouTube
+   * quota refusal or a dropped uplink taking out the whole evening's batch at
+   * once, and clearing thirty of those one id at a time at 11pm is how they
+   * end up not cleared at all.
+   *
+   * Held items are left alone: a QC hold is somebody's judgement that the cut
+   * needs looking at, and a bulk retry is not that look.
+   */
+  async retryFailed(): Promise<number> {
+    const failed = this.#items.filter(i => i.state === 'failed');
+    for (const item of failed) {
+      item.state = item.videoId ? 'uploaded' : item.clipPath ? 'cut' : 'pending';
+      item.attempts = 0;
+      item.error = null;
+    }
+    if (failed.length) {
+      await this.#save();
+      this.kick();
+    }
+    return failed.length;
   }
 
   #next(): QueueItem | undefined {
@@ -584,12 +679,25 @@ export class PublishQueue {
           if (item.kind === 'match') {
             if (item.matchKey) {
               await this.#tba.addMatchVideo(item.matchKey, item.videoId!);
-            } else {
-              // A keyless match is a practice match: TBA has no keys for
-              // practice, and linking one as event media would misfile a
-              // scrimmage alongside the ceremonies. Skip TBA entirely.
-              console.log(`[publish] ${item.label} has no TBA match key (practice), ` +
+            } else if (isPractice(item.label)) {
+              // TBA has no keys for practice matches, and linking one as event
+              // media would misfile a scrimmage alongside the ceremonies.
+              console.log(`[publish] ${item.label} is a practice match, ` +
                 'skipping the TBA link');
+            } else {
+              /*
+               * Keyless and NOT practice, which is a bug rather than a rule.
+               *
+               * This branch used to be folded into the practice one and said
+               * so in the log. Overtime 1 had no case in identify(), so the
+               * finals tiebreaker, the single match everyone goes looking for
+               * afterwards, would have uploaded unlinked and been flipped
+               * public while a log line insisted it was a practice match.
+               * Whoever investigated would have been sent the wrong way.
+               */
+              console.warn(`[publish] ${item.label} uploaded but could not be ` +
+                'linked on TBA: the desk does not know its match key. Link it ' +
+                'by hand, and file the name so identify() learns it.');
             }
           } else {
             await this.#tba.addEventMedia(item.videoId!);

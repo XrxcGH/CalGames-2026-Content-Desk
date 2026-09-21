@@ -406,3 +406,125 @@ test('a re-sent segment request returns the queued item instead of a second copy
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/** A bus whose state describes a just-scored match of any shape. */
+const matchBus = (over: Record<string, unknown> = {}): EventBus => {
+  const startedAt = 1_000_000;
+  return {
+    emit: () => {},
+    state: {
+      matchStartedAt: null,
+      lastMatchStartedAt: startedAt,
+      matchEndedAt: startedAt + 2_000,
+      scorePostedAt: startedAt + 3_000,
+      matchRun: 1,
+      match: { id: '42', displayName: 'Qualification 42', red: [], blue: [] },
+      score: { red: { total: 112 }, blue: { total: 98 } },
+      ...over,
+    },
+  } as unknown as EventBus;
+};
+
+test('the FTA\'s field checkout does not become a public video', async () => {
+  /*
+   * Cheesy skips the database work for a test match but fires
+   * ScorePostedNotifier anyway, OUTSIDE that guard, and loads one as
+   * {Type: Test, Id: 0, LongName: "Test Match"}. The desk's identity gate
+   * passes, "Test Match" keys to nothing, and it is not a practice match, so
+   * neither existing gate applied. Friday's field checkout would have gone up
+   * on the WRRF channel as "Test Match - 2026 CalGames" with a 0-0 score line
+   * and whoever happened to be bypassed in.
+   */
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const bus = matchBus({
+      match: { id: '0', displayName: 'Test Match', kind: 'test', red: [], blue: [] },
+    });
+    const q = new PublishQueue(root, structuredClone(DEFAULTS), bus, null);
+    await q.load();
+
+    assert.equal(await q.queueMatch(), null, 'not automatically');
+    assert.equal(await q.queueMatch({ manual: true }), null,
+      'and not manually either: there is no version of this anybody means');
+    assert.equal(q.items.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a test match is refused by name too, in case the field type is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const bus = matchBus({
+      match: { id: '0', displayName: 'Test Match', red: [], blue: [] },
+    });
+    const q = new PublishQueue(root, structuredClone(DEFAULTS), bus, null);
+    await q.load();
+    assert.equal(await q.queueMatch(), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a replayed match publishes the run that counted, not the one thrown away', async () => {
+  /*
+   * Cheesy can re-run a committed match: IsReplay goes true, it is played
+   * again and re-committed under the SAME Match.Id, and both commits fire the
+   * score-posted notifier. The dedupe was keyed on the label alone, so the
+   * first commit won and the second was silently dropped. The video on the
+   * channel and the video linked to qm42 on TBA was the run that was THROWN
+   * AWAY, showing a score that did not count, while the replay that did count
+   * was never cut, never uploaded, and reported as covered by the ledger
+   * because a matching label existed.
+   */
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const bus = matchBus();
+    const q = new PublishQueue(root, structuredClone(DEFAULTS), bus, null);
+    await q.load();
+
+    const first = await q.queueMatch();
+    assert.equal(first?.label, 'Qualification 42');
+    assert.equal(first?.run, 1);
+
+    // Same match posted again at the same run: still a duplicate.
+    assert.equal(await q.queueMatch(), null, 'a re-post of the same run is not news');
+
+    // The field replays it. Second run, same label, same TBA key.
+    (bus.state as { matchRun: number }).matchRun = 2;
+    const replay = await q.queueMatch();
+    assert.ok(replay, 'the replay is queued');
+    assert.equal(replay.run, 2);
+    assert.equal(replay.matchKey, 'qm42', 'and still links to the same TBA match');
+
+    // The abandoned run never reached the channel, so it is simply gone.
+    assert.deepEqual(q.items.map(i => i.run), [2],
+      'one video for Qualification 42, and it is the one that counted');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a replay after the first run is already uploaded says so instead of hiding it', async () => {
+  // Nothing can un-publish the wrong video automatically, and quietly leaving
+  // it is how the wrong match stays on the channel. The stale item is kept and
+  // marked, so it is findable.
+  const root = await mkdtemp(join(tmpdir(), 'pubq-'));
+  try {
+    const bus = matchBus();
+    const q = new PublishQueue(root, structuredClone(DEFAULTS), bus, null);
+    await q.load();
+
+    const first = await q.queueMatch();
+    (first as { videoId: string | null }).videoId = 'abc123';
+
+    (bus.state as { matchRun: number }).matchRun = 2;
+    const replay = await q.queueMatch();
+
+    assert.ok(replay, 'the replay is still queued');
+    assert.equal(first?.supersededBy, 2, 'and the stale upload is marked');
+    assert.equal(q.items.length, 2, 'the record of the wrong video survives');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

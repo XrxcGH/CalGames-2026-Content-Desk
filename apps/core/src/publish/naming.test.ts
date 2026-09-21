@@ -22,13 +22,70 @@ test('playoff matches get the (Rn) suffix and sf keys', () => {
   assert.deepEqual(identify('Match 13'), { name: 'Match 13 (R5)', key: 'sf13m1' });
 });
 
-test('finals and the tiebreaker', () => {
+test('finals are Final 1 to 3, and the tiebreakers after them are Overtime', () => {
+  /*
+   * The arena's own finals spec, from newFinalMatches():
+   *
+   *   Final 1    F1   f1m1   300s
+   *   Final 2    F2   f1m2   300s
+   *   Final 3    F3   f1m3   300s
+   *   Overtime 1 O1   f1m4   600s, hidden until needed
+   *   Overtime 2 O2   f1m5   600s, hidden until needed
+   *   Overtime 3 O3   f1m6   600s, hidden until needed
+   *
+   * This file used to retitle Final 3 as "Final Tiebreaker", which disagreed
+   * with the arena, the announcer reading off the field monitor, and TBA,
+   * whose f1m3 is just the third final. A best-of-three going to a third
+   * match is not a tiebreaker; the tiebreakers are the Overtime matches, and
+   * those had no branch at all.
+   */
   assert.deepEqual(identify('Final 1'), { name: 'Final 1', key: 'f1m1' });
   assert.deepEqual(identify('Finals 2'), { name: 'Final 2', key: 'f1m2' });
-  assert.deepEqual(identify('Final Tiebreaker'), { name: 'Final Tiebreaker', key: 'f1m3' });
-  // A third final IS the tiebreaker, however it arrives.
-  assert.deepEqual(identify('Final 3'), { name: 'Final Tiebreaker', key: 'f1m3' });
+  assert.deepEqual(identify('Final 3'), { name: 'Final 3', key: 'f1m3' });
   assert.deepEqual(identify('Final Two'), { name: 'Final 2', key: 'f1m2' });
+  // Still understood, because scorekeepers and older tools say it. It means
+  // the third final.
+  assert.deepEqual(identify('Final Tiebreaker'), { name: 'Final 3', key: 'f1m3' });
+});
+
+test('an overtime final gets a TBA key instead of being filed as practice', () => {
+  /*
+   * "Overtime 1" matched nothing, so identify() returned a null key, and the
+   * queue's keyless branch assumed keyless meant practice: the item was
+   * marked done with a log line reading "has no TBA match key (practice)".
+   * The finals going to overtime is the one match everybody looks for
+   * afterwards, and it would have uploaded unlinked, been flipped public
+   * without ever being linked, and sent whoever investigated the wrong way.
+   */
+  assert.deepEqual(identify('Overtime 1'), { name: 'Overtime 1', key: 'f1m4' });
+  assert.deepEqual(identify('Overtime 2'), { name: 'Overtime 2', key: 'f1m5' });
+  assert.deepEqual(identify('Overtime 3'), { name: 'Overtime 3', key: 'f1m6' });
+  assert.deepEqual(identify('O1'), { name: 'Overtime 1', key: 'f1m4' });
+  assert.equal(videoTitle(identify('Overtime 1').name, 'CalGames'), 'Overtime 1 - CalGames');
+});
+
+test('round numbers follow the bracket that is actually being played', () => {
+  /*
+   * Cheesy builds two double-elimination brackets and they number their
+   * rounds differently. Taken from the nameDetail strings the arena attaches
+   * to each match:
+   *
+   *   8 alliances:  M1-4 R1, M5-8 R2, M9-10 R3, M11-12 R4, M13 R5
+   *   4 alliances:  M1-2 R1, M3-4 R2, M5 R3
+   *
+   * The eight-alliance table was applied to both, so in a four-alliance
+   * bracket M3 was titled R1 where the arena calls it Round 2 Upper, and M5
+   * was titled R2 against Round 3 Lower. CalGames is an offseason and a
+   * four-alliance bracket is a real possibility. A wrong title is not
+   * fixable once it is on an uploaded video.
+   */
+  assert.equal(identify('Match 3').name, 'Match 3 (R1)', 'eight is the default');
+  assert.equal(identify('Match 3', 8).name, 'Match 3 (R1)');
+  assert.equal(identify('Match 3', 4).name, 'Match 3 (R2)');
+  assert.equal(identify('Match 5', 4).name, 'Match 5 (R3)');
+  assert.equal(identify('Match 13', 8).name, 'Match 13 (R5)');
+  // The key does not move with the bracket size: sf{n}m1 either way.
+  assert.equal(identify('Match 5', 4).key, 'sf5m1');
 });
 
 test('practice matches title normally but carry no TBA key', () => {

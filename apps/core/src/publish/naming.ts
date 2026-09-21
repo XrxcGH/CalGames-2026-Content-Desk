@@ -5,7 +5,7 @@
  *   Qualification 1 - CalGames
  *   Match 1 (R1) - CalGames          <- playoff, double elimination
  *   Final 1 - CalGames
- *   Final Tiebreaker - CalGames
+ *   Overtime 1 - CalGames            <- the finals tiebreaker, f1m4
  *
  *   2026 CalGames - Day 1            <- livestream
  *
@@ -29,8 +29,8 @@ const ORDINAL: Record<string, number> = { one: 1, two: 2, three: 3 };
  * official naming, plus its TBA key.
  *
  * Playoff matches use the modern double-elimination scheme: FIRST shows
- * "Match 7 (R2)" and TBA keys them `sf7m1`. Finals are `f1m1`, `f1m2`, and the
- * tiebreaker is `f1m3`.
+ * "Match 7 (R2)" and TBA keys them `sf7m1`. Finals are `f1m1`..`f1m3`, and
+ * the tiebreakers after them are Overtime 1/2/3 at `f1m4`..`f1m6`.
  */
 /**
  * Practice matches run during load-in and pit walkthroughs. They publish like
@@ -45,7 +45,13 @@ const ORDINAL: Record<string, number> = { one: 1, two: 2, three: 3 };
 export const isPractice = (displayName: string): boolean =>
   /^p(?:ractice)?\s*#?\s*\d*$/i.test(displayName.trim());
 
-export function identify(displayName: string): MatchIdentity {
+/**
+ * How many alliances the playoff bracket has, which decides how its matches
+ * are numbered into rounds. See roundOf(). Eight unless the desk has been
+ * told otherwise, because that is the common case and because a bracket
+ * nobody mentioned should not silently renumber the finals.
+ */
+export function identify(displayName: string, alliances = 8): MatchIdentity {
   const s = displayName.trim();
 
   // Qualification 42 / Qual 42 / Q42 / qm42
@@ -60,18 +66,45 @@ export function identify(displayName: string): MatchIdentity {
     return { name: n ? `Practice ${Number(n)}` : s, key: null };
   }
 
-  // Final Tiebreaker / Finals Tiebreaker / Final 3
-  if (/^finals?\s*(tiebreaker|tie-breaker|tie breaker)$/i.test(s)) {
-    return { name: 'Final Tiebreaker', key: 'f1m3' };
+  /*
+   * Overtime 1/2/3, which the arena keys f1m4/f1m5/f1m6.
+   *
+   * These had no branch at all, so identify() fell through to a null key and
+   * the queue's keyless path, which assumes keyless means practice: the item
+   * was marked done with a log line reading "has no TBA match key (practice),
+   * skipping the TBA link". The finals going to overtime is the single match
+   * everyone will go looking for afterwards, and it would have uploaded
+   * unlinked, flipped public without ever being linked, with the log actively
+   * misdirecting whoever investigated.
+   *
+   * The arena's own spec: Final 1/2/3 are f1m1..f1m3 at 300s, then Overtime
+   * 1/2/3 are f1m4..f1m6, hidden until they are needed.
+   */
+  const overtime = /^(?:overtime|ot|o)\s*#?\s*(\d+)$/i.exec(s);
+  if (overtime) {
+    const n = Number(overtime[1]);
+    return { name: `Overtime ${n}`, key: `f1m${n + 3}` };
   }
 
-  // Final 1 / Finals 2 / F1
+  // Final Tiebreaker / Finals Tiebreaker: a name the arena does not use, but
+  // scorekeepers and older tools do. It means Final 3.
+  if (/^finals?\s*(tiebreaker|tie-breaker|tie breaker)$/i.test(s)) {
+    return { name: 'Final 3', key: 'f1m3' };
+  }
+
+  /*
+   * Final 1 / Finals 2 / F1.
+   *
+   * Final 3 keeps its own name. It used to be retitled "Final Tiebreaker",
+   * which disagreed with the arena (longName "Final 3", shortName "F3"), the
+   * announcer reading off the field monitor, and TBA, whose f1m3 is just the
+   * third final. Under the current rules a best-of-three going to a third
+   * match is not a tiebreaker; the tiebreakers are the Overtime matches above.
+   */
   const final = /^(?:finals?|f)\s*#?\s*(\d+)$/i.exec(s);
   if (final) {
     const n = Number(final[1]);
-    return n >= 3
-      ? { name: 'Final Tiebreaker', key: 'f1m3' }
-      : { name: `Final ${n}`, key: `f1m${n}` };
+    return { name: `Final ${n}`, key: `f1m${n}` };
   }
 
   // Match 7 (R3), already in official form
@@ -86,7 +119,7 @@ export function identify(displayName: string): MatchIdentity {
   const playoff = /^(?:playoff|elimination|elim|match|m)\s*#?\s*(\d+)$/i.exec(s);
   if (playoff) {
     const n = Number(playoff[1]);
-    return { name: `Match ${n} (R${roundOf(n)})`, key: `sf${n}m1` };
+    return { name: `Match ${n} (R${roundOf(n, alliances)})`, key: `sf${n}m1` };
   }
 
   // Legacy bracket naming, still emitted by some tools.
@@ -100,22 +133,40 @@ export function identify(displayName: string): MatchIdentity {
   const spelled = /^finals?\s+(one|two|three)$/i.exec(s);
   if (spelled) {
     const n = ORDINAL[spelled[1]!.toLowerCase()]!;
-    return n >= 3 ? { name: 'Final Tiebreaker', key: 'f1m3' } : { name: `Final ${n}`, key: `f1m${n}` };
+    return { name: `Final ${n}`, key: `f1m${n}` };
   }
 
   return { name: s, key: null };
 }
 
 /**
- * Round number for the 13-match double-elimination bracket, matching the (Rn)
- * suffix FIRST puts on playoff titles.
+ * Round number for a double-elimination bracket, matching the (Rn) suffix
+ * FIRST puts on playoff titles.
  *
- * The official bracket has five rounds: matches 1-4, 5-8, 9-10, 11-12, 13.
- * An earlier version invented seven rounds and mislabeled everything past
- * match 6, which the test pins down because a wrong title is not fixable
- * once it is on uploaded videos.
+ * Cheesy Arena builds two brackets, and they number their rounds differently:
+ *
+ *   8 alliances, 13 matches:  M1-4 R1, M5-8 R2, M9-10 R3, M11-12 R4, M13 R5
+ *   4 alliances,  5 matches:  M1-2 R1, M3-4 R2, M5 R3
+ *
+ * Both are taken verbatim from newFourAllianceDoubleEliminationBracket and
+ * newEightAllianceDoubleEliminationBracket, whose per-match nameDetail
+ * strings ("Round 2 Upper", "Round 3 Lower") are the arena's own answer.
+ *
+ * `alliances` matters because the eight-alliance table is wrong for a small
+ * bracket in a way that shows on every title: M3 is Round 2 Upper in a
+ * four-alliance bracket and this used to call it R1, and M5 is Round 3 Lower
+ * and this used to call it R2. CalGames is an offseason and a four-alliance
+ * bracket is a real possibility there.
+ *
+ * Eight is the default because it is the common case and because a bracket
+ * the desk has not been told about should not silently renumber the finals.
  */
-export function roundOf(matchNumber: number): number {
+export function roundOf(matchNumber: number, alliances = 8): number {
+  if (alliances <= 4) {
+    if (matchNumber <= 2) return 1;
+    if (matchNumber <= 4) return 2;
+    return 3;
+  }
   if (matchNumber <= 4) return 1;
   if (matchNumber <= 8) return 2;
   if (matchNumber <= 10) return 3;

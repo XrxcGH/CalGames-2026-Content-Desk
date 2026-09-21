@@ -1929,6 +1929,13 @@ export function startServer(opts: ServerOpts) {
             await publish.retry(action.slice('retry/'.length));
             return json(res, 200, { ok: true });
           }
+          // Everything that failed, in one press. The realistic failure is not
+          // one bad item: it is a quota refusal or a dropped uplink taking out
+          // the whole evening's batch at once, and retrying thirty videos one
+          // id at a time at 11pm is how they end up not retried at all.
+          if (action === 'retry-failed') {
+            return json(res, 200, { retried: await publish.retryFailed() });
+          }
           return json(res, 404, { error: `Unknown publish action "${action}"` });
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });

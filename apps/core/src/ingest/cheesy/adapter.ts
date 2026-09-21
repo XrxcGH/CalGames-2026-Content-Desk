@@ -176,6 +176,25 @@ function bonusRp(s: ScoreSummary | undefined):
   };
 }
 
+/**
+ * model.MatchType -> what the desk calls that part of the tournament.
+ *
+ * Test matters most. Cheesy skips the database work for a test match but
+ * fires the score-posted notifier anyway, outside that guard, so the FTA's
+ * Friday field checkout reaches the desk looking like any other committed
+ * result. Nothing downstream could tell: "Test Match" has no TBA key and is
+ * not a practice match either, so neither gate caught it.
+ */
+function matchKind(type: number | string | undefined): MatchInfo['kind'] | null {
+  switch (type) {
+    case MatchType.Test: return 'test';
+    case MatchType.Practice: return 'practice';
+    case MatchType.Qualification: return 'qualification';
+    case MatchType.Playoff: return 'playoff';
+    default: return null;
+  }
+}
+
 interface Totals {
   autoFuel: number; teleopFuel: number; autoTower: number; teleopTower: number;
   foulsAgainst: number;
@@ -234,6 +253,13 @@ export class CheesyAdapter {
   /** Non-null while the field's period lengths disagree with REBUILT. */
   #timingMismatch: string[] | null = null;
   #timingWarned = false;
+  /**
+   * Which run of each match has been loaded. Cheesy re-runs a committed match
+   * under the SAME Match.Id, and both commits fire the score-posted notifier,
+   * so without a run number the publish queue treated the second as a
+   * duplicate label and put the abandoned first run on the channel.
+   */
+  #runs = new Map<string, number>();
 
   constructor(opts: CheesyAdapterOpts) {
     this.#bus = opts.bus;
@@ -510,6 +536,7 @@ export class CheesyAdapter {
       surrogates,
       ...((m.PlayoffRedAlliance ?? 0) > 0 ? { redAlliance: m.PlayoffRedAlliance } : {}),
       ...((m.PlayoffBlueAlliance ?? 0) > 0 ? { blueAlliance: m.PlayoffBlueAlliance } : {}),
+      ...(matchKind(m.Type) ? { kind: matchKind(m.Type)! } : {}),
     };
 
     // Cheesy replays its matchLoad snapshot whenever a display (re)subscribes,
@@ -548,6 +575,11 @@ export class CheesyAdapter {
     this.#autoWinnerSent = false;
     this.#matchLoaded = true;
     this.#armedSent = false;
+    // IsReplay is the arena saying a result already exists for this match, so
+    // whatever is about to be played is at least its second run.
+    const run = msg.IsReplay === true ? (this.#runs.get(match.id) ?? 1) + 1 : 1;
+    this.#runs.set(match.id, run);
+
     this.#loadedMatchId = match.id;
     this.#loadedMatchName = match.displayName ?? '';
     // Where the field is in the schedule, for the on-deck queue's floor.
@@ -556,7 +588,7 @@ export class CheesyAdapter {
     this.#loadedType = m.Type ?? null;
     this.#loadedTypeOrder = typeof m.TypeOrder === 'number' ? m.TypeOrder : null;
     this.#cardsSeen.clear();
-    this.#emit({ type: 'match.loaded', payload: match });
+    this.#emit({ type: 'match.loaded', payload: { ...match, run } });
   }
 
   /**

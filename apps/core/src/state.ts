@@ -146,6 +146,10 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         return {
           ...state,
           match: p,
+          // Which run of this match is about to be played. The arena replays a
+          // committed match under the same id, and the publish queue has to
+          // tell that run from the one it threw away.
+          matchRun: Math.max(1, Number((ev.payload as { run?: number })?.run ?? 1)),
           matchStartedAt: null,
           lastMatchStartedAt: null,
           matchLoadedAt: ev.ts,

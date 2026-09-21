@@ -1304,10 +1304,115 @@ async function loadCoverage() {
   } catch { /* transient */ }
 }
 $('covCheck').onclick = loadCoverage;
+
+// ---- videos -----------------------------------------------------------------
+/*
+ * The desk ships in deferred mode, so every cut video parks in `held` waiting
+ * for a go-ahead, and until now nothing on any surface could give one. The
+ * routes all existed and nobody called them: the only way to start the day's
+ * uploads was a hand-built authenticated POST, and the only way to clear a
+ * failure was one more of those per item, with the ids read out of a JSON
+ * blob at eleven at night. Realistically the weekend's videos never went up.
+ *
+ * Read-and-press, deliberately: no per-item controls beyond a retry. The two
+ * things an operator actually needs at the end of a day are "send them all"
+ * and "send the ones that broke again".
+ */
+const PUB_WORDS = {
+  held: 'waiting for you',
+  pending: 'queued',
+  cut: 'clip made',
+  uploaded: 'uploaded, linking',
+  done: 'done',
+  failed: 'failed',
+};
+
+async function loadPublish() {
+  try {
+    const res = await fetch('/api/publish');
+    if (!res.ok) return;
+    const r = await res.json();
+    const items = r.items ?? [];
+    const by = (state) => items.filter(i => i.state === state).length;
+    const sum = $('pubSum');
+    if (!r.available) {
+      sum.textContent = '· publishing is off';
+    } else {
+      const done = by('done');
+      const failed = by('failed');
+      const waiting = by('held');
+      sum.textContent = `· ${done}/${items.length} published`
+        + (waiting ? `, ${waiting} waiting` : '')
+        + (failed ? `, ${failed} failed` : '');
+      sum.toggleAttribute('data-bad', failed > 0);
+    }
+
+    const box = $('pubList');
+    if (!items.length) {
+      box.innerHTML = '<div class="hint">Nothing cut yet.</div>';
+      return;
+    }
+    // Newest first: at the end of a day the thing you are looking for is the
+    // thing that just happened.
+    box.replaceChildren(...items.slice().reverse().map(i => {
+      const row = document.createElement('div');
+      row.className = 'gap';
+      const name = document.createElement('b');
+      name.textContent = i.label + (i.supersededBy ? ' (replaced by a replay)' : '');
+      const detail = document.createElement('span');
+      detail.textContent = i.error
+        ? `${PUB_WORDS[i.state] ?? i.state}: ${i.error}`
+        : (PUB_WORDS[i.state] ?? i.state);
+      row.append(name, detail);
+      if (i.state === 'failed' || i.state === 'held') {
+        const go = document.createElement('button');
+        go.className = 'btn';
+        go.textContent = i.state === 'held' ? 'Publish' : 'Retry';
+        go.onclick = async () => {
+          go.disabled = true;
+          await fetch(`/api/publish/retry/${encodeURIComponent(i.id)}`, { method: 'POST' })
+            .catch(() => {});
+          loadPublish();
+        };
+        row.append(go);
+      }
+      return row;
+    }));
+  } catch { /* transient */ }
+}
+
+const pubPost = async (action, note) => {
+  setText($('pubNote'), 'Working...');
+  try {
+    const res = await fetch(`/api/publish/${action}`, { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    setText($('pubNote'), note(body));
+  } catch (err) {
+    setText($('pubNote'), err.message);
+  }
+  loadPublish();
+};
+
+$('pubRefresh').onclick = loadPublish;
+$('pubRelease').onclick = () => {
+  // Worth a confirm: on a slow venue uplink this competes with the stream,
+  // and the whole reason for deferred mode is not to do it mid-playoffs.
+  if (!confirm('Start uploading everything that is waiting? On a slow uplink '
+    + 'this competes with the stream. Normally done after the last award.')) return;
+  pubPost('release', b => `${b.released} video(s) released.`);
+};
+$('pubRetry').onclick = () => pubPost('retry-failed',
+  b => b.retried ? `${b.retried} failed video(s) queued again.` : 'Nothing was failed.');
 void loadCoverage();
+void loadPublish();
 // Slow poll: a reconciliation that changes only when a match ends or an upload
 // finishes does not need to be live, and this walks the whole queue.
-setInterval(() => { if (!document.hidden) void loadCoverage(); }, 60_000);
+setInterval(() => {
+  if (document.hidden) return;
+  void loadCoverage();
+  void loadPublish();
+}, 60_000);
 
 // ---- vitals -----------------------------------------------------------------
 // One health report across every subsystem. Polled slowly on purpose: several
