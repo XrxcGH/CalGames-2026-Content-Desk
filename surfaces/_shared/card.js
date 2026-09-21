@@ -135,10 +135,18 @@ export function drawCard(ctx, card) {
     ctx.restore();
     perf(ctx, x, blockY, blockW, blockH, 20);
 
-    // Winner gets a gold cap. Position and a label carry it too, never color
-    // alone, because red/blue is ~8% of male viewers' worst case. Clipped to
-    // the plate's chamfer so the band ends where the corner cut begins.
-    if (isWinner) {
+    /*
+     * Winner gets a gold cap. Position and a label carry it too, never color
+     * alone, because red/blue is ~8% of male viewers' worst case. Clipped to
+     * the plate's chamfer so the band ends where the corner cut begins.
+     *
+     * Not on a shadow-scored card. The total below is already outlined to say
+     * the desk typed it, and a gold cap plus the word WINNER over an outlined
+     * number is the card asserting a result it has just admitted it is
+     * guessing at. This is the graphic people screenshot and post, so it is
+     * the worst possible place to be confidently wrong about who won.
+     */
+    if (isWinner && !card.estimated) {
       ctx.save();
       chamfer(ctx, x, blockY, blockW, blockH, 26);
       ctx.clip();
@@ -165,13 +173,16 @@ export function drawCard(ctx, card) {
     }
 
     if (isWinner) {
-      ctx.fillStyle = p.gold;
-      ctx.font = cond(700)(28);
-      trackedCenter(ctx, 'WINNER', x + blockW / 2, blockY + 264, 4);
+      // Unofficial says so, in the quieter colour, and never as "WINNER".
+      ctx.fillStyle = card.estimated ? p.dim : p.gold;
+      ctx.font = cond(700)(card.estimated ? 24 : 28);
+      trackedCenter(ctx, card.estimated ? 'LEADING, UNOFFICIAL' : 'WINNER',
+        x + blockW / 2, blockY + 264, 4);
     } else if (won === 'tie') {
       ctx.fillStyle = p.dim;
       ctx.font = cond(600)(26);
-      ctx.fillText('TIE', x + blockW / 2, blockY + 264);
+      ctx.fillText(card.estimated ? 'LEVEL, UNOFFICIAL' : 'TIE',
+        x + blockW / 2, blockY + 264);
     }
   };
 

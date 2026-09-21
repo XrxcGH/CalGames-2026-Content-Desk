@@ -308,9 +308,22 @@ function paintRpStrips(thresholds) {
 
 paintRpStrips();
 
-function paintRp(container, rp) {
+/**
+ * The ranking-point badges, and whether the desk is guessing at them.
+ *
+ * `estimated` is not decoration here. When the bridge is down the operator
+ * shadow-scores by hand, and every number on the bar is drawn as an outline to
+ * say so. The badges were the one thing that ignored it: a guessed fuel total
+ * crossing the Energized threshold lit a badge in exactly the same solid green
+ * a field-confirmed one uses, so the overlay asserted a ranking point it had
+ * worked out from a desk-typed figure, beside totals it had just admitted were
+ * guesses.
+ */
+function paintRp(container, rp, estimated = false) {
+  container.dataset.est = String(!!estimated);
   for (const badge of container.children) {
     badge.dataset.earned = String(!!rp[badge.dataset.rp]);
+    badge.dataset.est = String(!!estimated);
   }
 }
 
@@ -329,7 +342,7 @@ function paintScore(state) {
     $(`${side}Total`).dataset.est = estTotal;
     $(`${side}Fuel`).dataset.est = estParts;
     $(`${side}Tower`).dataset.est = estParts;
-    paintRp($(`${side}Pips`), s.rp);
+    paintRp($(`${side}Pips`), s.rp, state.confidence === 'estimated');
   }
 }
 
@@ -404,14 +417,36 @@ function paintFinal(state) {
   // The on-air final screen and the card must agree.
   $('finalRedTeams').textContent = allianceRoster(state, 'red').map(t => t.number).join(' · ');
   $('finalBlueTeams').textContent = allianceRoster(state, 'blue').map(t => t.number).join(' · ');
-  paintRp($('finalRedRp'), state.score.red.rp);
-  paintRp($('finalBlueRp'), state.score.blue.rp);
+  const estimated = state.totalConfidence === 'estimated';
+  paintRp($('finalRedRp'), state.score.red.rp, estimated);
+  paintRp($('finalBlueRp'), state.score.blue.rp, estimated);
   paintFinalCards(state);
 
-  $('finalRedSide').toggleAttribute('data-won', r > b);
-  $('finalBlueSide').toggleAttribute('data-won', b > r);
-  $('finalRedVerdict').textContent = r > b ? 'Winner' : r === b ? 'Tie' : '';
-  $('finalBlueVerdict').textContent = b > r ? 'Winner' : r === b ? 'Tie' : '';
+  /*
+   * The verdict is a claim about the result, so it answers to the same flag
+   * the totals do.
+   *
+   * These four lines ran with no confidence check at all. With the bridge down
+   * and the desk shadow-scoring, paintFinal correctly drew both totals as
+   * white outlines, the overlay's whole convention for "this is a guess", and
+   * then printed WINNER in solid white under a solid gold cap between them. If
+   * the typed fuel was a few points out, that word named the wrong alliance,
+   * in the typography the graphic reserves for the field's own answer.
+   *
+   * Unofficial gets its own words and no gold cap: the cap is the thing people
+   * photograph.
+   */
+  $('finalRedSide').toggleAttribute('data-won', !estimated && r > b);
+  $('finalBlueSide').toggleAttribute('data-won', !estimated && b > r);
+  const verdict = (mine, theirs) => {
+    if (mine === theirs) return estimated ? 'Level, unofficial' : 'Tie';
+    if (mine < theirs) return '';
+    return estimated ? 'Leading, unofficial' : 'Winner';
+  };
+  $('finalRedVerdict').textContent = verdict(r, b);
+  $('finalBlueVerdict').textContent = verdict(b, r);
+  $('finalRedVerdict').dataset.est = String(estimated);
+  $('finalBlueVerdict').dataset.est = String(estimated);
 }
 
 // ---- status card ----------------------------------------------------------
