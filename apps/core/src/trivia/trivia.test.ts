@@ -619,3 +619,36 @@ test('a match pick joins its round instead of splitting it', () => {
   const names = t.sessions.map(s => s.name);
   assert.deepEqual(names, ['Round 1'], 'one round, not two fragments');
 });
+
+test('fixing a typo does not split the round the question was in', () => {
+  /*
+   * The host console posts text, options, answer and category when it saves an
+   * edit. `session` is not in that list, and the validator rebuilt the
+   * question from what it was given, so the edited question fell out of its
+   * round: the bank went from six rounds of six to Round 1 (6), Round 2 (2),
+   * Trivia (1), Round 2 (3), and the picker grew a second "Round 2" button and
+   * a phantom "Trivia" one. startSession then jumped to whichever run still
+   * had questions left, and saveBank persisted all of it to data/trivia.json.
+   *
+   * The host does this mid-event, to fix a typo somebody in the gym just read
+   * out.
+   */
+  const store = new TriviaStore(new EventBus(), DEFAULT_QUESTIONS);
+  const before = store.sessions;
+  const bank = store.bank();
+  const i = bank.findIndex(q => q.session && bank.filter(x => x.session === q.session).length > 2);
+  assert.ok(i >= 0, 'the shipped bank has rounds to break');
+  const round = bank[i]!.session;
+
+  store.editQuestion(i, {
+    text: bank[i]!.text.replace(/\?$/, ' (corrected)?'),
+    options: bank[i]!.options,
+    answer: bank[i]!.answer,
+    category: bank[i]!.category,
+  });
+
+  assert.equal(store.bank()[i]!.session, round, 'the question stays in its round');
+  assert.deepEqual(store.sessions.map(r => `${r.name}:${r.size}`),
+    before.map(r => `${r.name}:${r.size}`),
+    'and the round list is unchanged: no split, no phantom round');
+});

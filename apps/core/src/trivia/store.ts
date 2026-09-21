@@ -342,7 +342,22 @@ export class TriviaStore {
    * and leave it scored as a fact whose "correct" answer is just the
    * placeholder it was created with.
    */
-  #validate(draft: QuestionDraft, preserve?: Pick<TriviaQuestion, 'kind' | 'matchId'>): TriviaQuestion {
+  /**
+   * `preserve` carries the fields an edit must not silently drop.
+   *
+   * `session` is in here because leaving it out corrupted the bank. The host
+   * fixes a typo in question 9 of "Round 2", the console posts text, options,
+   * answer and category, and the round label was rebuilt from those alone: the
+   * question fell out of its round. The bank then reads Round 1 (6), Round 2
+   * (2), Trivia (1), Round 2 (3), so the picker grows a second Round 2 button
+   * and a phantom "Trivia" one, startSession jumps to whichever run still has
+   * questions in it, and saveBank writes the damage to disk. pick() already
+   * inherits a neighbour's session for exactly this reason.
+   */
+  #validate(
+    draft: QuestionDraft,
+    preserve?: Pick<TriviaQuestion, 'kind' | 'matchId' | 'session'>,
+  ): TriviaQuestion {
     const text = String(draft.text ?? '').trim();
     if (!text) throw new Error('The question needs text.');
     // Caps sized to the overlay's fit steps: past these, even the smallest
@@ -373,6 +388,7 @@ export class TriviaStore {
       ...(draft.category ? { category: String(draft.category).trim() } : {}),
       ...(preserve?.kind ? { kind: preserve.kind } : {}),
       ...(preserve?.matchId !== undefined ? { matchId: preserve.matchId } : {}),
+      ...(preserve?.session !== undefined ? { session: preserve.session } : {}),
     };
   }
 
@@ -390,7 +406,12 @@ export class TriviaStore {
   }
 
   addQuestion(draft: QuestionDraft): TriviaSnapshot {
-    this.#questions.push(this.#validate(draft));
+    // Joins the round it lands next to, rather than starting a nameless one of
+    // its own at the end of the bank. Same reasoning as pick(): a question with
+    // no session shows up in the picker as a round called "Trivia" that means
+    // nothing to the host.
+    const last = this.#questions[this.#questions.length - 1];
+    this.#questions.push(this.#validate(draft, last ? { session: last.session } : undefined));
     this.#publish();
     return this.snapshot();
   }
@@ -402,7 +423,7 @@ export class TriviaStore {
     // Keep the id so a half-finished edit cannot silently fork a duplicate.
     this.#questions[index] = this.#validate(
       { ...draft, id: existing.id },
-      { kind: existing.kind, matchId: existing.matchId },
+      { kind: existing.kind, matchId: existing.matchId, session: existing.session },
     );
     this.#publish();
     return this.snapshot();

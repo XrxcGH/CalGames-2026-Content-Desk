@@ -338,6 +338,41 @@ function paint(s) {
         el.textContent = set.scores[Number(el.dataset.scoreFor)] ?? 0;
       }
     }
+
+    /*
+     * A decided set refuses further scoring, deliberately: setWinner picks the
+     * first index at the max score, so a stray click after the fact could
+     * silently hand the win to the other player. The store was right and this
+     * page was not saying so. Both buttons stayed on screen and enabled, the
+     * POST answered 200 with an unchanged snapshot, and the handler's say('')
+     * then CLEARED the status line, so a mis-scored set produced a console
+     * that moved nothing and said nothing at all. The operator presses it five
+     * more times and then starts pressing other things.
+     *
+     * OUTSIDE the roster guard above, which is the trap here: completion
+     * arrives on a score change, and a score change does not rebuild the
+     * roster, so anything that runs only on a rebuild would never see it.
+     */
+    const decided = set.state === 'complete';
+    for (const b of document.querySelectorAll('[data-sc]')) {
+      b.disabled = decided;
+      b.title = decided
+        ? 'This set is decided. Press Start set to run it again.'
+        : '';
+    }
+    let note = document.getElementById('setDecided');
+    if (decided && !note) {
+      note = document.createElement('p');
+      note.id = 'setDecided';
+      note.className = 'hint';
+      note.setAttribute('role', 'status');
+      note.textContent = 'This set is decided, so the score buttons are off: '
+        + 'changing a score now could hand the win to the wrong player. '
+        + 'To run it again, press Start set.';
+      $('scoreRows').append(note);
+    } else if (!decided && note) {
+      note.remove();
+    }
   } else {
     lastRosterSig = null;
     $('scoreRows').innerHTML = '<p class="hint">Start a set and score buttons appear here, ' +
