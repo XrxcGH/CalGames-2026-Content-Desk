@@ -192,19 +192,55 @@ export interface RankingsResponse {
   HighestPlayedMatch?: string;
 }
 
-/** GET /api/matches/{type} (MatchWithResult[]) */
-export interface MatchWithResult {
-  Match?: CheesyMatch & {
-    Time?: string;
-    NameDetail?: string;
-    ScoreCommittedAt?: string;
-    Status?: number;
-  };
+/**
+ * GET /api/matches/{type} (MatchWithResult[]).
+ *
+ * FLAT, not nested, and this file had it nested. web/api.go declares
+ *
+ *     type MatchWithResult struct {
+ *         model.Match
+ *         Result *MatchResultWithSummary
+ *     }
+ *
+ * with model.Match EMBEDDED and carrying no json tag, and nothing in the arena
+ * defines MarshalJSON. Go's encoding/json promotes an embedded struct's fields
+ * into the outer object, so each row is
+ *
+ *     {"Id":42,"Type":1,"TypeOrder":42,"LongName":"Qualification 42",
+ *      "Red1":254,...,"Status":2,"Result":null}
+ *
+ * with no "Match" key anywhere. Reading `row.Match.Status` got undefined for
+ * every row, which the Scheduled default then turned into "nothing has been
+ * played", so the on-deck queue was the first eight matches of the schedule
+ * for the whole weekend and every name and team number came out blank.
+ *
+ * Result IS a named field, so it stays where it is.
+ *
+ * The websocket matchLoad message is the opposite case and genuinely nested:
+ * generateMatchLoadMessage returns an anonymous struct with a NAMED
+ * `Match *model.Match` field. MatchLoadMessage above is correct as written.
+ * The giveaway that this was a transcription slip rather than a guess is
+ * CheesyRanking two types up: RankingWithNickname embeds game.Ranking exactly
+ * the same way, and that one is modelled flat, with a comment saying so.
+ */
+export interface MatchWithResult extends CheesyMatch {
+  Time?: string;
+  NameDetail?: string;
+  ScoreCommittedAt?: string;
+  Status?: number;
   Result?: {
     RedSummary?: ScoreSummary;
     BlueSummary?: ScoreSummary;
   } | null;
 }
+
+/**
+ * model.MatchType. A plain Go int, and `stringer` only adds a String() method,
+ * which encoding/json ignores, so this arrives on the wire as a NUMBER.
+ */
+export const MatchType = {
+  Test: 0, Practice: 1, Qualification: 2, Playoff: 3,
+} as const;
 
 /**
  * game.MatchStatus. 0 scheduled, 1 hidden, 2 red won, 3 blue won, 4 tie.

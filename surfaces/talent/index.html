@@ -111,6 +111,11 @@ a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
   <section>
     <h2>Coming up</h2>
     <p class="nextline" id="next">-</p>
+    <!-- Shown only while the deck above actually came from Nexus. Their API
+         asks that anything using their data link back to frc.nexus, and they
+         are volunteers handing out free API keys. -->
+    <p class="hint" id="queueCredit" hidden>Queue data:
+      <a href="https://frc.nexus" target="_blank" rel="noopener">frc.nexus</a></p>
   </section>
 
   <section>
@@ -245,6 +250,7 @@ desk.on('state', s => {
     `<b>${esc(m.shortName)}</b> <span class="al al--red">Red</span> ${m.red.join(', ')}` +
     ` <span class="vs">vs</span> <span class="al al--blue">Blue</span> ${m.blue.join(', ')}`).join('<br>');
   $('next').innerHTML = up || 'Nothing queued yet.';
+  $('queueCredit').hidden = s.queueFrom !== 'nexus';
 });
 
 startTicker(() => {

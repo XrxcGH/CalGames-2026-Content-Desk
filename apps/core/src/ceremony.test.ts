@@ -49,6 +49,52 @@ const LIST = [
 const WINNER = 'Zzyzx Robotics Collective';
 const TEAM = 9999;
 
+/**
+ * Does this response actually carry the team number, as a VALUE?
+ *
+ * Substring-matching the serialized body was wrong, and wrong in the worst
+ * possible way: it went red at 2026-09-21T06:44Z because `state.updatedAt`
+ * was 1789999479294, and "9999" is in there. Sixteen minutes of every
+ * ~13 days, and any number of shorter windows besides, this test fails while
+ * nothing has leaked at all.
+ *
+ * The test's own comment says a flake on THIS invariant is worse than no
+ * test, because the next person to see it red assumes it is the flake again,
+ * and the one time it is real they ship a projector that spoils the Founders'
+ * Award. So the check is structural: walk the parsed response and compare
+ * values, which is also strictly stronger than a substring search, because a
+ * team number hidden in a nested object is found and a timestamp is not.
+ *
+ * Strings are still substring-matched. A winner's NAME leaking as part of a
+ * longer string ("winner: Zzyzx Robotics Collective") is a real leak, and
+ * unlike a bare number it cannot collide with a timestamp.
+ */
+function carries(body: string, secret: string | number): boolean {
+  let root: unknown;
+  try { root = JSON.parse(body); } catch { return String(body).includes(String(secret)); }
+
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): boolean => {
+    if (typeof node === 'number') return typeof secret === 'number' && node === secret;
+    if (typeof node === 'string') {
+      return typeof secret === 'number'
+        // A team number stored as text is still the team number. An exact
+        // match, so it cannot be satisfied by a longer number containing it.
+        ? node.trim() === String(secret)
+        : node.includes(secret);
+    }
+    if (node === null || typeof node !== 'object') return false;
+    if (seen.has(node)) return false;
+    seen.add(node);
+    // Keys too: a map of team number -> anything leaks the number in its key.
+    if (!Array.isArray(node)) {
+      for (const k of Object.keys(node)) if (walk(k)) return true;
+    }
+    return Object.values(node as Record<string, unknown>).some(walk);
+  };
+  return walk(root);
+}
+
 test('a winner is unreachable from the stands until the reveal, all evening', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'cg-ceremony-'));
   const bus = new EventBus();
@@ -98,7 +144,7 @@ test('a winner is unreachable from the stands until the reveal, all evening', as
   spectator.on('message', d => heard.push(String(d)));
   await new Promise((res, rej) => { spectator.on('open', res); spectator.on('error', rej); });
   const nothingHeardYet = (when: string) => {
-    const leak = heard.find(f => f.includes(WINNER) || f.includes(String(TEAM)));
+    const leak = heard.find(f => carries(f, WINNER) || carries(f, TEAM));
     assert.equal(leak, undefined,
       `${when}: a frame reached the stands carrying the winner: ${leak?.slice(0, 160)}`);
   };
@@ -152,19 +198,19 @@ test('a winner is unreachable from the stands until the reveal, all evening', as
 
     // The JA can proof-read their own typing. Nobody else can.
     const jaView = await call('/api/awards', { who: 'ja' });
-    assert.equal(jaView.text.includes(WINNER), true,
+    assert.equal(carries(jaView.text, WINNER), true,
       'the JA can re-read what they staged, or a typo reaches the projector');
 
     // ---- the long wait: the afternoon, with winners sitting on the desk ---
     for (const path of ['/api/state', '/api/awards', '/api/events/recent']) {
       const open = await fromTheStands(path);
-      assert.equal(open.text.includes(WINNER), false,
+      assert.equal(carries(open.text, WINNER), false,
         `${path} must not carry the winner to an unauthenticated phone`);
-      assert.equal(open.text.includes(String(TEAM)), false,
+      assert.equal(carries(open.text, TEAM), false,
         `${path} must not carry the winning team number either`);
     }
     const deskWait = await call('/api/awards', { who: 'desk' });
-    assert.equal(deskWait.text.includes(WINNER), false,
+    assert.equal(carries(deskWait.text, WINNER), false,
       'the signed-in DESK still cannot read a winner before the handover');
     await settle();
     nothingHeardYet('after an afternoon of staging');
@@ -183,7 +229,7 @@ test('a winner is unreachable from the stands until the reveal, all evening', as
       assert.equal(shown.title, a.title);
       assert.equal(shown.blurb, a.blurb,
         `${a.id}: the plate carries the one line blurb, not the definition`);
-      assert.equal(up.text.includes(WINNER), false,
+      assert.equal(carries(up.text, WINNER), false,
         `${a.id}: the winner is STILL not on the open feed with the plate up`);
       await settle();
       nothingHeardYet(`${a.id}: plate up, GA building the moment`);

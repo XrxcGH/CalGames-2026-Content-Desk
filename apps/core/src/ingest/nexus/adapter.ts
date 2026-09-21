@@ -43,21 +43,83 @@ export interface NexusAdapterOpts {
   client?: NexusClient;
 }
 
-/** Statuses Nexus uses that mean the match has not been played yet. */
-const PENDING = /queuing|on deck|on field|scheduled|waiting/i;
+/**
+ * Nexus has no terminal match status, and this file was written as though it
+ * did.
+ *
+ * The published enum is exactly ["Queuing soon", "Now queuing", "On deck",
+ * "On field"]. There is no "Completed", no "Scheduled", no "Waiting". A match
+ * that has been played KEEPS "On field" for the rest of the event: in the
+ * spec's own mid-playoffs example, with `nowQueuing: "Playoff 5"`, every
+ * practice match, every qualification match and Playoff 1 through 4 are all
+ * still "On field". The `matches` array is the whole schedule, in play order,
+ * and nothing is ever removed from it.
+ *
+ * The old filter matched all four values, so it kept the entire schedule and
+ * took the first six. From the first successful poll on Friday until shutdown
+ * on Sunday, the side screens, the pit monitor and the announcer's page would
+ * all have shown Practice 1 through Practice 6 as the upcoming queue, with
+ * Saturday-morning times, while the "now queuing" banner directly above them
+ * correctly said Qualification 47. Worse than having no Nexus at all, because
+ * a queue.updated kept arriving every twenty seconds so nothing looked stale.
+ *
+ * So the rule is positional rather than textual. The array is in play order,
+ * "On field" means on the field now or already played, and therefore
+ * everything after the LAST "On field" row is what has not happened yet. That
+ * also handles the replay rows Nexus interleaves, which sit in play order
+ * where they will actually be run.
+ */
+const ON_FIELD = 'on field';
+
+/**
+ * Matches that have not been played, in play order.
+ *
+ * Exported because the rule is the whole feature, and it is worth being able
+ * to point a test at it directly with the spec's own payloads.
+ */
+export function pendingMatches(matches: NexusMatch[]): NexusMatch[] {
+  let lastOnField = -1;
+  for (let i = 0; i < matches.length; i++) {
+    if ((matches[i]!.status ?? '').trim().toLowerCase() === ON_FIELD) lastOnField = i;
+  }
+  return matches.slice(lastOnField + 1).filter(m => {
+    if (!(m.label ?? '').trim()) return false;
+    // AutoQueue events stamp a commit time when the scores go up. Nothing
+    // before the cut should carry one, so this only catches a row that has
+    // somehow been played out of order.
+    return !m.times?.actualCommitTime;
+  });
+}
 
 const teamNumbers = (raw: (string | null)[] | undefined): number[] =>
   (raw ?? []).map(t => Number(t)).filter(n => Number.isInteger(n) && n > 0);
 
-/** "Qualification 12" -> "Q12", so a side screen can fit it. */
+/**
+ * "Qualification 12" -> "Q12", so a side screen can fit it.
+ *
+ * Nexus documents exactly five label forms: `Practice 1`, `Qualification 24`,
+ * `Qualification 24 Replay`, `Playoff 8`, `Final 1`.
+ *
+ * M for a playoff match is not an invention: Cheesy Arena's own double
+ * elimination bracket names them `M1`..`M13` (playoff/double_elimination.go),
+ * so the field monitor, the bracket graphic and the announcer all say M8 too.
+ * It used to reach M only by falling through a generic `match` branch, which
+ * was right by accident; it is spelled out now.
+ *
+ * The replay suffix is the real fix here. Without it `Qualification 24 Replay`
+ * shortened to `Q24`, identical to the match it replaces, so the deck showed
+ * two rows both reading Q24 with different teams in them. The spec's own
+ * mid-qualifications example has exactly this case.
+ */
 export function shortLabel(label: string): string {
-  const m = /^(practice|qualification|playoff|final|match)\s*(\d+)/i.exec(label.trim());
-  if (!m) return label.trim().slice(0, 12);
+  const text = label.trim();
+  const m = /^(practice|qualification|playoff|final|match)\s*(\d+)(\s+replay)?/i.exec(text);
+  if (!m) return text.slice(0, 12);
   const kind = m[1]!.toLowerCase();
   const letter = kind === 'qualification' ? 'Q'
     : kind === 'practice' ? 'P'
       : kind === 'final' ? 'F' : 'M';
-  return `${letter}${m[2]}`;
+  return `${letter}${m[2]}${m[3] ? 'R' : ''}`;
 }
 
 /**
@@ -89,6 +151,11 @@ export class NexusAdapter {
   /** Per-half apply failures, so a broken feed is loud once and then quiet. */
   #applyFails = new Map<string, number>();
   #started = false;
+  /**
+   * Team number -> pit address, fetched once. Static for the weekend, and it
+   * is what turns "1678 needs polycarb" into somewhere to walk.
+   */
+  #pits: Record<string, string> = {};
 
   constructor(opts: NexusAdapterOpts) {
     this.#bus = opts.bus;
@@ -100,6 +167,12 @@ export class NexusAdapter {
 
   start(): void {
     if (this.#timer) return;
+    // Pit addresses do not move once the event opens, so this is fetched once
+    // and never again. A failure is not worth a retry loop: it costs a parts
+    // request its "(pit A1)" and nothing else.
+    void this.#client.pits()
+      .then(pits => { if (pits && typeof pits === 'object') this.#pits = pits; })
+      .catch(() => { /* addresses are a nicety, not a feed */ });
     void this.poll();
     this.#timer = setInterval(() => { void this.poll(); }, this.#pollMs);
     this.#timer.unref?.();
@@ -170,6 +243,9 @@ export class NexusAdapter {
     try {
       this.#applyAnnouncements(status, wasStarted);
     } catch (err) { this.#warn('announcements', err); }
+    try {
+      this.#applyPartsRequests(status, wasStarted);
+    } catch (err) { this.#warn('parts requests', err); }
   }
 
   /** Loud once per kind, then quiet. A broken feed must not fill the log. */
@@ -183,15 +259,8 @@ export class NexusAdapter {
 
   #applyQueue(status: NexusEventStatus): void {
     const matches = Array.isArray(status.matches) ? status.matches : [];
-    const pending = matches.filter(m => {
-      const label = (m.label ?? '').trim();
-      if (!label) return false;
-      // No status at all is treated as pending: an event that has not started
-      // has a schedule and nothing else.
-      return !m.status || PENDING.test(m.status);
-    });
 
-    const upcoming: UpcomingMatch[] = pending.slice(0, 6).map(m => ({
+    const upcoming: UpcomingMatch[] = pendingMatches(matches).slice(0, 6).map(m => ({
       name: (m.label ?? '').trim(),
       shortName: shortLabel(m.label ?? ''),
       // ISO-ish local time string is what the surfaces render; null when Nexus
@@ -202,6 +271,11 @@ export class NexusAdapter {
       })(),
       red: teamNumbers(m.redTeams),
       blue: teamNumbers(m.blueTeams),
+      // What happens after this match. Nexus is where the queuers type
+      // "lunch after Q6", and it is the one thing the whole building plans
+      // its day around; the desk had been parsing it away.
+      ...(m.breakAfter ? { breakAfter: m.breakAfter } : {}),
+      ...(m.replayOf ? { replayOf: m.replayOf } : {}),
     }));
 
     // Emitted even when empty. It used to return early on an empty list, so
@@ -266,6 +340,43 @@ export class NexusAdapter {
         type: 'announcement.posted',
         source: 'nexus',
         payload: { text, postedAt: a.postedTime ?? Date.now(), from: 'Nexus' },
+      });
+    }
+  }
+
+  /**
+   * A team asking the room for a part, mirrored onto the venue screens.
+   *
+   * Same de-duplicated, backlog-suppressed path as announcements, and for the
+   * same reasons: the request carries an id, the whole open list arrives on
+   * every poll, and replaying this morning's requests at 2pm would send
+   * people looking for a part that was found hours ago.
+   *
+   * Phrased as an announcement rather than given its own event type because
+   * "1678 needs 1/8 polycarb" is exactly what the announcement rail is for,
+   * and every surface that can carry one already does.
+   */
+  #applyPartsRequests(status: NexusEventStatus, wasStarted: boolean): void {
+    const list = Array.isArray(status.partsRequests) ? status.partsRequests : [];
+    for (const p of list) {
+      const parts = (p?.parts ?? '').trim();
+      if (!parts) continue;
+      const id = `parts:${p.id ?? `${p.postedTime ?? 0}:${parts}`}`;
+      if (this.#seenAnnouncements.has(id)) continue;
+      this.#seenAnnouncements.add(id);
+      if (!wasStarted) continue;
+
+      const team = (p.requestedByTeam ?? '').trim();
+      const pit = team ? this.#pits[team] : undefined;
+      const who = team ? `Team ${team}${pit ? ` (pit ${pit})` : ''}` : 'A team';
+      this.#bus.emit({
+        type: 'announcement.posted',
+        source: 'nexus',
+        payload: {
+          text: `${who} needs ${parts}`,
+          postedAt: p.postedTime ?? Date.now(),
+          from: 'Nexus parts request',
+        },
       });
     }
   }

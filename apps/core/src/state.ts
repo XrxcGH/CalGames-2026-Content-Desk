@@ -420,6 +420,11 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         return {
           ...state,
           upcoming: p.upcoming ?? state.upcoming,
+          // Which source the deck on screen came from. Nexus asks that
+          // anything using their data link back to frc.nexus, and the surfaces
+          // can only honour that if they know when they are showing it.
+          queueFrom: p.upcoming ? (ev.source === 'nexus' ? 'nexus' : 'field')
+            : state.queueFrom,
           // undefined means "this source has no opinion" (Cheesy does not),
           // and must not wipe what Nexus said. Explicit null does clear it.
           nowQueuing: p.nowQueuing === undefined ? state.nowQueuing : p.nowQueuing,

@@ -75,11 +75,19 @@ const RANKINGS = {
   ],
 };
 
+// FLAT, because that is what the arena sends. web/api.go embeds model.Match
+// anonymously in MatchWithResult and Go promotes an embedded struct's fields,
+// so there is no "Match" key on this route. This file used to serve the nested
+// shape the desk's parser expected, which is the reason a completely dead
+// on-deck queue passed the whole suite: the fake arena, the fixtures and the
+// parser were wrong in the same direction, and only a real field disagreed.
+// Q42 has just been played, so Q43 is next.
 const SCHEDULE = [
-  { Match: { ShortName: 'Q43', LongName: 'Qualification 43', Status: 0, Red1: 254, Red2: 5940, Red3: 199, Blue1: 1678, Blue2: 649, Blue3: 8033 } },
-  { Match: { ShortName: 'Q44', LongName: 'Qualification 44', Status: 0, Red1: 846, Red2: 100, Red3: 649, Blue1: 253, Blue2: 115, Blue3: 5940 } },
-  { Match: { ShortName: 'Q45', LongName: 'Qualification 45', Status: 0, Red1: 1868, Red2: 8033, Red3: 254, Blue1: 670, Blue2: 199, Blue3: 1678 } },
-  { Match: { ShortName: 'Q46', LongName: 'Qualification 46', Status: 0, Red1: 115, Red2: 253, Red3: 846, Blue1: 100, Blue2: 670, Blue3: 1868 } },
+  { Id: 42, Type: 2, TypeOrder: 42, ShortName: 'Q42', LongName: 'Qualification 42', Status: 2, Time: '2026-10-17T13:00:00-07:00', Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670 },
+  { Id: 43, Type: 2, TypeOrder: 43, ShortName: 'Q43', LongName: 'Qualification 43', Status: 0, Time: '2026-10-17T13:07:00-07:00', Red1: 254, Red2: 5940, Red3: 199, Blue1: 1678, Blue2: 649, Blue3: 8033 },
+  { Id: 44, Type: 2, TypeOrder: 44, ShortName: 'Q44', LongName: 'Qualification 44', Status: 0, Time: '2026-10-17T13:14:00-07:00', Red1: 846, Red2: 100, Red3: 649, Blue1: 253, Blue2: 115, Blue3: 5940 },
+  { Id: 45, Type: 2, TypeOrder: 45, ShortName: 'Q45', LongName: 'Qualification 45', Status: 0, Time: '2026-10-17T13:21:00-07:00', Red1: 1868, Red2: 8033, Red3: 254, Blue1: 670, Blue2: 199, Blue3: 1678 },
+  { Id: 46, Type: 2, TypeOrder: 46, ShortName: 'Q46', LongName: 'Qualification 46', Status: 0, Time: '2026-10-17T13:28:00-07:00', Red1: 115, Red2: 253, Red3: 846, Blue1: 100, Blue2: 670, Blue3: 1868 },
 ];
 
 export interface FakeArenaOpts {

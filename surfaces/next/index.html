@@ -124,6 +124,10 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
   letter-spacing: .1em; text-transform: uppercase; color: var(--cg-white-dim); }
 .hintline { text-align: center; font-family: var(--font-cond); font-size: 13px;
   letter-spacing: .06em; color: var(--cg-white-dim); line-height: 1.5; }
+/* Deliberately quiet: an obligation honoured, not a banner. */
+.queue-credit { text-align: center; font-family: var(--font-cond); font-size: 12px;
+  letter-spacing: .06em; color: var(--cg-white-dim); margin: 14px 0 0; }
+.queue-credit a { color: inherit; }
 .rankline { text-align: center; font-family: var(--font-cond); font-size: 16px;
   letter-spacing: .08em; text-transform: uppercase; }
 .rankline b { font-family: var(--font-num); color: var(--cg-gold); font-size: 20px; }
@@ -148,6 +152,10 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 
   <div class="rankline" id="rank" hidden aria-live="polite"></div>
   <div id="list"></div>
+  <!-- Only while the list above is Nexus's. Their API asks for the link back,
+       and they are volunteers handing out free API keys. -->
+  <p class="queue-credit" id="queueCredit" hidden>Queue times from
+    <a href="https://frc.nexus" target="_blank" rel="noopener">frc.nexus</a></p>
   <!-- The most-asked question after an event, answered during it: where is the
        video of the match we just played. -->
   <div id="played" hidden>
@@ -302,6 +310,7 @@ function paint(s) {
   // the bottom until the page stops scrolling, so the phone and the laptop
   // each get as many as their screen holds.
   const all = s.upcoming ?? [];
+  $('queueCredit').hidden = s.queueFrom !== 'nexus';
   const isMine = m => team !== null && (m.red.includes(team) || m.blue.includes(team));
 
   // Keep each match's place in the real queue. The estimate is "next start

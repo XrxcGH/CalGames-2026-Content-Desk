@@ -15,7 +15,7 @@ import type {
 } from '../../types.ts';
 import { CheesyClient, type CheesyClientOpts } from './client.ts';
 import {
-  MatchState, MatchStatus,
+  MatchState, MatchStatus, MatchType,
   type AllianceSelectionMessage,
   type ArenaStatusMessage, type MatchLoadMessage, type MatchTimeMessage,
   type MatchWithResult, type RankingsResponse,
@@ -46,20 +46,83 @@ export function mapRankings(res: RankingsResponse): {
   };
 }
 
-// 8, not 4: the venue side screens show four, but the phone-facing per-team
-// schedule view needs a longer horizon to answer "when do WE play next".
-export function mapUpcoming(matches: MatchWithResult[], limit = 8): UpcomingMatch[] {
-  return matches
-    // Anything past "scheduled" has been played, so it isn't on deck.
-    .filter(m => (m.Match?.Status ?? MatchStatus.Scheduled) === MatchStatus.Scheduled)
-    .slice(0, limit)
-    .map(m => ({
-      name: m.Match?.LongName ?? m.Match?.ShortName ?? '',
-      shortName: m.Match?.ShortName ?? '',
-      time: m.Match?.Time ?? null,
-      red: [m.Match?.Red1, m.Match?.Red2, m.Match?.Red3].filter((n): n is number => !!n),
-      blue: [m.Match?.Blue1, m.Match?.Blue2, m.Match?.Blue3].filter((n): n is number => !!n),
-    }));
+/**
+ * The arena stops listing matches once the gap to the next one passes this,
+ * on the grounds that what is on the far side of lunch is not "up next".
+ * field.MaxMatchGapMin in the 2026 source.
+ */
+export const MAX_MATCH_GAP_MIN = 20;
+
+export interface UpcomingOpts {
+  /**
+   * TypeOrder of the match the field currently has loaded, when it is of the
+   * same type as this list. Matches below it are behind the field and are
+   * dropped even if they were never played.
+   */
+  fromTypeOrder?: number;
+  limit?: number;
+}
+
+/**
+ * Schedule rows -> the on-deck queue, mirroring web/queueing_display.go.
+ *
+ * The arena's own rule is `match.IsComplete() || match.TypeOrder <
+ * CurrentMatch.TypeOrder` -> skip, then stop at a gap over MaxMatchGapMin.
+ * Filtering on completion ALONE is not the same thing, because a skipped
+ * match is never completed and never hidden: a no-show or a bit of schedule
+ * compression, both routine at an offseason, leaves a qual that will never be
+ * played sitting at the head of the queue for the rest of the weekend. The
+ * TypeOrder floor is what retires it, and it is why this takes the loaded
+ * match rather than just the list.
+ *
+ * 8, not the arena's 5: the venue side screens show four, but the phone-facing
+ * per-team schedule view needs a longer horizon to answer "when do WE play
+ * next". Playoffs are capped tighter by the caller, as they are in the arena,
+ * because further out than the next few is genuinely unknowable.
+ */
+export function mapUpcoming(
+  matches: MatchWithResult[], opts: UpcomingOpts = {},
+): UpcomingMatch[] {
+  const limit = opts.limit ?? 8;
+  const floor = opts.fromTypeOrder ?? -Infinity;
+  const out: UpcomingMatch[] = [];
+
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i]!;
+    // Anything past "scheduled" has been played, so it isn't on deck. Hidden
+    // is the arena's own "pretend this row does not exist".
+    if ((m.Status ?? MatchStatus.Scheduled) !== MatchStatus.Scheduled) continue;
+    if ((m.TypeOrder ?? 0) < floor) continue;
+
+    const red = [m.Red1, m.Red2, m.Red3].filter((n): n is number => !!n);
+    const blue = [m.Blue1, m.Blue2, m.Blue3].filter((n): n is number => !!n);
+    // Playoff matches whose feeding matchups have not resolved come back with
+    // all six stations zeroed (playoff_tournament.go, UpdateMatches positions
+    // an empty Alliance). They are Scheduled, not Hidden, so they reach here.
+    // A row with no teams and no seeds names nobody and is not worth a line on
+    // a pit monitor; one with seeds can at least say which alliances meet.
+    const redSeed = m.PlayoffRedAlliance ?? 0;
+    const blueSeed = m.PlayoffBlueAlliance ?? 0;
+    if (!red.length && !blue.length && !(redSeed > 0 || blueSeed > 0)) continue;
+
+    out.push({
+      name: m.LongName ?? m.ShortName ?? '',
+      shortName: m.ShortName ?? '',
+      time: m.Time ?? null,
+      red, blue,
+      ...(redSeed > 0 ? { redAlliance: redSeed } : {}),
+      ...(blueSeed > 0 ? { blueAlliance: blueSeed } : {}),
+    });
+    if (out.length >= limit) break;
+
+    // Don't carry the list across a break. The next row's scheduled time is
+    // the arena's own test for one.
+    const next = matches[i + 1];
+    const gapMs = next?.Time && m.Time
+      ? Date.parse(next.Time) - Date.parse(m.Time) : 0;
+    if (Number.isFinite(gapMs) && gapMs > MAX_MATCH_GAP_MIN * 60_000) break;
+  }
+  return out;
 }
 
 /**
@@ -132,6 +195,14 @@ export class CheesyAdapter {
   #loadedMatchName = '';
   /** When Nexus last delivered a queue, so the schedule poll can defer to it. */
   #nexusQueueAt = 0;
+  /**
+   * Where the field is in the schedule: the loaded match's type and its order
+   * within that type. The arena's queueing display drops anything below this,
+   * which is the only thing that retires a match the scorekeeper skipped.
+   * Null until the first matchLoad, where no floor is the honest answer.
+   */
+  #loadedType: number | string | null = null;
+  #loadedTypeOrder: number | null = null;
 
   constructor(opts: CheesyAdapterOpts) {
     this.#bus = opts.bus;
@@ -232,6 +303,20 @@ export class CheesyAdapter {
         } catch {
           // No bracket yet. Quals alone is still a correct queue.
         }
+        // The arena's rule, applied per list because TypeOrder only orders
+        // within a type: a qual floor means nothing to a playoff row.
+        const floor = (t: number): number | undefined =>
+          this.#loadedType === t && this.#loadedTypeOrder !== null
+            ? this.#loadedTypeOrder : undefined;
+        const upcoming = [
+          ...mapUpcoming(qual, { fromTypeOrder: floor(MatchType.Qualification) }),
+          // Four, as in the arena's numPlayoffMatchesToShow: past the next
+          // few, which alliance plays which is genuinely not known yet.
+          ...mapUpcoming(playoff, {
+            fromTypeOrder: floor(MatchType.Playoff), limit: 4,
+          }),
+        ].slice(0, 8);
+
         // Nexus arbitration: when the queuers' live estimates are flowing,
         // this poll stays quiet. Both sources write state.upcoming wholesale,
         // and alternating them put the printed schedule and the live estimate
@@ -239,8 +324,13 @@ export class CheesyAdapter {
         // minute. Two sources disagreeing on air is worse than one being
         // absent; Cheesy is the fallback, and 90s (four missed Nexus polls)
         // is how long it waits before deciding the fallback is needed.
-        if (Date.now() - this.#nexusQueueAt > 90_000) {
-          this.#emit({ type: 'queue.updated', payload: { upcoming: mapUpcoming([...qual, ...playoff]) } });
+        //
+        // Unless Nexus has nothing to say. It publishes an empty list at the
+        // end of the day and at an event that is not using it for queuing,
+        // and deferring to an empty list is deferring to no list at all.
+        const nexusFresh = Date.now() - this.#nexusQueueAt <= 90_000;
+        if (!nexusFresh || this.#bus.state.upcoming.length === 0) {
+          this.#emit({ type: 'queue.updated', payload: { upcoming } });
         }
       } catch (err) {
         console.warn('[cheesy] schedule poll failed:', (err as Error).message);
@@ -353,6 +443,11 @@ export class CheesyAdapter {
     this.#armedSent = false;
     this.#loadedMatchId = match.id;
     this.#loadedMatchName = match.displayName ?? '';
+    // Where the field is in the schedule, for the on-deck queue's floor.
+    // Set here rather than in #poll because the poll only sees lists, and a
+    // list cannot tell you which of its rows the scorekeeper has moved past.
+    this.#loadedType = m.Type ?? null;
+    this.#loadedTypeOrder = typeof m.TypeOrder === 'number' ? m.TypeOrder : null;
     this.#cardsSeen.clear();
     this.#emit({ type: 'match.loaded', payload: match });
   }

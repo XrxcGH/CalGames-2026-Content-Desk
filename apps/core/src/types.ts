@@ -330,6 +330,21 @@ export interface UpcomingMatch {
   time: string | null;
   red: number[];
   blue: number[];
+  /**
+   * Playoff seeds, when the bracket knows which alliances meet but not yet
+   * which robots they will field. Lets a row read "Alliance 2 vs Alliance 3"
+   * instead of being dropped for having no teams.
+   */
+  redAlliance?: number;
+  blueAlliance?: number;
+  /**
+   * What happens after this match, from the queuers: "Lunch", "Alliance
+   * selection", "Awards break". The one thing the whole building plans its
+   * day around, and Nexus attaches it to a specific match for free.
+   */
+  breakAfter?: string;
+  /** This match is a replay of an earlier one, which shares its number. */
+  replayOf?: string;
 }
 
 /** How the event is actually running vs. the published schedule. */
@@ -578,6 +593,13 @@ export interface DeskState {
    * playing the previous match.
    */
   nowQueuing: string | null;
+  /**
+   * Where the deck on screen came from: the queuers via Nexus, or the field's
+   * own schedule. Nexus's API asks that anything using their data link back to
+   * frc.nexus, and a surface can only carry that credit honestly if it knows
+   * when what it is showing is theirs.
+   */
+  queueFrom: 'nexus' | 'field' | null;
   /** The most recent event announcement, mirrored from Nexus. */
   announcement: { text: string; postedAt: number; from: string } | null;
   /** Live status card, or null. Operator-fired from the desk console. */
@@ -648,6 +670,7 @@ export const initialState = (): DeskState => ({
   rankings: [],
   highestPlayedMatch: '',
   upcoming: [],
+  queueFrom: null,
   pace: { cycleSec: null, nextStartAt: null, behindMin: null, lastStartAt: null },
   nowQueuing: null,
   announcement: null,

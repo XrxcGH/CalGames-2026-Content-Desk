@@ -25,27 +25,65 @@ export interface NexusClientOpts {
   fetchFn?: typeof fetch;
 }
 
+/**
+ * The four values Nexus's `Match.status` can take. This is the WHOLE enum:
+ * there is no terminal state, so a played match keeps "On field" for the rest
+ * of the event. See pendingMatches() in adapter.ts for what that means.
+ */
+export type NexusMatchStatus = 'Queuing soon' | 'Now queuing' | 'On deck' | 'On field';
+
 /** One scheduled match as Nexus sees it. Every field is optional on the wire. */
 export interface NexusMatch {
+  /** "Practice 1", "Qualification 24", "Qualification 24 Replay", "Playoff 8", "Final 1". */
   label?: string;
-  /** "Now queuing", "On deck", "On field", "Completed", ... free text. */
-  status?: string;
+  /**
+   * Typed rather than free text, because the reason this file used to say
+   * "free text" is that somebody assumed a "Completed" that does not exist.
+   * Widened to string so an enum Nexus adds later still parses.
+   */
+  status?: NexusMatchStatus | string | null;
   redTeams?: (string | null)[];
   blueTeams?: (string | null)[];
+  /**
+   * The break that begins after this match. Lunch, alliance selection and
+   * awards are the three things the whole building plans its day around, and
+   * this is a queuer's own answer for when they are.
+   */
+  breakAfter?: 'Break' | 'Lunch' | 'End of day' | 'Alliance selection' | 'Awards break'
+    | string | null;
+  /** The label of the match this one replays, or null. */
+  replayOf?: string | null;
   times?: {
-    estimatedQueueTime?: number;
-    estimatedOnDeckTime?: number;
-    estimatedOnFieldTime?: number;
-    estimatedStartTime?: number;
-    actualQueueTime?: number;
-    actualOnDeckTime?: number;
-    actualOnFieldTime?: number;
+    scheduledStartTime?: number | null;
+    estimatedQueueTime?: number | null;
+    estimatedOnDeckTime?: number | null;
+    estimatedOnFieldTime?: number | null;
+    estimatedStartTime?: number | null;
+    actualQueueTime?: number | null;
+    actualOnDeckTime?: number | null;
+    actualOnFieldTime?: number | null;
+    /** AutoQueue events only; null everywhere else. */
+    actualStartTime?: number | null;
+    /** AutoQueue events only. The one true "this match is over" signal. */
+    actualCommitTime?: number | null;
   };
 }
 
 export interface NexusAnnouncement {
   id?: string;
   announcement?: string;
+  postedTime?: number;
+}
+
+/**
+ * A team asking the room for a part. At an offseason this is some of the most
+ * useful content a pit monitor can carry: it is the kind of thing that
+ * actually gets a robot back on the field.
+ */
+export interface NexusPartsRequest {
+  id?: string;
+  parts?: string;
+  requestedByTeam?: string;
   postedTime?: number;
 }
 
@@ -56,8 +94,18 @@ export interface NexusEventStatus {
   nowQueuing?: string | null;
   matches?: NexusMatch[];
   announcements?: NexusAnnouncement[];
-  partsRequests?: unknown[];
+  partsRequests?: NexusPartsRequest[];
 }
+
+/** Team number -> pit address. */
+export type NexusPitAddresses = Record<string, string>;
+
+/** Team number -> inspection state. Cached by Nexus; a couple of minutes old. */
+export type NexusInspection = Record<string, {
+  inspected?: boolean;
+  status?: 'hold' | 'in-progress' | 'complete' | 'reinspection' | 'queued' | 'not-started' | null;
+  queuePosition?: number | null;
+}>;
 
 export class NexusClient {
   #key: string;
@@ -88,6 +136,10 @@ export class NexusClient {
       signal: AbortSignal.timeout(12_000),
     });
 
+    if (res.status === 401) {
+      throw new Error('Nexus got no API key (401). Set nexus.apiKey in config.json ' +
+        'from frc.nexus/api, or clear nexus.eventKey to turn the feed off.');
+    }
     if (res.status === 403) {
       throw new Error('Nexus refused the API key (403). Check it at frc.nexus/api, ' +
         'and that it has not been disabled.');
@@ -109,8 +161,36 @@ export class NexusClient {
     return this.#get<NexusEventStatus>(`/event/${encodeURIComponent(this.#event)}`);
   }
 
-  /** Team number -> pit address. Static for the weekend; fetched once. */
-  pits(): Promise<{ pits?: Record<string, string> }> {
+  /**
+   * Team number -> pit address. Static for the weekend; fetched once.
+   *
+   * A BARE object, `{"100":"A1","200":"C12"}`. This used to be typed as
+   * `{ pits?: ... }`, so the first caller to read `.pits` would have got
+   * undefined and quietly shown no addresses at all.
+   */
+  pits(): Promise<NexusPitAddresses> {
     return this.#get(`/event/${encodeURIComponent(this.#event)}/pits`);
+  }
+
+  /**
+   * Team number -> inspection state, including the live queue position.
+   *
+   * Nexus caches this, so it can be a couple of minutes out of date, and it
+   * is not set at all for demo events. Slow-poll it.
+   */
+  inspection(): Promise<NexusInspection> {
+    return this.#get(`/event/${encodeURIComponent(this.#event)}/inspection`);
+  }
+
+  /**
+   * Playoff alliances, in pick order: [[captain, first, second], ...].
+   *
+   * Live during selection, so it arrives partial, with missing alliances and
+   * null members while picking is still going on. That is the point: it is
+   * the graphic the audience display wants during the most content-starved
+   * twenty minutes of the day.
+   */
+  alliances(): Promise<(string | null)[][]> {
+    return this.#get(`/event/${encodeURIComponent(this.#event)}/alliances`);
   }
 }

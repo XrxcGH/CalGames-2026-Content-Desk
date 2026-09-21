@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { EventBus } from '../../bus.ts';
-import { NexusAdapter, bestStartEstimate, shortLabel } from './adapter.ts';
+import { NexusAdapter, bestStartEstimate, shortLabel, pendingMatches } from './adapter.ts';
 import { NexusClient, type NexusEventStatus } from './client.ts';
 import type { DeskEvent } from '../../types.ts';
 
@@ -11,22 +12,38 @@ const collect = (bus: EventBus, types: string[]): DeskEvent[] => {
   return seen;
 };
 
+/**
+ * Nexus's OWN published example payloads, lifted verbatim out of the v1.8.0
+ * OpenAPI document at frc.nexus/api/v1/docs.
+ *
+ * They are here because the fixtures they replace were invented, and the two
+ * tests written specifically to guarantee that a played match stops being "up
+ * next" were the two that could not catch it failing: one used `status:
+ * 'Completed'` and the other simulated the end of qualifications by sending an
+ * empty `matches` array. Nexus does neither. There is no "Completed" in the
+ * enum at all, and the array is always the whole schedule.
+ */
+const SPEC = JSON.parse(
+  readFileSync(new URL('./fixtures/event-status.json', import.meta.url), 'utf8'),
+) as Record<string, NexusEventStatus>;
+
 const status = (over: Partial<NexusEventStatus> = {}): NexusEventStatus => ({
   eventKey: '2026cacg',
   dataAsOfTime: 1_000,
   nowQueuing: 'Qualification 12',
   matches: [
+    // Played. Keeps "On field" forever, because Nexus has no terminal status.
+    { label: 'Qualification 11', status: 'On field', redTeams: [], blueTeams: [] },
     {
       label: 'Qualification 12', status: 'Now queuing',
       redTeams: ['254', '846', '1678'], blueTeams: ['971', '1868', '100'],
       times: { estimatedStartTime: 1_700_000_000_000 },
     },
     {
-      label: 'Qualification 13', status: 'Scheduled',
+      label: 'Qualification 13', status: 'Queuing soon',
       redTeams: ['8', '604', '199'], blueTeams: ['1', '2', '3'],
       times: { estimatedStartTime: 1_700_000_600_000 },
     },
-    { label: 'Qualification 11', status: 'Completed', redTeams: [], blueTeams: [] },
   ],
   announcements: [],
   ...over,
@@ -163,9 +180,9 @@ test('one bad item does not take the queue call down for the day', () => {
 });
 
 test('the last match played stops being "up next"', () => {
-  // An empty pending list returned early, so once Nexus marked the final qual
-  // Completed the side screens advertised a played match through alliance
-  // selection and into the playoffs with no way to clear it but a restart.
+  // An empty pending list returned early, so once the schedule ran out the
+  // side screens advertised a played match through alliance selection and
+  // into the playoffs with no way to clear it but a restart.
   const bus = new EventBus();
   const seen = collect(bus, ['queue.updated']);
   const nexus = adapter(bus);
@@ -176,6 +193,98 @@ test('the last match played stops being "up next"', () => {
   const last = seen[seen.length - 1]!;
   assert.deepEqual((last.payload as { upcoming: unknown[] }).upcoming, [],
     'an empty queue is news, not silence');
+});
+
+// ---------------------------------------------------------------------------
+// Against Nexus's own published payloads. Everything above is hand-written and
+// can only prove the desk agrees with itself.
+// ---------------------------------------------------------------------------
+
+const upcomingFrom = (payload: NexusEventStatus): string[] => {
+  const bus = new EventBus();
+  const seen = collect(bus, ['queue.updated']);
+  adapter(bus).apply(payload);
+  return (seen[0]!.payload as { upcoming: { name: string }[] }).upcoming.map(m => m.name);
+};
+
+test('mid-qualifications, the deck starts at the match after the one on the field', () => {
+  // The spec's own example. Practice 1-6 and Qualification 1-4 are ALL still
+  // "On field" because Nexus has no terminal status; nowQueuing is Q6. The
+  // old filter matched all four enum values, so it kept the whole schedule
+  // and showed Practice 1 through Practice 6 as the upcoming queue while the
+  // banner above it correctly read Qualification 6.
+  const names = upcomingFrom(SPEC.EventStatusMidQualifications!);
+  assert.equal(names[0], 'Qualification 5', 'not Practice 1');
+  assert.deepEqual(names, [
+    'Qualification 5', 'Qualification 6', 'Qualification 2 Replay',
+    'Qualification 7', 'Qualification 8', 'Qualification 9',
+  ]);
+});
+
+test('mid-playoffs, the deck is playoff matches and not Friday practice', () => {
+  const names = upcomingFrom(SPEC.EventStatusMidPlayoffs!);
+  assert.deepEqual(names, [
+    'Playoff 5', 'Playoff 6', 'Playoff 7', 'Playoff 8', 'Playoff 9', 'Playoff 10',
+  ]);
+});
+
+test('the deck differs between mid-quals and mid-playoffs at all', () => {
+  // The sharpest form of the bug: these two payloads produced byte-identical
+  // upcoming lists, six practice matches, hours apart on the same Saturday.
+  assert.notDeepEqual(
+    upcomingFrom(SPEC.EventStatusMidQualifications!),
+    upcomingFrom(SPEC.EventStatusMidPlayoffs!),
+  );
+});
+
+test('before anything has been played the whole schedule is still upcoming', () => {
+  const names = upcomingFrom(SPEC.EventStatusPrePractice!);
+  assert.equal(names[0], 'Practice 1', 'nothing is on the field yet');
+});
+
+test('an event with no schedule yet produces an empty deck, not a crash', () => {
+  assert.deepEqual(upcomingFrom(SPEC.EventStatusEmpty!), []);
+});
+
+test('the break the room plans its day around survives the trip', () => {
+  const bus = new EventBus();
+  const seen = collect(bus, ['queue.updated']);
+  adapter(bus).apply(SPEC.EventStatusMidQualifications!);
+  const upcoming = (seen[0]!.payload as {
+    upcoming: { name: string; breakAfter?: string; replayOf?: string }[];
+  }).upcoming;
+
+  assert.equal(upcoming.find(m => m.name === 'Qualification 6')?.breakAfter, 'Lunch');
+  assert.equal(upcoming.find(m => m.name === 'Qualification 5')?.breakAfter, undefined);
+  assert.equal(upcoming.find(m => m.name === 'Qualification 2 Replay')?.replayOf,
+    'Qualification 2');
+});
+
+test('a replay does not show up as a second row with the original\'s number', () => {
+  // Both rows shortened to "Q2", so the deck carried two lines reading Q2
+  // with different teams in them.
+  const m = SPEC.EventStatusMidQualifications!.matches!;
+  const replay = m.find(x => x.label === 'Qualification 2 Replay')!;
+  const original = m.find(x => x.label === 'Qualification 2')!;
+  assert.notEqual(shortLabel(replay.label!), shortLabel(original.label!));
+  assert.equal(shortLabel(replay.label!), 'Q2R');
+});
+
+test('"On field" is not a pending status, whatever the rest of the row says', () => {
+  // The whole enum, in the order the spec lists it. Only the last one means
+  // the match is on the field now or already played.
+  const all = [
+    { label: 'A', status: 'Queuing soon' },
+    { label: 'B', status: 'Now queuing' },
+    { label: 'C', status: 'On deck' },
+    { label: 'D', status: 'On field' },
+  ];
+  assert.deepEqual(pendingMatches(all).map(x => x.label), [],
+    'the last On field row is the field, and there is nothing after it');
+  assert.deepEqual(
+    pendingMatches([...all, { label: 'E', status: 'Queuing soon' }]).map(x => x.label),
+    ['E'],
+  );
 });
 
 test('a dead uplink stops calling a team to the field', async () => {

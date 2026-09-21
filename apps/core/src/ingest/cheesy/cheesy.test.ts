@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { CheesyClient, assertPathAllowed, assertSocketAllowed, ALLOWED_SOCKETS } from './client.ts';
-import { fuelPoints, towerPoints, MatchState, MatchStatus } from './protocol.ts';
+import { fuelPoints, towerPoints, MatchState, MatchStatus, type MatchWithResult } from './protocol.ts';
 import { CheesyAdapter, mapRankings, mapSelection, mapUpcoming } from './adapter.ts';
 import { EventBus } from '../../bus.ts';
 import type { DeskEvent } from '../../types.ts';
@@ -415,21 +415,23 @@ test('rankings map from the REST shape', () => {
   assert.equal(out.rankings[1]?.record, '0-0-0');
 });
 
-test('on deck skips matches that have been played', () => {
-  const m = (n: number, status: number) => ({
-    Match: {
-      ShortName: `Q${n}`, LongName: `Qualification ${n}`, Status: status,
-      Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670,
-    },
-  });
+// The schedule route is FLAT: web/api.go embeds model.Match anonymously in
+// MatchWithResult, and Go promotes an embedded struct's fields, so a row has
+// no "Match" key. Every fixture here is shaped the way the wire is, because
+// the last set was not, and a queue that returned eight blank rows at a real
+// event passed this file cleanly.
+const qual = (n: number, status: number, over: Partial<MatchWithResult> = {}) => ({
+  Id: n, Type: 2, TypeOrder: n,
+  ShortName: `Q${n}`, LongName: `Qualification ${n}`, Status: status,
+  Time: new Date(Date.UTC(2026, 9, 17, 20, 0) + n * 7 * 60_000).toISOString(),
+  Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670,
+  ...over,
+});
 
+test('on deck reads the flat schedule rows the arena actually sends', () => {
   const out = mapUpcoming([
-    m(1, MatchStatus.RedWon), m(2, MatchStatus.Tie),
-    m(3, MatchStatus.Scheduled), m(4, MatchStatus.Scheduled),
-    m(5, MatchStatus.Scheduled), m(6, MatchStatus.Scheduled),
-    m(7, MatchStatus.Scheduled), m(8, MatchStatus.Scheduled),
-    m(9, MatchStatus.Scheduled), m(10, MatchStatus.Scheduled),
-    m(11, MatchStatus.Scheduled), m(12, MatchStatus.Scheduled),
+    qual(1, MatchStatus.RedWon), qual(2, MatchStatus.Tie),
+    ...Array.from({ length: 10 }, (_, i) => qual(i + 3, MatchStatus.Scheduled)),
   ]);
 
   // Eight on deck: the side screens render four; the phone schedule view
@@ -438,6 +440,61 @@ test('on deck skips matches that have been played', () => {
     ['Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10'], 'limit of eight');
   assert.deepEqual(out[0]?.red, [846, 1868, 253]);
   assert.deepEqual(out[0]?.blue, [100, 115, 670]);
+  assert.equal(out[0]?.name, 'Qualification 3', 'the name survives the trip');
+});
+
+test('a match the scorekeeper skipped does not sit at the head of the queue', () => {
+  // A no-show or a bit of schedule compression leaves a qual that is neither
+  // complete nor hidden. Filtering on played-ness alone left it at position 0
+  // for the rest of the weekend, and since the desk concatenates quals ahead
+  // of playoffs, one skipped Saturday qual outranked the entire Sunday
+  // bracket on every pit monitor. The arena's own rule is a TypeOrder floor.
+  const list = [
+    qual(40, MatchStatus.Scheduled),   // skipped, never played, never hidden
+    qual(41, MatchStatus.RedWon),
+    qual(42, MatchStatus.Scheduled),
+    qual(43, MatchStatus.Scheduled),
+  ];
+
+  assert.equal(mapUpcoming(list)[0]?.shortName, 'Q40',
+    'with no loaded match there is no floor, which is the honest answer');
+  assert.deepEqual(mapUpcoming(list, { fromTypeOrder: 42 }).map(u => u.shortName),
+    ['Q42', 'Q43'], 'the field has moved past Q40, so Q40 is not up next');
+});
+
+test('the deck stops at a break rather than carrying across it', () => {
+  // field.MaxMatchGapMin. What is on the far side of lunch is not "up next",
+  // and a deck that says it is has the room walking an hour early.
+  const out = mapUpcoming([
+    qual(1, MatchStatus.Scheduled),
+    qual(2, MatchStatus.Scheduled),
+    qual(3, MatchStatus.Scheduled, { Time: '2026-10-17T21:30:00Z' }),  // +60 min
+    qual(4, MatchStatus.Scheduled, { Time: '2026-10-17T21:37:00Z' }),
+  ]);
+  assert.deepEqual(out.map(u => u.shortName), ['Q1', 'Q2']);
+});
+
+test('an unresolved playoff match is not a row with nobody in it', () => {
+  // playoff_tournament.go zeroes all six stations on a match whose feeding
+  // matchups have not resolved. Those rows are Scheduled, not Hidden, so they
+  // reach the deck; without teams or seeds they name nobody.
+  const po = (n: number, over: Partial<MatchWithResult> = {}) => ({
+    Id: 100 + n, Type: 3, TypeOrder: n, ShortName: `M${n}`,
+    LongName: `Playoff ${n}`, Status: MatchStatus.Scheduled,
+    Red1: 0, Red2: 0, Red3: 0, Blue1: 0, Blue2: 0, Blue3: 0, ...over,
+  });
+
+  const out = mapUpcoming([
+    po(5, { Red1: 254, Red2: 846, Red3: 100, Blue1: 1678, Blue2: 115, Blue3: 670 }),
+    po(6, { PlayoffRedAlliance: 2, PlayoffBlueAlliance: 3 }),
+    po(7),
+  ]);
+
+  assert.deepEqual(out.map(u => u.shortName), ['M5', 'M6'], 'M7 names nobody');
+  assert.deepEqual(out[1], {
+    name: 'Playoff 6', shortName: 'M6', time: null, red: [], blue: [],
+    redAlliance: 2, blueAlliance: 3,
+  }, 'seeds carry, so the row can still say which alliances meet');
 });
 
 test('an empty schedule maps to an empty deck rather than throwing', () => {
