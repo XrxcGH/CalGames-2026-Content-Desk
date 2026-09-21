@@ -51,7 +51,10 @@ export function allianceRoster(state, side) {
   const seed = side === 'red' ? state?.match?.redAlliance : state?.match?.blueAlliance;
   if (!seed) return onField;                       // qualification match
 
-  const picked = (state?.selection?.alliances ?? []).find(a => a.id === seed)?.teams;
+  // Zeros are cleared slots, kept positionally on the board so a correction
+  // does not slide later picks left. A roster is a list of real teams.
+  const picked = (state?.selection?.alliances ?? []).find(a => a.id === seed)
+    ?.teams.filter(n => n > 0);
   // Selection has not run, or this alliance is still empty: the field wins.
   if (!picked?.length) return onField;
 

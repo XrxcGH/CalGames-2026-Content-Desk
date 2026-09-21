@@ -19,6 +19,7 @@ import {
   MatchState, MatchStatus, MatchType,
   type AllianceSelectionMessage,
   type ArenaStatusMessage, type MatchLoadMessage, type MatchTimeMessage,
+  type EventStatusMessage,
   type MatchTimingMessage, type MatchWithResult, type RankingsResponse,
   type RealtimeScoreMessage, type ScorePostedMessage, type ScoreSummary,
 } from './protocol.ts';
@@ -144,7 +145,22 @@ export function mapSelection(msg: AllianceSelectionMessage): AllianceSelection {
   return {
     alliances: (msg.Alliances ?? []).map((a, i) => ({
       id: a.Id ?? i + 1,
-      teams: (a.TeamIds ?? []).filter((n): n is number => typeof n === 'number' && n > 0),
+      /*
+       * POSITIONAL. The zeros are holes, not absences.
+       *
+       * The arena pre-allocates every alliance's TeamIds to full length and
+       * fills slots positionally, writing 0 back into a slot the scorekeeper
+       * clears. Filtering the zeros out COMPACTED the array, which is
+       * harmless while picks arrive left to right, and wrong in the one case
+       * that matters: correcting a mis-entered first-round pick by blanking
+       * it while the second-round pick is already in slid the second-round
+       * pick into the first-round column, on the projector, during the
+       * segment the whole hall is watching.
+       *
+       * Trailing zeros still go, because a slot nobody has reached yet is
+       * genuinely not there and the board draws its own empty slots.
+       */
+      teams: trimTrailing((a.TeamIds ?? []).map(n => (typeof n === 'number' && n > 0 ? n : 0))),
     })),
     ranked: (msg.RankedTeams ?? [])
       .filter(r => (r.TeamId ?? 0) > 0)
@@ -199,6 +215,13 @@ function matchKind(type: number | string | undefined): MatchInfo['kind'] | null 
     case MatchType.Playoff: return 'playoff';
     default: return null;
   }
+}
+
+/** Drop empty slots off the END only: a hole in the middle is information. */
+function trimTrailing(list: number[]): number[] {
+  let end = list.length;
+  while (end > 0 && !list[end - 1]) end--;
+  return list.slice(0, end);
 }
 
 interface Totals {
@@ -456,7 +479,7 @@ export class CheesyAdapter {
         // own witness to that, and the loaded match type is the other: once
         // the field is playing playoffs there is certainly a bracket.
         const bracketExists = this.#loadedType === MatchType.Playoff
-          || (this.#bus.state.selection?.alliances ?? []).some(a => a.teams.length > 0);
+          || (this.#bus.state.selection?.alliances ?? []).some(a => a.teams.some(t => t > 0));
         if (bracketExists) {
           try {
             playoff = await this.#client.get<MatchWithResult[]>('/api/matches/playoff');
@@ -578,6 +601,7 @@ export class CheesyAdapter {
       case 'allianceSelection':
         return this.#onAllianceSelection(data as AllianceSelectionMessage);
       case 'matchTiming': return this.#onMatchTiming(data as MatchTimingMessage);
+      case 'eventStatus': return this.#onEventStatus(data as EventStatusMessage);
       default: return;   // lowerThird, playSound, etc.; the desk owns those
     }
   }
@@ -634,6 +658,33 @@ export class CheesyAdapter {
   get timingMismatch(): string[] | null { return this.#timingMismatch; }
 
   /**
+   * How late the event is running, in the arena's own words.
+   *
+   * The arena derives this from the adjacent matches' scheduled versus actual
+   * start times and puts it on its queueing display, its rankings display and
+   * the field monitor. The desk derives its own figure from a median of
+   * recent cycle times, and had no case for this notifier, so two screens in
+   * the same gym were going to show different minute figures all weekend with
+   * nothing to reconcile them. The field's number is the one the scoring
+   * table will be asked about, so it wins; the desk's stays as the fallback
+   * for a desk running without a bridge.
+   *
+   * Same arbitration shape as Nexus versus Cheesy on the queue.
+   */
+  #onEventStatus(msg: EventStatusMessage): void {
+    const message = (msg.EarlyLateMessage ?? '').trim();
+    // Empty is the arena declining to guess: a test match, or a replay, where
+    // it says so explicitly rather than publishing a wrong number. Declining
+    // is not the same as saying "on schedule", so it clears rather than
+    // overwrites.
+    this.#emit({
+      type: 'pace.updated',
+      confidence: 'authoritative',
+      payload: { officialLate: message || null },
+    });
+  }
+
+  /**
    * Alliance rosters.
    *
    * Cheesy writes every notifier's current value to a socket the moment it
@@ -654,9 +705,9 @@ export class CheesyAdapter {
    */
   #onAllianceSelection(msg: AllianceSelectionMessage): void {
     const next = mapSelection(msg);
-    const hasTeams = next.alliances.some(a => a.teams.length > 0);
+    const hasTeams = next.alliances.some(a => a.teams.some(t => t > 0));
     const held = this.#bus.state.selection;
-    if (!hasTeams && held?.alliances.some(a => a.teams.length > 0)) {
+    if (!hasTeams && held?.alliances.some(a => a.teams.some(t => t > 0))) {
       console.warn('[cheesy] ignoring an empty alliance list: the arena has been ' +
         'restarted and has not reloaded selection. Keeping the rosters we hold.');
       return;

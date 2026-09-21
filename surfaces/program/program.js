@@ -181,7 +181,13 @@ function paintSelection(sel) {
     return `<div class="sel-al" style="--n:${size}">
       <div class="sel-al-seed num">${a.id}</div>
       <div class="sel-al-teams">
-        ${picks.map((t, i) => `<span class="sel-al-team num"${i === 0 ? ' data-captain' : ''}>${t}</span>`).join('')}
+        ${picks.map((t, i) => (t
+          // A zero is a slot the scorekeeper CLEARED, not a team. Drawing it
+          // as an empty slot keeps every later pick in its own column: this
+          // used to compact, so blanking a mis-entered first-round pick slid
+          // the second-round pick left, on the projector, mid-selection.
+          ? `<span class="sel-al-team num"${i === 0 ? ' data-captain' : ''}>${t}</span>`
+          : '<span class="sel-al-slot"></span>')).join('')}
         ${'<span class="sel-al-slot"></span>'.repeat(slots)}
       </div>
     </div>`;

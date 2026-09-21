@@ -97,8 +97,23 @@ export function chaptersFrom(
       continue;
     }
 
-    // Selection republishes on every pick; only the first one is a landmark.
+    /*
+     * Selection republishes on every pick; only the first one is a landmark.
+     *
+     * "First" has to mean the first one with a PICK IN IT. Cheesy bootstraps
+     * every notifier the moment a socket connects, so the desk sees an
+     * alliance_selection.update on its first connection of the day and on
+     * every reconnect after it, with a list already sized to the event and
+     * every roster empty. Taking that as the landmark stamped "Alliance
+     * selection" at whatever moment the desk or the socket last came up,
+     * typically mid-qualification on Saturday morning, and YouTube published
+     * it without complaint. Fixing it afterwards means editing the
+     * description of a video the community has already linked.
+     */
     if (ev.type === 'alliance_selection.update' && at >= 0 && !sawSelection) {
+      const p = ev.payload as { alliances?: { teams?: number[] }[] } | undefined;
+      const picked = (p?.alliances ?? []).some(a => (a.teams ?? []).some(t => t > 0));
+      if (!picked) continue;
       sawSelection = true;
       found.push({ atSec: at, title: 'Alliance selection' });
     }

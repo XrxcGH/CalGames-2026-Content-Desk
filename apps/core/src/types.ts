@@ -417,6 +417,20 @@ export interface PaceInfo {
   cycleSec: number | null;
   nextStartAt: number | null;
   behindMin: number | null;
+  /**
+   * How late the FIELD says the event is running, in its own words.
+   *
+   * The arena publishes this on every match start and state change, derived
+   * from the adjacent matches' scheduled versus actual times, and shows it on
+   * its queueing display, rankings display and field monitor. Preferred over
+   * behindMin wherever both exist, because two screens in the same gym
+   * disagreeing about how late the day is generates questions at the scoring
+   * table that nobody can answer.
+   *
+   * Null when the arena declines to guess, which it does during a test match
+   * and during a replay. Declining is not the same as "on schedule".
+   */
+  officialLate: string | null;
   lastStartAt: number | null;
 }
 
@@ -761,7 +775,10 @@ export const initialState = (): DeskState => ({
   matchRun: 1,
   officialWinner: null,
   tiebreakReason: null,
-  pace: { cycleSec: null, nextStartAt: null, behindMin: null, lastStartAt: null },
+  pace: {
+    cycleSec: null, nextStartAt: null, behindMin: null, lastStartAt: null,
+    officialLate: null,
+  },
   nowQueuing: null,
   announcement: null,
   status: null,

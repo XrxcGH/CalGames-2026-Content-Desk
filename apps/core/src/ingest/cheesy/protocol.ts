@@ -215,6 +215,27 @@ export interface MatchTimingMessage {
   TimeoutDurationSec?: number;
 }
 
+/**
+ * field.EventStatus, sent whole on the `eventStatus` notifier.
+ *
+ * The arena works out how late the event is running from the ADJACENT
+ * matches' scheduled versus actual start times, and renders it on its own
+ * queueing display, rankings display and field monitor. The desk computes the
+ * same figure independently from a median of recent cycle times, and had no
+ * case for this notifier at all, so two screens in the same gym were going to
+ * show different minute figures with nothing to reconcile them.
+ */
+export interface EventStatusMessage {
+  /** e.g. "8:12 (0:43 slower than scheduled)". Empty when not yet known. */
+  CycleTime?: string;
+  /**
+   * "Event is running 23 minutes late", "...23 minutes early", or "Event is
+   * running on schedule". Empty during a test match and during a replay,
+   * where the arena declines to guess.
+   */
+  EarlyLateMessage?: string;
+}
+
 export interface ScorePostedMessage {
   Match?: CheesyMatch;
   RedScoreSummary?: ScoreSummary;

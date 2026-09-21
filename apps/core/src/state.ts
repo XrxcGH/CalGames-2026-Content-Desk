@@ -735,8 +735,35 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'arena.status':
         return { ...state, connected: { ...state.connected, ...(ev.payload as object) } };
 
-      case 'pace.updated':
-        return { ...state, pace: ev.payload as DeskState['pace'] };
+      /*
+       * Two producers, each with an opinion about a different half.
+       *
+       * The desk's own pace model owns cycleSec, nextStartAt, behindMin and
+       * lastStartAt, and sends them together. The field owns officialLate and
+       * sends only that. Casting the payload wholesale meant whichever spoke
+       * last erased the other's half, so the arena's figure survived until the
+       * desk's next tick, about a second.
+       *
+       * Merged per field instead: a key the payload does not carry is not an
+       * opinion about that key. officialLate is the exception that must be
+       * settable to null, because the arena explicitly declines to guess
+       * during a test match or a replay, and declining is not the same as
+       * saying the event is on schedule.
+       */
+      case 'pace.updated': {
+        const p = ev.payload as Partial<DeskState['pace']>;
+        return {
+          ...state,
+          pace: {
+            ...state.pace,
+            ...(p.cycleSec !== undefined ? { cycleSec: p.cycleSec } : {}),
+            ...(p.nextStartAt !== undefined ? { nextStartAt: p.nextStartAt } : {}),
+            ...(p.behindMin !== undefined ? { behindMin: p.behindMin } : {}),
+            ...(p.lastStartAt !== undefined ? { lastStartAt: p.lastStartAt } : {}),
+            ...('officialLate' in p ? { officialLate: p.officialLate ?? null } : {}),
+          },
+        };
+      }
 
       /*
        * Built field by field, like every other operator-typed string, rather

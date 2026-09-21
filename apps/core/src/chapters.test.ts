@@ -78,15 +78,44 @@ test('chapters closer together than ten seconds are dropped, because they void t
 });
 
 test('alliance selection lands once, no matter how many picks republish it', () => {
+  const pick = (teams: number[]) => ({ alliances: [{ id: 1, teams }] });
   const log = [
     ...match(10 * 60_000, 'Qualification 43'),
-    ev('alliance_selection.update', 30 * 60_000, { alliances: [] }),
-    ev('alliance_selection.update', 31 * 60_000, { alliances: [] }),
-    ev('alliance_selection.update', 32 * 60_000, { alliances: [] }),
+    ev('alliance_selection.update', 30 * 60_000, pick([254])),
+    ev('alliance_selection.update', 31 * 60_000, pick([254, 846])),
+    ev('alliance_selection.update', 32 * 60_000, pick([254, 846, 1678])),
   ];
   const chapters = chaptersFrom(log, T0);
   assert.equal(chapters.filter(c => c.title === 'Alliance selection').length, 1);
   assert.equal(chapters.find(c => c.title === 'Alliance selection')?.atSec, 30 * 60);
+});
+
+test('the chapter waits for an actual pick, not the socket coming up', () => {
+  /*
+   * Cheesy bootstraps every notifier the moment a socket connects, so the
+   * desk sees an alliance_selection.update on its first connection of the day
+   * and on every reconnect after it, with a list already sized to the event
+   * and every roster empty. Taking that as the landmark stamped "Alliance
+   * selection" at whatever moment the desk last came up, typically
+   * mid-qualification on Saturday morning, and YouTube published it without
+   * complaint. Fixing that afterwards means editing the description of a
+   * video the community has already linked.
+   */
+  const log = [
+    // The desk connects at 9am and the arena replays an empty board.
+    ev('alliance_selection.update', 5 * 60_000, {
+      alliances: [{ id: 1, teams: [] }, { id: 2, teams: [] }],
+    }),
+    ...match(10 * 60_000, 'Qualification 43'),
+    // A socket blip mid-morning replays it again.
+    ev('alliance_selection.update', 15 * 60_000, { alliances: [{ id: 1, teams: [] }] }),
+    // Selection actually starts in the afternoon.
+    ev('alliance_selection.update', 90 * 60_000, { alliances: [{ id: 1, teams: [254] }] }),
+  ];
+  const chapters = chaptersFrom(log, T0);
+  const sel = chapters.filter(c => c.title === 'Alliance selection');
+  assert.equal(sel.length, 1);
+  assert.equal(sel[0]?.atSec, 90 * 60, 'the afternoon, not the morning');
 });
 
 test('a replayed match keeps its own chapter even though the title repeats', () => {

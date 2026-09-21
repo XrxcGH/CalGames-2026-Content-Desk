@@ -1722,3 +1722,66 @@ test('a score changed after the commit is noticed from the schedule poll', async
     await new Promise(r => server.close(r));
   }
 });
+
+test('clearing a mis-entered pick does not slide the next one into its column', () => {
+  /*
+   * The arena pre-allocates every alliance's TeamIds to full length and fills
+   * slots positionally, writing 0 back into a slot the scorekeeper clears.
+   * Filtering the zeros out COMPACTED the array, which is harmless while
+   * picks arrive left to right and wrong in the one case that matters:
+   * correcting a mis-entered first-round pick while the second-round pick is
+   * already in slid the second-round pick into the first-round column, on the
+   * projector, during the segment the whole hall is watching.
+   */
+  const board = mapSelection({
+    Alliances: [{ Id: 1, TeamIds: [254, 0, 1678, 0] }],
+  });
+  assert.deepEqual(board.alliances[0]?.teams, [254, 0, 1678],
+    'the hole is kept, and the trailing empty slot is not');
+
+  // The captain is still the captain and 1678 is still the second pick.
+  assert.equal(board.alliances[0]?.teams[0], 254);
+  assert.equal(board.alliances[0]?.teams[2], 1678);
+
+  // A board nobody has picked on yet is empty, not a row of zeros.
+  assert.deepEqual(mapSelection({ Alliances: [{ Id: 1, TeamIds: [0, 0, 0, 0] }] })
+    .alliances[0]?.teams, []);
+});
+
+test('the field\'s own "how late is the event" figure wins over the desk\'s', () => {
+  /*
+   * The arena derives this from the adjacent matches' scheduled versus actual
+   * start times and renders it on its queueing display, its rankings display
+   * and the field monitor. The desk derives its own from a median of recent
+   * cycle times, and had no case for the eventStatus notifier at all, so two
+   * screens in the same gym were going to show different minute figures all
+   * weekend with nothing to reconcile them.
+   */
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  // The desk's own model publishes first.
+  bus.emit({
+    type: 'pace.updated', source: 'clock',
+    payload: { cycleSec: 480, nextStartAt: 1, behindMin: 9, lastStartAt: 0 },
+  });
+  assert.equal(bus.state.pace.behindMin, 9);
+
+  adapter.ingest('eventStatus', { EarlyLateMessage: 'Event is running 23 minutes late' });
+  assert.equal(bus.state.pace.officialLate, 'Event is running 23 minutes late');
+  assert.equal(bus.state.pace.behindMin, 9, 'the desk keeps its own, as the fallback');
+  assert.equal(bus.state.pace.cycleSec, 480, 'and the rest of its half survives');
+
+  // The desk's next tick must not wipe the field's figure.
+  bus.emit({
+    type: 'pace.updated', source: 'clock',
+    payload: { cycleSec: 500, nextStartAt: 2, behindMin: 11, lastStartAt: 1 },
+  });
+  assert.equal(bus.state.pace.officialLate, 'Event is running 23 minutes late');
+  assert.equal(bus.state.pace.behindMin, 11);
+
+  // The arena declines to guess during a test match or a replay, and that is
+  // not the same as saying the event is on schedule.
+  adapter.ingest('eventStatus', { EarlyLateMessage: '' });
+  assert.equal(bus.state.pace.officialLate, null);
+});

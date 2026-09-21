@@ -654,8 +654,18 @@ function paint(s) {
   const up = (s.upcoming ?? []).slice(0, 4);
   const clock = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const behind = s.pace?.behindMin;
-  const behindText = behind == null || Math.abs(behind) < 2 ? ''
-    : behind > 0 ? `${behind} min behind` : `${-behind} min ahead`;
+  // The FIELD's wording when it has one. The arena derives how late the day
+  // is from the adjacent matches' scheduled versus actual times and shows it
+  // on its own queueing and rankings displays; the desk derives its own from
+  // a median of recent cycles. Two screens in the same gym showing different
+  // minute figures generates questions at the scoring table that nobody can
+  // answer, so the field wins and the desk's stays as the fallback.
+  // "On schedule" is not worth a line: the absence of a warning says it.
+  const official = s.pace?.officialLate;
+  const behindText = official
+    ? (/on schedule/i.test(official) ? '' : official)
+    : behind == null || Math.abs(behind) < 2 ? ''
+      : behind > 0 ? `${behind} min behind` : `${-behind} min ahead`;
   // "Now playing" is dropped when the event is off schedule: the match name is
   // already the first row below, and the drift is the part nobody else tells
   // them. Both forms are short enough to hold the 72px room-only floor.
