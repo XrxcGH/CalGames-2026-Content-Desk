@@ -56,7 +56,7 @@ fails if anything else appears.
 | `/displays/audience/websocket` | `realtimeScore`, `scorePosted`, `lowerThird`, `audienceDisplayMode`, `allianceSelection`, `playSound`, `matchLoad`, `matchTime` |
 | `/displays/queueing/websocket` | queueing + `eventStatus` |
 | `/displays/field_monitor/websocket` | `arenaStatus`: station health, robot comms. Powers the "what happened to 846?" replay marker. **Has a read loop** (`updateTeamNotes`, behind `?fta=true`); we never set `fta` and never send a frame |
-| `/displays/rankings/websocket` | live rankings |
+| `/displays/rankings/websocket` | **not opened.** Allowlisted, but its handler carries only `display.Notifier`, `eventStatus` and `reload`, none of which the desk reads: rankings come from `GET /api/rankings` on the 60s poll. Opening it bought nothing and cost a display registration |
 | `/displays/bracket/websocket` | playoff bracket state |
 
 **Allowed (HTTP, `GET` only):**

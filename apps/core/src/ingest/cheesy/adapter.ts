@@ -260,6 +260,41 @@ export class CheesyAdapter {
    * duplicate label and put the abandoned first run on the channel.
    */
   #runs = new Map<string, number>();
+  /**
+   * Which socket each notifier is being taken from. First to deliver wins.
+   *
+   * Most of the arena's notifiers are published on several sockets at once:
+   * matchLoad on five of our six, matchTime on four, realtimeScore on two.
+   * Each is an independent TCP connection carrying the identical stream, the
+   * messages carry no sequence number or timestamp, and each listener is a
+   * five-deep channel with a NON-BLOCKING send that silently drops when full,
+   * so one socket running a few seconds behind the others is an ordinary
+   * outcome when this process is busy cutting a clip.
+   *
+   * Identical duplicates were harmless, because the second diff is zero. The
+   * REORDERINGS were not, and all three of these are event-visible:
+   *
+   *   PostMatch, then a stale TeleopPeriod, then PostMatch, and match.end
+   *   fires TWICE: the post-match sequence and the automatic cut both run
+   *   again.
+   *
+   *   TeleopPeriod, stale PausePeriod, TeleopPeriod, and match.teleop_start
+   *   fires twice, which re-anchors the clock and jumps the on-air countdown
+   *   backwards to 2:20 in the middle of teleop.
+   *
+   *   realtimeScore 50, a stale 45, then 55, and the desk emits a +10 delta
+   *   for 5 points of real scoring. score.delta drives the replay markers,
+   *   the scoring-rate graphic and the post-match timeline, so they overstate
+   *   the rest of the match. The stale frame also lands wholesale on
+   *   score.realtime, so the audience sees the score drop and jump back.
+   *
+   * First-to-deliver rather than a hard-coded socket per notifier, because an
+   * offseason arena build missing an endpoint should still work: whichever
+   * socket brings a notifier first owns it, and ownership is released the
+   * moment that socket drops so another can take over. Redundancy kept,
+   * duplicates gone.
+   */
+  #owner = new Map<string, string>();
   /** What the arena calls the break that is about to start, from matchLoad. */
   #breakDescription = '';
   #breakNextMatch = '';
@@ -271,7 +306,8 @@ export class CheesyAdapter {
     this.#client = new CheesyClient({
       host: opts.host,
       displayId: opts.displayId,
-      onEvent: (notifier, data) => this.ingest(notifier, data),
+      onEvent: (notifier, data, path) => this.ingest(notifier, data, path),
+      onDown: (path) => this.socketDown(path),
       onStatus: (_up, detail) => {
         // The AGGREGATE, not the single socket: six sockets feed this
         // callback, and reporting each one's state last-writer-wins made one
@@ -410,8 +446,34 @@ export class CheesyAdapter {
    * Feed one Cheesy Arena notifier in. Public because the websocket is not the
    * only thing that drives it: a recorded capture can be replayed through the
    * same path to rehearse the whole pipeline without a field.
+   *
+   * `path` is the socket it arrived on. Omitted by a replay or a test, which
+   * is the whole point: those have exactly one source, so there is nothing to
+   * arbitrate and the ownership check is skipped.
    */
-  ingest(notifier: string, data: unknown): void {
+  /**
+   * A socket has gone: release whatever it owned so the next frame from any
+   * other socket takes that notifier over.
+   *
+   * Without this, losing /displays/audience would silently stop scorePosted
+   * for the rest of the event, while three other sockets went on carrying
+   * matchLoad and matchTime perfectly well.
+   */
+  socketDown(path: string): void {
+    for (const [notifier, owner] of this.#owner) {
+      if (owner === path) this.#owner.delete(notifier);
+    }
+  }
+
+  ingest(notifier: string, data: unknown, path?: string): void {
+    // One socket per notifier. See #owner: matchLoad is published on five of
+    // our six sockets and matchTime on four, and a lagging duplicate is worse
+    // than no duplicate at all.
+    if (path !== undefined) {
+      const owner = this.#owner.get(notifier);
+      if (owner === undefined) this.#owner.set(notifier, path);
+      else if (owner !== path) return;
+    }
     switch (notifier) {
       case 'matchLoad': return this.#onMatchLoad(data as MatchLoadMessage);
       case 'matchTime': return this.#onMatchTime(data as MatchTimeMessage);

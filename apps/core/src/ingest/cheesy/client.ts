@@ -65,6 +65,25 @@ export const ALLOWED_SOCKETS = [
 ] as const;
 
 /**
+ * The sockets actually opened by default.
+ *
+ * /displays/rankings is on the allowlist but not here. Its handler subscribes
+ * to exactly display.Notifier, EventStatusNotifier and ReloadDisplaysNotifier,
+ * and the desk handles none of the three: rankings come from GET /api/rankings
+ * on the 60s poll, because the notifier does not carry them. So opening it
+ * bought nothing and cost a display registration in the arena's registry, a
+ * TCP connection, and a row on the scorekeeper's /setup/displays page.
+ *
+ * The other five all carry something, or carry a duplicate worth having as a
+ * fallback: with one-socket-per-notifier arbitration in the adapter, a
+ * duplicate is free until the socket that owns a notifier drops, and then it
+ * is the thing that keeps the show running.
+ */
+export const DEFAULT_SOCKETS = ALLOWED_SOCKETS.filter(
+  p => p !== '/displays/rankings/websocket',
+);
+
+/**
  * The per-socket display id suffix. Registering a display OVERWRITES that
  * id's configuration in the arena, so the desk's sockets must not share one
  * id with each other or with a real screen.
@@ -139,8 +158,14 @@ export interface CheesyClientOpts {
    * so it cannot collide with a real audience screen.
    */
   displayId: string;
-  onEvent: (notifier: string, data: unknown) => void;
+  onEvent: (notifier: string, data: unknown, path: string) => void;
   onStatus?: (connected: boolean, detail: string) => void;
+  /**
+   * One socket has gone. Separate from onStatus, which reports the aggregate:
+   * this one names the path, so whatever was taking a notifier from that
+   * socket can let another socket take over.
+   */
+  onDown?: (path: string) => void;
 }
 
 export class CheesyClient {
@@ -166,7 +191,7 @@ export class CheesyClient {
     if (this.#audit.length > 5000) this.#audit.shift();
   }
 
-  connect(paths: readonly string[] = ALLOWED_SOCKETS): void {
+  connect(paths: readonly string[] = DEFAULT_SOCKETS): void {
     for (const path of paths) {
       assertSocketAllowed(path);
       this.#open(path);
@@ -265,7 +290,12 @@ export class CheesyClient {
       // Cheesy frames are {type, data}.
       let msg: { type?: string; data?: unknown };
       try { msg = JSON.parse(String(raw)) as typeof msg; } catch { return; }
-      if (msg.type) this.#opts.onEvent(msg.type, msg.data);
+      // The PATH goes with the frame. Most notifiers are published on
+      // several of these sockets at once, and the adapter has to be able to
+      // take each one from a single source: they carry no sequence number, so
+      // two copies of the same stream arriving out of order is indetectable
+      // after the fact.
+      if (msg.type) this.#opts.onEvent(msg.type, msg.data, path);
     });
 
     // We never send an APPLICATION frame. Five of the six endpoints cannot
@@ -285,6 +315,7 @@ export class CheesyClient {
     if (!this.#sockets.has(path)) return;
     this.#sockets.delete(path);
     this.#connected.delete(path);
+    this.#opts.onDown?.(path);
     this.#opts.onStatus?.(false, `${path}: ${why}`);
 
     // Backoff caps at 60s. A reconnect storm during a field reset is the most

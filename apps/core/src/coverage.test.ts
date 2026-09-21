@@ -228,3 +228,55 @@ test('a playoff match joins its upload, and the score column fills', async () =>
   assert.equal(report.gaps.some(g => g.problem === 'never-queued'), false,
     'so it does not warn about a video that exists');
 });
+
+test('the open per-team view hands out no unlisted video and no error text', () => {
+  /*
+   * /api/coverage/team/ is open to anyone on the venue wifi, on purpose: it
+   * answers "where is the video of the match we just played", which is the
+   * most asked question after an event. It was returning the whole row.
+   *
+   * Two fields in there are not the public's. `videoId`, for a video uploaded
+   * UNLISTED and only flipped public once its TBA link succeeds, and an
+   * unlisted YouTube id is watchable by anyone holding it: typing a team
+   * number into a phone returned watchable links to videos nobody had decided
+   * to publish, QC-held cuts and the superseded run of a replayed match
+   * included. And `error`, which carries ffmpeg's last stderr line, local
+   * filesystem paths and all. The trivia QR code puts this desk's address on
+   * a projector in front of the gym.
+   */
+  const bus = new EventBus();
+  const ledger = new CoverageLedger(fakeQueue([
+    item({ id: 'i1', label: 'Qualification 12', state: 'uploaded', videoId: 'secret-unlisted' }),
+    item({
+      id: 'i2', label: 'Qualification 13', state: 'failed', videoId: null,
+      error: 'ffmpeg: C:\Users\ericj\rec\cut-3.mp4: no such file',
+    }),
+    item({ id: 'i3', label: 'Qualification 14', state: 'done', videoId: 'published-ok' }),
+  ]));
+  ledger.attach(bus);
+  playMatch(bus, 'Qualification 12', { red: [846, 1, 2] });
+  playMatch(bus, 'Qualification 13', { red: [846, 3, 4] });
+  playMatch(bus, 'Qualification 14', { red: [846, 5, 6] });
+
+  const open = ledger.forTeamPublic(846);
+  assert.equal(open.length, 3);
+
+  const body = JSON.stringify(open);
+  assert.equal(body.includes('secret-unlisted'), false,
+    'an unlisted id is watchable by anyone holding it');
+  assert.equal(body.includes('ffmpeg'), false, 'and an error names local paths');
+  assert.equal(body.includes('ericj'), false);
+
+  // What it DOES carry: a ready-made link, once the video is actually public.
+  assert.equal(open.find(r => r.name === 'Qualification 12')?.video, null,
+    'uploaded is not published');
+  assert.equal(open.find(r => r.name === 'Qualification 13')?.video, null);
+  assert.equal(open.find(r => r.name === 'Qualification 14')?.video,
+    'https://www.youtube.com/watch?v=published-ok');
+
+  // And the part a team actually asked for still works.
+  assert.deepEqual(open.find(r => r.name === 'Qualification 14')?.red, [846, 5, 6]);
+
+  // The gated route is unchanged: the operator needs the whole picture.
+  assert.equal(ledger.forTeam(846)[0]?.publish?.videoId, 'secret-unlisted');
+});

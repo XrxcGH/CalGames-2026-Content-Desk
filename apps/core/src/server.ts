@@ -1435,7 +1435,11 @@ export function startServer(opts: ServerOpts) {
         if (!Number.isInteger(team) || team <= 0) {
           return json(res, 400, { error: 'Team must be a number.' });
         }
-        return json(res, 200, { team, rows: coverage.forTeam(team) });
+        // The PUBLIC projection: a watch link once a video is published, and
+        // nothing about the pipeline. The full row carries the videoId of
+        // UNLISTED uploads, which are watchable by anyone holding the id, and
+        // raw error strings containing local filesystem paths.
+        return json(res, 200, { team, rows: coverage.forTeamPublic(team) });
       }
 
       // ---- who is on camera ------------------------------------------------

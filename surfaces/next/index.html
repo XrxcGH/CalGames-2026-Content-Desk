@@ -216,11 +216,14 @@ async function loadPlayed() {
         sc.textContent = `${r.score.red} - ${r.score.blue}${won ? '  W' : ''}`;
         el.append(sc);
       }
-      const vid = r.publish?.videoId;
-      if (vid) {
+      // A ready-made link, not a raw video id. The route used to hand out the
+      // id of videos uploaded UNLISTED and not yet published, which anyone
+      // holding the id can watch; it now carries a URL, and only once the
+      // video is actually public.
+      if (r.video) {
         const a = document.createElement('a');
         a.className = 'played-link';
-        a.href = `https://youtu.be/${vid}`;
+        a.href = r.video;
         a.target = '_blank';
         a.rel = 'noopener';
         a.textContent = 'Watch';

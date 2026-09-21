@@ -45,6 +45,18 @@ export interface CoverageRow {
   } | null;
 }
 
+/** What an unauthenticated phone is allowed to know about a match. */
+export interface PublicCoverageRow {
+  name: string;
+  matchKey: string | null;
+  playedAt: number | null;
+  red: number[];
+  blue: number[];
+  score: { red: number; blue: number } | null;
+  /** A watch link, and only once the video is actually published. */
+  video: string | null;
+}
+
 export type CoverageProblem =
   | 'never-queued'      // it was played and nothing was ever cut for it
   | 'not-uploaded'      // queued, but it has not reached the channel
@@ -265,5 +277,40 @@ export class CoverageLedger {
    */
   forTeam(team: number): CoverageRow[] {
     return this.report().rows.filter(r => r.red.includes(team) || r.blue.includes(team));
+  }
+
+  /**
+   * The same rows, safe to hand to anyone on the venue wifi.
+   *
+   * The open route exists to answer "where is the video of the match we just
+   * played", which is the most asked question after an event and a fair one
+   * to ask during it. It was returning the whole CoverageRow, publish block
+   * included, and two fields in there are not the public's:
+   *
+   *   videoId, for a video uploaded UNLISTED and only flipped public once its
+   *   TBA link succeeds. An unlisted YouTube id is watchable by anyone
+   *   holding it, so typing a team number into a phone returned watchable
+   *   links to videos nobody had decided to publish yet, QC-held cuts and the
+   *   superseded run of a replayed match included. The trivia QR code puts
+   *   this desk's address on a projector in front of the gym.
+   *
+   *   error, which carries raw messages, including ffmpeg's last stderr line,
+   *   which contains local filesystem paths.
+   *
+   * So the open shape carries a watch URL and only once the item is actually
+   * done. Everything else about the pipeline stays on the gated route.
+   */
+  forTeamPublic(team: number): PublicCoverageRow[] {
+    return this.forTeam(team).map(r => ({
+      name: r.name,
+      matchKey: r.matchKey,
+      playedAt: r.playedAt,
+      red: r.red,
+      blue: r.blue,
+      score: r.score,
+      video: r.publish?.state === 'done' && r.publish.videoId
+        ? `https://www.youtube.com/watch?v=${r.publish.videoId}`
+        : null,
+    }));
   }
 }

@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { CheesyClient, assertPathAllowed, assertSocketAllowed, ALLOWED_SOCKETS } from './client.ts';
+import {
+  CheesyClient, assertPathAllowed, assertSocketAllowed, ALLOWED_SOCKETS, DEFAULT_SOCKETS,
+} from './client.ts';
 import { fuelPoints, towerPoints, MatchState, MatchStatus, type MatchWithResult } from './protocol.ts';
 import { CheesyAdapter, mapRankings, mapSelection, mapUpcoming } from './adapter.ts';
 import { EventBus } from '../../bus.ts';
@@ -1169,7 +1171,7 @@ test('the one socket that CAN read from us is never asked to', async () => {
   });
   try {
     client.connect();
-    for (let i = 0; i < 80 && seen.length < ALLOWED_SOCKETS.length; i++) {
+    for (let i = 0; i < 80 && seen.length < DEFAULT_SOCKETS.length; i++) {
       await new Promise(r => setTimeout(r, 25));
     }
 
@@ -1215,15 +1217,16 @@ test('each display socket registers under its own id, because registering is a w
   });
   try {
     client.connect();
-    for (let i = 0; i < 80 && seen.length < ALLOWED_SOCKETS.length; i++) {
+    for (let i = 0; i < 80 && seen.length < DEFAULT_SOCKETS.length; i++) {
       await new Promise(r => setTimeout(r, 25));
     }
 
     const ids = seen
       .map(u => new URLSearchParams(u.slice(u.indexOf('?') + 1)).get('displayId'))
       .filter((v): v is string => !!v);
-    assert.equal(ids.length, 5, 'the five display sockets carry an id');
-    assert.equal(new Set(ids).size, 5, 'and no two of them are the same');
+    assert.equal(ids.length, DEFAULT_SOCKETS.filter(p => p.startsWith('/displays/')).length,
+      'every display socket opened carries an id');
+    assert.equal(new Set(ids).size, ids.length, 'and no two of them are the same');
     for (const id of ids) {
       assert.ok(id.startsWith('contentdesk1-'),
         `${id} should still be recognisably this desk's`);
@@ -1370,4 +1373,105 @@ test('a break says what it is, when it ends, and what comes after', () => {
   assert.equal(brk.label, 'Awards Break');
   assert.equal(brk.nextMatch, 'Match 11');
   assert.equal(brk.seconds, 900);
+});
+
+test('the same notifier on two sockets is taken from one of them', () => {
+  /*
+   * matchLoad is published on five of the desk's six sockets, matchTime on
+   * four, realtimeScore on two. Each is an independent TCP connection
+   * carrying the identical stream, the messages carry no sequence number, and
+   * each arena-side listener is a five-deep channel with a NON-BLOCKING send
+   * that drops when full, so one socket running seconds behind the others is
+   * an ordinary outcome when this process is busy cutting a clip.
+   *
+   * Identical duplicates were harmless. Reordered ones were not.
+   */
+  const bus = new EventBus();
+  const seen: string[] = [];
+  bus.subscribe(ev => seen.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  const A = '/displays/audience/websocket';
+  const B = '/api/arena/websocket';
+
+  // A plays the match through. B is the same stream a few seconds behind,
+  // which is what a five-deep non-blocking channel does under load.
+  for (const state of [
+    MatchState.StartMatch, MatchState.AutoPeriod, MatchState.PausePeriod,
+    MatchState.TeleopPeriod, MatchState.PostMatch,
+  ]) {
+    adapter.ingest('matchTime', { MatchState: state }, A);
+  }
+  for (const state of [
+    MatchState.StartMatch, MatchState.AutoPeriod, MatchState.PausePeriod,
+    MatchState.TeleopPeriod, MatchState.PostMatch,
+  ]) {
+    adapter.ingest('matchTime', { MatchState: state }, B);
+  }
+
+  // Without arbitration, B's lagging copy fired match.end a second time,
+  // running the post-match sequence and the automatic upload cut again, and
+  // fired match.teleop_start again, which re-anchors the clock and jumps the
+  // on-air countdown backwards to 2:20 in the middle of teleop.
+  assert.equal(seen.filter(t => t === 'match.end').length, 1, 'one buzzer, one end');
+  assert.equal(seen.filter(t => t === 'match.start').length, 1, 'one start');
+  assert.equal(seen.filter(t => t === 'match.teleop_start').length, 1,
+    'and the clock is not re-anchored mid-teleop');
+});
+
+test('a stale score frame from a second socket cannot inflate a delta', () => {
+  // 50 on the owner, a delayed 45 from another socket, then 55. The desk used
+  // to emit +10 for 5 points of real scoring, and score.delta drives the
+  // replay markers, the scoring-rate graphic and the post-match timeline.
+  const bus = new EventBus();
+  const seen: { field: string; amount: number }[] = [];
+  bus.subscribe(ev => {
+    if (ev.type === 'score.delta') seen.push(ev.payload as { field: string; amount: number });
+  });
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  const A = '/displays/audience/websocket';
+  const B = '/displays/field_monitor/websocket';
+  adapter.ingest('realtimeScore', { Red: { ScoreSummary: { TeleopFuelPoints: 50 } } }, A);
+  adapter.ingest('realtimeScore', { Red: { ScoreSummary: { TeleopFuelPoints: 45 } } }, B);
+  adapter.ingest('realtimeScore', { Red: { ScoreSummary: { TeleopFuelPoints: 55 } } }, A);
+
+  assert.deepEqual(seen.map(d => d.amount), [50, 5],
+    'the baseline, then five points: the stale frame is not in the ledger');
+  assert.equal(bus.state.score.red.fuel, 55, 'and the score does not dip and jump back');
+});
+
+test('losing the socket that owned a notifier hands it to another', () => {
+  // Otherwise losing /displays/audience would silently stop scorePosted for
+  // the rest of the event, while three other sockets went on carrying
+  // matchLoad and matchTime perfectly well.
+  const bus = new EventBus();
+  const seen: string[] = [];
+  bus.subscribe(ev => seen.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  const A = '/displays/audience/websocket';
+  const B = '/api/arena/websocket';
+
+  adapter.ingest('matchLoad', { Match: { Id: 1, LongName: 'Qualification 1' } }, A);
+  assert.equal(seen.filter(t => t === 'match.loaded').length, 1);
+
+  // B is ignored while A owns it.
+  adapter.ingest('matchLoad', { Match: { Id: 2, LongName: 'Qualification 2' } }, B);
+  assert.equal(bus.state.match?.displayName, 'Qualification 1', 'still A\'s');
+
+  // A drops. B takes over on its next frame.
+  adapter.socketDown(A);
+  adapter.ingest('matchLoad', { Match: { Id: 2, LongName: 'Qualification 2' } }, B);
+  assert.equal(bus.state.match?.displayName, 'Qualification 2');
+});
+
+test('a replay or a test feeds one source, so arbitration stays out of the way', () => {
+  // ingest() with no path is how a recorded capture and every other test in
+  // this file drive the adapter. There is nothing to arbitrate there.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', { Match: { Id: 5, LongName: 'Qualification 5' } });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod });
+  assert.equal(bus.state.match?.displayName, 'Qualification 5');
 });
