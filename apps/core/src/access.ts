@@ -106,6 +106,23 @@ const OPEN_POST = new Set([
  */
 const OPEN_PREFIXES = ['/theme/', '/shared/', '/media/'];
 
+/**
+ * Carved back OUT of an open prefix.
+ *
+ * /media/ is open because every audience surface pulls robot cutouts from it
+ * with no cookie. The same mount also serves media/audio, which is the one
+ * category of file in this project that must never be redistributed: walk-up
+ * songs and stingers, somebody else's recordings, licensed for one event.
+ * .gitignore says so in as many words.
+ *
+ * Walk-ups are named for the team ("media/audio/walkups/254.mp3", and the desk
+ * tells volunteers to name them that way), so the file names are not a secret:
+ * they are the match schedule. Anyone on the venue Wi-Fi could read the whole
+ * music library off the desk by typing team numbers, and the trivia QR code
+ * puts the desk's address on a projector in front of the entire gym.
+ */
+const CLOSED_UNDER_OPEN = ['/media/audio/'];
+
 export interface AccessQuery {
   method: string;
   path: string;
@@ -128,7 +145,8 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // pre-opened. That is the exact mechanism behind the OPTIONS hole below,
   // and the file's own "a verb is not a permission" test does not hold on
   // this branch.
-  if (reading && OPEN_PREFIXES.some(p => path.startsWith(p))) return false;
+  if (reading && OPEN_PREFIXES.some(p => path.startsWith(p))
+      && !CLOSED_UNDER_OPEN.some(p => path.startsWith(p))) return false;
 
   // The surface pages themselves.
   if (path === '/' ) return false;                       // the index just lists them

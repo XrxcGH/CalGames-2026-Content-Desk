@@ -173,6 +173,24 @@ const SANITIZERS: Record<string, (v: unknown) => unknown> = {
 
 export const EDITABLE_SECTIONS = Object.keys(SANITIZERS);
 
+/**
+ * What the Event settings page is allowed to write. NOT the same list.
+ *
+ * `awards` has a sanitizer because awards.onListChanged persists the Judge
+ * Advisor's own edits through this store. That made it reachable from POST
+ * /api/setup, which takes `section` straight from the request body behind the
+ * settings gate alone: anyone holding the settings code could send
+ * {"section":"awards","value":{"list":[]}} and write the whole ceremony out of
+ * data/event-content.json.
+ *
+ * Nothing would look wrong either. The live Awards instance keeps its
+ * in-memory copy, so the loss only appears at the next restart, and restarts
+ * happen at events. The awards tier exists precisely so the desk side of the
+ * house cannot reach the ceremony; a settings code that can delete it is the
+ * same boundary crossed from the other direction.
+ */
+export const DESK_EDITABLE_SECTIONS = EDITABLE_SECTIONS.filter(s => s !== 'awards');
+
 export class EventContent {
   #file: string;
   #dir: string;

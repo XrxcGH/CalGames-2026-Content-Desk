@@ -34,7 +34,7 @@ import type { CardLedger } from './cards.ts';
 import type { Rundown } from './rundown.ts';
 import type { Sponsors } from './sponsors.ts';
 import type { Awards } from './awards.ts';
-import type { EventContent } from './content.ts';
+import { DESK_EDITABLE_SECTIONS, type EventContent } from './content.ts';
 import type { Slides } from './slides.ts';
 import { CONTROL_ACTIONS, controlGroups } from './control-map.ts';
 import type { Vitals } from './vitals.ts';
@@ -1326,6 +1326,20 @@ export function startServer(opts: ServerOpts) {
           const body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8')) as
             { section?: string; value?: unknown };
           const section = String(body.section ?? '');
+          // The settings page writes event content. It does not write the
+          // ceremony: `awards` has a sanitizer only so the Judge Advisor's own
+          // edits can persist through this store, and leaving it reachable
+          // here let the settings code erase the whole award list out of
+          // data/event-content.json. See DESK_EDITABLE_SECTIONS.
+          if (!DESK_EDITABLE_SECTIONS.includes(section)) {
+            return json(res, 422, {
+              error: `"${section}" is not editable from the Event settings page. `
+                + (section === 'awards'
+                  ? 'The Judge Advisor edits the ceremony on /s/awards.'
+                  : 'Credentials and machine wiring live in config.json on the '
+                    + 'desk machine.'),
+            });
+          }
           const stored = await content.set(section, body.value, config);
           // The store changed the config object; now the live modules and the
           // bus have to hear about it, per section.

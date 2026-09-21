@@ -203,7 +203,7 @@ async function api(body) {
     body: JSON.stringify(body),
   });
   const out = await res.json();
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     // The JA session died mid-judging: a desk restart rotates it. Every
     // card's catch can only print the bare server message next to its own
     // button, and retrying loops the same 401 forever, because the unlock
@@ -223,7 +223,7 @@ async function api(body) {
 
 async function load() {
   const res = await fetch('/api/awards');
-  if (res.status === 401) { show(false); return; }
+  if (res.status === 401 || res.status === 403) { show(false); return; }
   const snap = await res.json();
   if (!snap || snap.locked) { show(false); return; }
   show(true);
