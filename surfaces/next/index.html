@@ -73,6 +73,13 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 .m-name { font-family: var(--font-num); font-weight: 900; font-size: 24px; }
 .m-eta { font-family: var(--font-cond); font-weight: 600; font-size: 15px;
   letter-spacing: .06em; text-transform: uppercase; color: var(--cg-gold); text-align: right; }
+/* A real gap between the alliances, because red-versus-blue is the one thing
+   this palette cannot carry alone: red/blue is the most common colour vision
+   deficiency, and on the default list (nobody following a team) there is
+   nothing else separating the two groups. The gold tick is the same divider
+   the alliance overview uses. */
+.al-sep { flex: none; width: 3px; align-self: stretch; margin: 0 4px;
+  background: var(--cg-gold); }
 .m-teams { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap;
   font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 15px; }
 /* 19px bold puts these in WCAG's large-text tier, where white on the
@@ -290,7 +297,7 @@ function paint(s) {
         <span class="m-name num">${esc(m.shortName || m.name)}</span>
         <span class="m-side">${side}</span>
         <span class="m-eta">${eta(queuePos)}</span>
-        <span class="m-teams">${m.red.map(n => chip(n, 'r')).join('')}${m.blue.map(n => chip(n, 'b')).join('')}</span>
+        <span class="m-teams">${m.red.map(n => chip(n, 'r')).join('')}<span class="al-sep" aria-hidden="true"></span>${m.blue.map(n => chip(n, 'b')).join('')}</span>
       </div>`;
   }).join('') || `<p class="hintline">${all.length
     ? `Team ${team} is not in the next ${all.length} matches. You have time.`

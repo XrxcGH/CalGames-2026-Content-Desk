@@ -119,6 +119,10 @@ a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; 
     <p class="lead">Screens anyone can put on a monitor. Open one of these on a pit TV and
       leave it: no OBS, no sign-in, no keyboard. Each one fills the screen and looks after
       itself.</p>
+    <!-- Only filled when the address asked for a screen that does not exist.
+         A kiosk nobody is standing next to has to be right or visibly wrong. -->
+    <p class="lead" id="menuNote" role="status" hidden
+      style="color:var(--st-warn);font-weight:600"></p>
     <div class="grid" id="grid"></div>
     <p class="note" id="note"></p>
   </div>
@@ -167,15 +171,33 @@ const params = new URLSearchParams(location.search);
 const want = params.get('screen');
 const $ = id => document.getElementById(id);
 
+/*
+ * "Nothing asked for" and "asked for something that does not exist" are not
+ * the same answer.
+ *
+ * An unrecognised ?screen= fell through to PIT_SCREENS[0], so a mistyped or
+ * out-of-date URL left a pit monitor confidently showing the program overlay
+ * while whoever set it up walked away believing it was showing the schedule.
+ * A kiosk nobody is standing next to has to be right or visibly wrong, never
+ * quietly something else.
+ */
 if (!want) {
   showMenu();
 } else {
-  const screen = PIT_SCREENS.find(s => s.id === want) ?? PIT_SCREENS[0];
-  showKiosk(screen);
+  const screen = PIT_SCREENS.find(s => s.id === want);
+  if (screen) showKiosk(screen);
+  else {
+    showMenu();
+    $('menuNote').hidden = false;
+    $('menuNote').textContent = `This address asked for a screen called "${want}", `
+      + 'which is not one of these. Pick the one you want below, and use the '
+      + 'address it gives you.';
+  }
 }
 
 function showMenu() {
   $('menu').hidden = false;
+  $('menuNote').hidden = true;
   document.title = 'Watch · CalGames 2026';
   $('grid').innerHTML = PIT_SCREENS.map(s => `
     <a class="card" href="?screen=${s.id}">
@@ -193,7 +215,9 @@ function showMenu() {
       + (u.fieldStream
         ? ` The field feed is configured, so the program screen composites it automatically.`
         : ` No field feed is set, so the program screen draws on the CalGames backdrop `
-          + `instead. Add one with <b>?feed=</b> or set <b>kiosk.fieldStreamUrl</b> in config.`);
+          + 'instead. Add one on the <b>Event settings</b> page at <b>/s/setup</b>, under '
+          + 'Screens and stream, or for this monitor only append <b>?feed=</b> to this '
+          + 'address.');
   }).catch(() => { $('note').textContent = ''; });
 }
 

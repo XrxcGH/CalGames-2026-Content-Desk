@@ -116,6 +116,11 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 14px;
         </div>
       </div>
       <div class="warn" id="warn" role="alert" hidden></div>
+      <!-- A clip failure is a separate, one-off fact from the standing
+           warnings above. Sharing one element meant it could only be cleared
+           by an unrelated warning coming and going, so it sat there for the
+           rest of the session. -->
+      <div class="warn" id="clipWarn" role="alert" hidden></div>
     </div>
     <p class="hint" id="armHint">A browser will not play a sound until someone has clicked the
       page once. Click the button, leave this window open, and the desk can drive it from
@@ -239,8 +244,8 @@ function clipFailed(token) {
 // in a codec this machine lacks fails afterwards, silently, with no rejection.
 audio.addEventListener('error', () => {
   if (!lastToken) return;
-  $('warn').hidden = false;
-  $('warn').textContent = 'That clip stopped: the file would not decode on this machine.';
+  $('clipWarn').hidden = false;
+  $('clipWarn').textContent = 'That clip stopped: the file would not decode on this machine.';
   clipFailed(lastToken);
 });
 
@@ -311,11 +316,14 @@ function paint(s) {
     const age = desk.serverNow - clip.startedAt;
     if (age < 15000) {
       lastToken = clip.token;
+      // A clip that plays is the answer to the last one that did not.
+      $('clipWarn').hidden = true;
+      $('clipWarn').textContent = '';
       audio.src = clip.src;
       audio.currentTime = 0;
       audio.play().catch(err => {
-        $('warn').hidden = false;
-        $('warn').textContent = 'That clip would not play: ' + err.message;
+        $('clipWarn').hidden = false;
+        $('clipWarn').textContent = 'That clip would not play: ' + err.message;
         // And tell the desk, or it stays latched on a clip that is not
         // playing: the bed ducked to 22%, the walk-up button lit, and the
         // room hearing almost nothing until somebody notices and changes
@@ -360,8 +368,23 @@ function paint(s) {
   if (s.music?.configured && !s.music.reachable && s.music.linked) {
     warn.push('The music service is not answering. Clips still play from this machine.');
   }
-  if (warn.length) { $('warn').hidden = false; $('warn').textContent = warn.join(' '); }
-  else if (!$('warn').textContent.startsWith('That clip')) $('warn').hidden = true;
+  /*
+   * Diff-guarded, and the clip failure gets its own element.
+   *
+   * This ran on every audio.updated frame, about every five seconds, and
+   * assigning textContent replaces the node's children even when the string
+   * is identical: #warn is role="alert", so a standing warning re-announced
+   * itself assertively, forever, over whatever else the operator was reading.
+   *
+   * The clip failure used to hide inside this same element and was protected
+   * from being cleared by a string-prefix test, which made it permanent: once
+   * one clip failed, the line stayed for the rest of the session and could
+   * only be dislodged by an unrelated warning arriving and then going away.
+   * Its own element, cleared when a clip next plays.
+   */
+  const text = warn.join(' ');
+  if ($('warn').textContent !== text) $('warn').textContent = text;
+  $('warn').hidden = !text;
 
   const clips = s.clips ?? [];
   $('clips').textContent = clips.length

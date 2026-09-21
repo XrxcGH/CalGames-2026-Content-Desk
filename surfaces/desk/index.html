@@ -337,8 +337,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 .ponair .empty { color: var(--text-dim); font-size: 13px; padding: 8px; }
 /* Visually hidden but announced: gives screen readers the alliance word that
    sighted operators get for free from position and the alliance color. */
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* .sr-only now lives in packages/theme/tokens.css, which this page loads. */
 </style>
 </head>
 <body>
@@ -575,7 +574,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
                  stop. -->
             <label>On air, in screen order (left is the audience's left)</label>
             <div id="panelOnAir" class="ponair"></div>
-            <p class="hint" id="panelHint">Tick a name to put them on. Six maximum.</p>
+            <!-- aria-live like every other hint on this page. The six-person
+                 panel limit refuses by springing the checkbox back, which is
+                 invisible to a screen reader, so the refusal was announced
+                 nowhere at all. -->
+            <p class="hint" id="panelHint" aria-live="polite">Tick a name to put them on. Six maximum.</p>
             <p class="hint">A <b>student</b>'s card airs as a first name and a
               family initial. Everyone in the hall still knows who they are; a
               search engine does not. Adults doing a job under their own name

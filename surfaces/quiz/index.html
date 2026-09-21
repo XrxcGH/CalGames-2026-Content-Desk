@@ -236,12 +236,28 @@ function paint(v) {
   // innerHTML setter replaces the children even for an identical string,
   // which drops keyboard focus every poll and can swallow a tap that lands
   // mid-repaint. Same reason setText guards the live regions above.
+  /*
+   * After the reveal, which answer was right was carried by fill colour and
+   * opacity alone: nothing in the text, nothing in the accessibility tree.
+   * A player using a screen reader, or anyone who cannot separate the green
+   * from the recessed plates, was told the round had been revealed and not
+   * what the answer was. The hidden spans put both facts where they belong.
+   */
+  const tag = (i) => {
+    if (v.phase !== 'revealed') return mine === i ? '<span class="sr-only">Your answer</span>' : '';
+    if (i === v.answer) {
+      return mine === i
+        ? '<span class="sr-only">Correct answer, and the one you picked</span>'
+        : '<span class="sr-only">Correct answer</span>';
+    }
+    return mine === i ? '<span class="sr-only">Your answer, wrong</span>' : '';
+  };
   const opts = q ? q.options.map((text, i) => `
     <button class="opt" data-i="${i}"
       ${mine === i ? 'data-mine="true"' : ''}
       ${v.phase === 'revealed' ? `data-right="${i === v.answer}"` : ''}
       ${v.phase !== 'open' || mine !== null ? 'disabled' : ''}>
-      <b>${LETTERS[i]}</b><span>${esc(text)}</span>
+      <b>${LETTERS[i]}</b><span>${esc(text)}</span>${tag(i)}
     </button>`).join('') : '';
   if (opts !== lastOptsHTML) {
     lastOptsHTML = opts;

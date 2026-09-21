@@ -58,8 +58,7 @@ h1 { margin: 0; font-size: 19px; font-variation-settings: "wdth" 118; }
 .now .s.blue { color: var(--alliance-blue-text); text-align: right; }
 /* Visually hidden but announced: the alliance word that sighted operators get
    for free from position and colour. Same rule the desk console carries. */
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* .sr-only now lives in packages/theme/tokens.css, which this page loads. */
 .now .mid { text-align: center; }
 .now .clk { font-family: var(--font-num); font-weight: 900; font-size: 26px; line-height: 1; color: var(--cg-gold); }
 /* Tracking adds a trailing space to every glyph, so centered tracked text
@@ -531,7 +530,12 @@ async function loadScenes() {
 
 function paintScene(state) {
   for (const b of document.querySelectorAll('#sceneGrid .b')) {
-    b.dataset.on = String(b.dataset.scene === (state?.scene ?? null));
+    const on = b.dataset.scene === (state?.scene ?? null);
+    b.dataset.on = String(on);
+    // Which camera is live was carried by a gold fill and nothing else, so a
+    // screen reader heard six identical buttons. Every other toggle group on
+    // this page already says so; the screen grid one function above does it.
+    b.setAttribute('aria-pressed', String(on));
   }
 }
 desk.on('state', paintScene);
@@ -623,8 +627,19 @@ function paintAudio(s) {
   // fired by whoever is standing where they can see the alliance walk out.
   const clips = (s.clips ?? []).filter(c => c.team !== null);
   const box = $('audClips');
-  if (box.dataset.n === String(clips.length)) return;
-  box.dataset.n = String(clips.length);
+  /*
+   * Keyed on what the clips ARE, not how many there are.
+   *
+   * The library rescans on every upload and clip ids derive from filenames,
+   * so swapping one walk-up for a corrected file under a new name changes the
+   * set without changing its size. The count guard then skipped the rebuild,
+   * every button kept its old closure, and the press that mattered posted a
+   * clip id the desk no longer has: an alliance introduction with silence
+   * where the walk-up should be.
+   */
+  const sig = JSON.stringify(clips.map(c => [c.id, c.label, c.team]));
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
   box.replaceChildren(...clips.map(c => {
     const b = document.createElement('button');
     b.className = 'b';

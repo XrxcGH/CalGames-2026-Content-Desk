@@ -69,10 +69,16 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
 .btn-go:active { transform: scale(.97); }
 /* Inset, because the chamfer clips an outset ring into nothing. */
 .btn-go:focus-visible { outline: 3px solid var(--cg-black); outline-offset: -6px; }
-.btn-quiet { background: none; border: 2px solid var(--cg-purple-hi); color: var(--cg-white);
+/* --cg-purple-hi on this card measures 1.50:1, and the border is the ONLY
+   boundary these buttons have: no fill, no shadow. So "Edit wording", "Move
+   earlier", "Move later" and "Remove the loaded winner" were white words
+   floating on a card, findable only by reading them. Same value and same
+   reasoning as the input borders above, which were fixed for this already. */
+.btn-quiet { background: none; border: 2px solid var(--cg-white-mute); color: var(--cg-white);
   padding: 11px 18px; cursor: pointer; clip-path: var(--chamfer); --ch: 10px;
   font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   letter-spacing: .1em; text-transform: uppercase; }
+.btn-quiet:hover { border-color: var(--cg-gold); }
 .btn-quiet:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
 /* A disabled control has to LOOK disabled. "Move earlier" on the first award
    of a ceremony, and "Move later" on the last, were pixel-identical to
@@ -120,7 +126,13 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
 .aw-desc { margin: 4px 0 10px; font-size: 14px; line-height: 1.5; color: var(--cg-white-dim); }
 .aw-state { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
   letter-spacing: .12em; text-transform: uppercase; margin-bottom: 8px; }
-.aw-state[data-v="staged"] { color: var(--st-ok); }
+/* --st-ok is the fill green (#0D9B74) and reads 3.55:1 on this card, under
+   the 4.5:1 floor for 13px text. This one line is the whole confirmation that
+   a winner is staged: if the Judge Advisor cannot read it they cannot tell a
+   loaded award from an empty one, which is the only state this page reports.
+   The lightened voice, same mechanism as --st-bad-text and the alliance
+   voices, measures 6.6:1 here. */
+.aw-state[data-v="staged"] { color: var(--st-ok-text); }
 .aw-state[data-v="presented"] { color: var(--cg-gold); }
 .aw-state[data-v="empty"] { color: var(--cg-white-dim); }
 .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }

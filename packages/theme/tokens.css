@@ -77,6 +77,11 @@
      resolved to nothing and rendered plain white: the one line on the page
      whose whole job is to look wrong looked like every other line. */
   --st-bad-text:      #FF6B6B;
+  /* The success green AS TEXT, for the same reason as the red above. --st-ok
+     (#0D9B74) is a fill colour: it reads 3.55:1 on --cg-purple, which is under
+     the 4.5:1 floor for small text, and the Judge Advisor's "Winner loaded"
+     line is 13px. 6.6:1 here. */
+  --st-ok-text:       #2FD3A3;
   --alliance-red-lo:  #7A0F13;
   --alliance-blue-lo: #00375F;
 
@@ -360,6 +365,15 @@
   --focus-ring:     var(--cg-purple);
 }
 
+/* Visually hidden, still announced. Text that carries a fact a sighted
+   operator reads off a colour or a position: which camera is live, which
+   trivia answer was right. Defined here because three pages had already
+   copied it, and the fourth needing it is how a fourth copy happens. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
 /* --------------------------------------------------------------------------
    OPERATOR FOCUS RING: any keyboard-focusable control on an operator surface
    gets a visible ring, even ones that predate this rule (plain buttons,
@@ -598,7 +612,24 @@ html, body {
      first-time host saw one gold button and a row of captions. */
   background: var(--btn-face, var(--cg-purple-hi));
   color: var(--text);
+  /*
+   * An outline, because the face alone is not a shape.
+   *
+   * --btn-face (#331040) measures 1.09:1 against --surface-raised, so a button
+   * resting on a raised panel, which is where the settings page puts Add, Up,
+   * Down and Remove, had no perceptible boundary: the fix that gave buttons
+   * their own face solved the case of sitting on the SUNKEN panel and left
+   * this one. A brighter fill would undo the thing this face is for, which is
+   * that secondary controls rest calm and gold stays reserved for the one that
+   * matters. An outline gives the shape back without raising the voice:
+   * --cg-white-mute reads 3.36:1 on the raised panel, clearing the 3:1 floor
+   * for a non-text boundary.
+   *
+   * clip-path clips a border like everything else here, so it is drawn inset
+   * with a box-shadow rather than as a border, which would also move the box.
+   */
   border: 0;
+  box-shadow: inset 0 0 0 2px var(--cg-white-mute);
   clip-path: var(--chamfer); --ch: 9px;
   padding: 12px 22px;
   font-size: 15px;
@@ -607,7 +638,7 @@ html, body {
               background var(--dur-tap) linear,
               color var(--dur-tap) linear;
 }
-.btn:hover  { background: var(--btn-hover); }
+.btn:hover  { background: var(--btn-hover); box-shadow: inset 0 0 0 2px var(--cg-gold); }
 .btn:active { transform: scale(.96); background: var(--cg-gold-lo); }
 /* Inset: the chamfer clips an outset ring into nothing. See the console
    focus block above. */
@@ -626,6 +657,9 @@ html, body {
  * the same specificity, so .btn:hover placed later would have repainted a
  * gold button purple the moment the cursor touched it.
  */
+/* A gold face is already unmistakable, and a muted ring around it reads as
+   dirt. Primaries and pressed state carry their own shape. */
+.btn--go, .btn[aria-pressed="true"] { box-shadow: none; }
 .btn--go { background: var(--accent); color: var(--text-on-accent); }
 .btn--go:hover { background: var(--cg-gold-hi, var(--accent)); }
 .btn--go:active { background: var(--cg-gold-lo); }

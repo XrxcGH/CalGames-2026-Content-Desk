@@ -256,7 +256,16 @@ function paint(s) {
   }
 
   const q = s.question;
-  $('sub').textContent = `${q.category ?? 'Question'} · ${s.questionIndex + 1} of ${s.questionCount}`;
+  /*
+   * The round, when there is one. The overlay counted through the whole day's
+   * bank, so the gym was told "question 9 of 36" while the host console said
+   * "Round 2, question 3 of 6", and the room had no way to know how much of
+   * the round was left. The bank total is the right answer only when the
+   * questions are not grouped into rounds at all.
+   */
+  $('sub').textContent = s.session
+    ? `${s.session.name} · ${s.session.position} of ${s.session.size}`
+    : `${q.category ?? 'Question'} · ${s.questionIndex + 1} of ${s.questionCount}`;
   $('qText').textContent = q.text;
   const revealed = s.phase === 'revealed';
   $('opts').innerHTML = q.options.map((text, i) => `

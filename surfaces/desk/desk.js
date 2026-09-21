@@ -1222,11 +1222,22 @@ function paintAudio(s) {
     warn = 'The music service is not answering, so the playlist cannot be changed. ' +
       'Clips still play. ' + (s.music.error ?? '');
   }
-  if (warn) { $('audioHint').textContent = warn; $('audioHint').setAttribute('data-warn', ''); }
+  /*
+   * Through setText, and without re-parsing HTML.
+   *
+   * #audioHint is aria-live, and this runs on every audio.updated frame, which
+   * is roughly every five seconds all day. The innerHTML assignment replaced
+   * the region's children even when the sentence was identical, and a replaced
+   * aria-live region is a changed one, so a screen-reader operator heard the
+   * same static sentence about where walk-up files go, every five seconds,
+   * for the length of the event. The warning branch had the same problem, and
+   * a standing warning is exactly the one that must not be re-read forever.
+   */
+  if (warn) { setText($('audioHint'), warn); $('audioHint').setAttribute('data-warn', ''); }
   else {
     $('audioHint').removeAttribute('data-warn');
-    $('audioHint').innerHTML = 'The player runs on the music machine at <b>/s/house</b>. ' +
-      'Walk-up files go in <b>media/audio/walkups</b>, named for the team.';
+    setText($('audioHint'), 'The player runs on the music machine at /s/house. '
+      + 'Walk-up files go in media/audio/walkups, named for the team.');
   }
 }
 
@@ -1490,9 +1501,15 @@ function emergPaint(state) {
   $('emergSection').toggleAttribute('data-live', !!e);
   $('emergState').toggleAttribute('data-live', !!e);
   $('emergState').toggleAttribute('data-failed', !!emergError);
-  $('emergState').textContent = emergError || (e
+  // role="alert" aria-live="assertive", rewritten unguarded on EVERY bus
+  // event. A live safety message therefore interrupted the screen reader
+  // continuously, cutting off whatever the operator was trying to read,
+  // during the one situation where they most need to hear something else.
+  // The raise and the clear still change the string, so the alert still
+  // fires once when it means something.
+  setText($('emergState'), emergError || (e
     ? `LIVE on every screen since ${new Date(e.raisedAt).toLocaleTimeString()}. Clear it when the room is back to normal.`
-    : '');
+    : ''));
 }
 
 async function emergency(body) {
