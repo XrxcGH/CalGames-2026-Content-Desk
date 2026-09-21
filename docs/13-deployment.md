@@ -71,6 +71,24 @@ first that replies with Cheesy Arena's JSON. Somebody's dev server on 8080 does 
 Double-click `START-DESK.cmd` in the desk folder. It restarts in place, keeps your config, and
 picks the field back up.
 
+### Checking the build before you hand it out
+
+    npm run check:launcher
+
+Eighteen seconds. It runs the real build, without the embedded Node copy, and
+then asserts the four things that have actually gone wrong: that the build
+completes at all, that the exe is a Windows GUI binary rather than a console
+one, that `harness.mjs` (the arena writer) is not in the payload, and that the
+desk itself is.
+
+This exists because the launcher is the one deliverable with nothing else
+checking it, and it shipped broken. The change that held `harness.mjs` out of
+the payload used PowerShell's `-replace`, which takes a regular expression,
+with a pattern of a single backslash, which is not one: `build.ps1` threw on
+its first staging loop and produced no exe at all. A syntax check would not
+have caught it, because the file parses and fails at runtime. Only running the
+build catches that, so this runs the build.
+
 ### Stopping it
 
 There is no window to close, on purpose. The launcher is built as a Windows application rather
