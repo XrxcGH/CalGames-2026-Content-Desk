@@ -229,6 +229,12 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px; letter-sp
     <!-- The one control worth having in a pocket: the producer is standing
          next to the announcer when the music needs to stop, not at the desk. -->
     <h2>House audio <small id="audSrc"></small></h2>
+    <!-- The same four warnings the desk derives from this identical snapshot.
+         A toast is the wrong shape for a STANDING condition: it says "Music
+         on" and vanishes, and nothing on the phone ever mentions that no
+         player is armed, so the producer keeps pressing a button that cannot
+         make a sound. This line stays until the condition does. -->
+    <p class="hint" id="audWarn" role="status" hidden></p>
     <div class="grid">
       <button class="b b--go" id="audPlay">Music on</button>
       <button class="b b--warn" id="audPause">Music off</button>
@@ -499,8 +505,20 @@ async function loadScenes() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ scene: name }),
           });
-          if (r.ok) toast(b.textContent);
-          else toast((await r.json()).error ?? 'Failed', true);
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok) toast(body.error ?? 'Failed', true);
+          /*
+           * The route answers 200 and reports whether OBS was actually there:
+           * it emits scene.change on the bus regardless, so the graphics
+           * follow either way, and only reaches the switcher when OBS is
+           * connected. The phone used to toast plain success on r.ok and
+           * light the button 'live', so a producer holding a phone in the
+           * hall believed they had cut to a camera that never moved. Say
+           * which of the two happened.
+           */
+          else if (body.obs === false) {
+            toast(`${b.textContent}: graphics only, OBS is not connected`, true);
+          } else toast(b.textContent);
         } catch (err) {
           toast(`Not cut: ${err.message}`, true);
         }
@@ -542,19 +560,63 @@ async function audio(action, body) {
 // Success toasts fire when the request RESOLVES, not when the finger lands:
 // the optimistic version toasted "Music off" and then, on failure, stacked
 // the error under it: two contradictory toasts back to back.
-$('audPlay').onclick = tap(async () => { if (await audio('play')) toast('Music on'); });
-$('audPause').onclick = tap(async () => { if (await audio('pause')) toast('Music off'); });
-$('audNext').onclick = tap(async () => { if (await audio('next')) toast('Skipped'); });
+// Gated on the snapshot that comes back, not on the request having returned:
+// with no player armed the route answers 200 and nothing plays, and "Music on"
+// over a silent hall is the toast that stops somebody investigating.
+const audioSaid = (snap, ok) => {
+  const warn = snap ? audioWarning(snap) : '';
+  if (warn) toast(warn, true); else toast(ok);
+};
+$('audPlay').onclick = tap(async () => { const s = await audio('play'); if (s) audioSaid(s, 'Music on'); });
+$('audPause').onclick = tap(async () => { const s = await audio('pause'); if (s) audioSaid(s, 'Music off'); });
+$('audNext').onclick = tap(async () => { const s = await audio('next'); if (s) audioSaid(s, 'Skipped'); });
 $('audDuck').onclick = tap(async () => {
   const on = !(audioState?.music?.ducked);
-  if (await audio('duck', { on })) toast(on ? 'Ducked' : 'Back up');
+  const snap = await audio('duck', { on });
+  if (snap) audioSaid(snap, on ? 'Ducked' : 'Back up');
 });
+
+/**
+ * The standing reason the audio buttons might do nothing.
+ *
+ * Kept in step with the desk console's own derivation from the same snapshot
+ * (see audioHint in surfaces/desk/desk.js). The phone had none of it: it
+ * toasted success for every press because the request returned 200, which it
+ * does whether or not anything made a sound.
+ */
+function audioWarning(s) {
+  const armed = s.players?.armed ?? 0;
+  if (s.music?.needsRelink) {
+    return `${s.music.service ?? 'The music service'} needs re-linking on the desk `
+      + 'machine. Clips still play.';
+  }
+  if (armed === 0) {
+    return 'No house player is armed, so nothing here will make a sound. Open '
+      + '/s/house on the music machine and press the button once.';
+  }
+  if (armed > 1) {
+    return `${armed} house players are armed. If one of them is the machine OBS `
+      + 'captures, the music is going to the stream. Close the other one.';
+  }
+  if (s.music?.configured && s.music.linked && !s.music.reachable) {
+    return 'The music service is not answering, so the playlist cannot be changed. '
+      + 'Clips still play.';
+  }
+  return '';
+}
 
 function paintAudio(s) {
   if (!s) return;
   audioState = s;
   const label = { playlist: 'playlist', clip: 'walk-up', console: 'game audio', silent: 'silent' };
   $('audSrc').textContent = label[s.source] ?? '';
+
+  const warn = audioWarning(s);
+  const warnEl = $('audWarn');
+  // Diff-guarded: this repaints on every audio frame, and a role="status"
+  // rewritten with an identical string re-announces it.
+  if (warnEl.textContent !== warn) warnEl.textContent = warn;
+  warnEl.hidden = !warn;
   $('audDuck').classList.toggle('b--go', !!s.music?.ducked);
 
   // Walk-ups only on the phone. A stinger is a desk decision; a walk-up is

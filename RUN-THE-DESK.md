@@ -18,6 +18,7 @@ minutes end to end; your chapter takes ten.
 
 | If you are... | Read chapters |
 | --- | --- |
+| **The only volunteer** | 1, 1a, 2, 6 |
 | Setting up on Friday | 1, 2, 3, 4, 5 |
 | **Desk manager / producer** | 1, 2, 6, 7, 11 |
 | **On-air talent** (announcing, analysis, interviews) | 1, 2, 8 |
@@ -60,7 +61,10 @@ address, and a screen appears.
 
 ### The three jobs
 
-At minimum this show runs with three people. More is better; three is enough.
+Three people is the comfortable shape of this show, and the rest of this guide
+is written for it. It is not a floor: one person can run it, and chapter 1a is
+how. Read this section anyway, because it says what each job is for, and a
+one-person crew is doing all three.
 
 **Desk manager (producer).** Sits at the desk laptop. Drives the graphics,
 switches cameras, keeps the show moving. If there is only one person who knows
@@ -73,9 +77,78 @@ showing the talent view, which tells them everything they need to say.
 up, is the stream live, is the recording running. Checks the pre-show list in
 chapter 3 and fixes what it flags.
 
-If you have more people, the next two to add are a **dedicated switcher** (so
-the desk manager stops cutting cameras) and a **second talent** (so the
-announcer has somebody to talk to). After that, a replay operator.
+**Adding people.** The jobs above are the first three. After them, in order:
+a **dedicated switcher** (so the desk manager stops cutting cameras), a
+**second talent** (so the announcer has somebody to talk to), a **replay
+operator**, then the trivia host and the arcade scorer.
+
+Each one takes over a console that already exists, so nobody has to be
+retrained and nothing has to be reconfigured: hand them the address, give them
+the event PIN, and they open a page. A volunteer who turns up at lunchtime can
+be useful within five minutes. The consoles stay in step with each other
+because they all read the same desk, so two people never have to agree about
+anything by talking.
+
+---
+
+## Chapter 1a · If you are the only one here
+
+It happens. Two people said yes and neither arrived, or they are both in the
+pits fixing a robot. This chapter is the whole show, run by one person, and it
+is deliberately short because you are busy.
+
+**The show still works.** Nothing in this program needs a second operator.
+Every automatic behaviour the desk has exists for exactly this: the screens
+follow the match on their own, the score bar follows the field, the side
+screens rotate by themselves, and the "when does my team play?" page answers
+parents without you.
+
+**Do these four things before doors.**
+
+1. **Arm every cue.** Open **Show automation** on the desk console and press
+   **Arm every cue**. This is the opposite of the advice in chapter 6, which
+   tells you to watch each cue be right first, and that advice assumes three
+   people. Alone, you want the desk cutting cameras and ducking music by
+   itself, because the alternative is that nobody does it. You can still take
+   anything by hand.
+2. **Put the side screens and the pit TVs on first.** They run unattended all
+   day. Chapter 5.
+3. **Run the doors check** and fix what it flags, because nobody else will
+   notice later. Chapter 3.
+4. **Decide what you are not doing** (below) and do not open those pages.
+
+**What to run, and what to leave shut.**
+
+| Open it | Leave it shut |
+| --- | --- |
+| The desk console | The replay console |
+| The talent view, if you are announcing | The telestrator pad |
+| | The trivia host and arcade consoles |
+| | The team media page |
+
+Leaving a console shut costs nothing. Nothing breaks, nothing queues up
+waiting, and no screen goes blank because a page is not open: every surface
+reads the desk, and the desk is running. The replay console in particular is
+pure upside when staffed and pure distraction when not.
+
+**The one thing to plan for: the awards ceremony.** This is the only part of
+the weekend where being alone is genuinely harder, because the Judge Advisor
+has to hand you their code and the ceremony has a rhythm you cannot pause.
+Read chapter 6's awards section before doors, not during. Stage nothing
+yourself: the JA loads the winners from their own tablet, and all you do is
+press **Show** and then **Reveal** when the announcer says the winner's name.
+
+**Things that will feel wrong, and are fine.**
+
+- Nobody is cutting cameras between matches. The cues are. Let them.
+- The announcer is you, and you are also driving. Put the delay card up
+  (chapter 6) and take ten seconds. An explained pause reads as process.
+- You will miss a replay. There is no replay operator. This costs the show
+  nothing that the audience will notice.
+
+**If a second person turns up**, hand them the replay console first: it is the
+job with the best ratio of value to instruction, and chapter 7 explains it in
+two minutes. After that, the talent view.
 
 ---
 

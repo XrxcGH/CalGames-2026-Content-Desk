@@ -74,6 +74,16 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus-rin
   font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   letter-spacing: .1em; text-transform: uppercase; }
 .btn-quiet:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
+/* A disabled control has to LOOK disabled. "Move earlier" on the first award
+   of a ceremony, and "Move later" on the last, were pixel-identical to
+   working ones: the Judge Advisor presses, nothing happens, and the only
+   reading available is that the page is broken. The console fleet already
+   has this rule in tokens.css; this page declares no data-surface, so it
+   cannot inherit it. Dashed as well as faded, so the state is not resting on
+   opacity alone. */
+.btn-quiet:disabled, .btn-go:disabled {
+  opacity: .45; cursor: not-allowed; border-style: dashed;
+}
 
 /* The literal fallback is load-bearing, not belt-and-braces. --st-bad-text is
    declared only under :root[data-surface="console"], and this page carries no
@@ -442,6 +452,23 @@ function awardCard(a, order, lastInDay) {
       team.inputMode = 'numeric';
       const save = goBtn(a.staged ? 'Replace' : 'Load winner');
       save.classList.add('act');
+      /*
+       * Enter loads the winner.
+       *
+       * These cards are not inside a <form>, so the Go key on a tablet
+       * keyboard did nothing at all. That keyboard covers the bottom half of
+       * the screen, which is where the button is, so the Judge Advisor's
+       * options were to dismiss the keyboard and then press Load winner, or
+       * to press Go and believe it had saved. This page is used on a tablet,
+       * one-handed, by somebody reading names off a sheet.
+       */
+      for (const field of [winner, team]) {
+        field.addEventListener('keydown', e => {
+          if (e.key !== 'Enter' || save.disabled) return;
+          e.preventDefault();
+          save.click();
+        });
+      }
       save.onclick = async () => {
         try {
           await api({ action: 'stage', id: a.id, winner: winner.value.trim(),
