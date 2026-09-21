@@ -382,9 +382,18 @@
   outline-offset: -6px;
 }
 /* And on a gold pressed face the gold ring vanishes a second way (1.27:1).
-   Black on gold is 10.84:1. */
+   Black on gold is 10.84:1.
+
+   .btn--go is here for the same reason and could not fix itself. It sets
+   `outline-color: var(--cg-black)` further down this file, but that selector
+   is two simple selectors against this rule's three, so on a console the gold
+   won and every primary action on every operator surface, which is exactly
+   the button a keyboard operator tabs to first, had a gold ring on a gold
+   face. Specificity, not source order: moving it later would not have helped. */
 :root[data-surface="console"] .btn[aria-pressed="true"]:focus-visible,
-:root[data-surface="light"] .btn[aria-pressed="true"]:focus-visible {
+:root[data-surface="light"] .btn[aria-pressed="true"]:focus-visible,
+:root[data-surface="console"] .btn--go:focus-visible,
+:root[data-surface="light"] .btn--go:focus-visible {
   outline-color: var(--cg-black);
 }
 

@@ -244,3 +244,31 @@ test('obs-websocket v5 auth follows the documented four steps', () => {
   assert.notEqual(sign(password, challenge, salt), expected);
   assert.match(sign(password, salt, challenge), /^[A-Za-z0-9+/]{43}=$/, 'base64 sha256');
 });
+
+test('needsObs agrees with what each cue actually does', () => {
+  /*
+   * The desk greys out "Run now" for cues that cannot work with OBS away, and
+   * it used to grey out every cue instead, under a notice explaining why in
+   * terms that were not true of most of the buttons it was disabling: the
+   * three music cues and the end game chip never touch OBS. A desk running
+   * the show on the venue projectors with no stream at all had show
+   * automation it could not fire by hand.
+   *
+   * The flag is declared per cue, so it can drift from the code beside it.
+   * Read each `run` back and let the two argue here rather than at the event,
+   * where the symptom is a button that does nothing and a reason that is
+   * false.
+   */
+  for (const cue of defaultCues()) {
+    const callsScene = /\bctx\s*\.\s*scene\s*\(/.test(cue.run.toString());
+    assert.equal(!!cue.needsObs, callsScene,
+      `${cue.id}: needsObs is ${!!cue.needsObs} but run() ${callsScene ? 'does' : 'does not'} call ctx.scene`);
+  }
+
+  // And the split is real, so a future refactor that marks them all one way
+  // fails here instead of quietly restoring the bug.
+  const cues = defaultCues();
+  assert.ok(cues.some(c => c.needsObs), 'some cues drive OBS');
+  assert.ok(cues.some(c => !c.needsObs),
+    'and some do not: those stay runnable by hand with OBS disconnected');
+});

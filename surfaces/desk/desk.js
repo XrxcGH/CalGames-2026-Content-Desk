@@ -1907,6 +1907,29 @@ $('tmClear').onclick = async () => {
 // and nothing on this console said cues existed. The desk has to be able to
 // run the whole show by itself.
 let cueSig = '';
+/*
+ * Until when the note belongs to something the operator just did.
+ *
+ * "Run now" set the note to "ran it" and then, two lines later in the same
+ * function, forced a repaint that overwrote it with the standing armed count.
+ * The confirmation existed for about as long as a network round trip, so the
+ * one button on this panel that does something irreversible looked like it
+ * had done nothing, and the honest response to that is to press it again.
+ */
+let cueNoteHeldUntil = 0;
+
+/** Say something back, and keep it on screen long enough to be read. */
+function cueSay(msg) {
+  setText($('cueNote'), `· ${msg}`);
+  cueNoteHeldUntil = Date.now() + 4000;
+  setTimeout(() => { cueSig = ''; void loadCues(); }, 4100);
+}
+
+/** The standing note: suppressed while a reply to the operator is up. */
+function cueStandingNote(text) {
+  if (Date.now() < cueNoteHeldUntil) return;
+  setText($('cueNote'), text);
+}
 
 async function loadCues() {
   try {
@@ -1928,7 +1951,7 @@ function paintCues({ available, obs, cues = [] }) {
   const disarmAll = $('cueDisarmAll');
 
   if (!available) {
-    setText($('cueNote'), '· off');
+    cueStandingNote('· off');
     box.innerHTML = '<p class="hint" style="padding:8px">Show automation is not running '
       + 'on this desk. Everything still works by hand; nothing is missing from the show.</p>';
     armAll.disabled = true;
@@ -1936,7 +1959,7 @@ function paintCues({ available, obs, cues = [] }) {
     return;
   }
   if (!cues.length) {
-    setText($('cueNote'), '· none configured');
+    cueStandingNote('· none configured');
     box.innerHTML = '<p class="hint" style="padding:8px">No cues are configured on this '
       + 'desk. They are set up before the event, in config.json on this machine.</p>';
     armAll.disabled = true;
@@ -1945,13 +1968,36 @@ function paintCues({ available, obs, cues = [] }) {
   }
 
   const armed = cues.filter(c => c.autopilot).length;
-  setText($('cueNote'), `· ${armed} of ${cues.length} armed`);
+  cueStandingNote(`· ${armed} of ${cues.length} armed`);
   armAll.disabled = armed === cues.length;
   disarmAll.disabled = armed === 0;
 
-  // A cue that drives OBS cannot do anything while OBS is away. Say so once,
-  // here, rather than letting every press fail quietly.
-  const obsDown = obs && obs.attached && !obs.connected;
+  /*
+   * A cue that drives OBS cannot do anything while OBS is away. It used to
+   * disable Run now on EVERY cue, under a notice explaining why: but the
+   * three music cues and the end game chip never touch OBS, so a desk running
+   * the show on the venue projectors with no stream had four working cues it
+   * could not fire by hand, and a reason printed underneath that was false of
+   * all four. The engine now says which cues need it (see Cue.needsObs).
+   */
+  const obsDown = !!(obs && obs.attached && !obs.connected);
+  const blocked = obsDown ? cues.filter(c => c.needsObs).length : 0;
+
+  /*
+   * Where the keyboard was, so it can be put back.
+   *
+   * This list repaints on a poll, and the signature it diffs against includes
+   * counters that move as the show runs: "would have run 3x" becomes 4x and
+   * the whole list is rebuilt under the operator. replaceChildren destroys
+   * the focused button, so focus falls to <body> and the next Tab starts from
+   * the top of a twenty-section console. On a console whose first line of
+   * documentation is "keyboard-first", a panel that throws the keyboard out
+   * every fifteen seconds is not usable by the people it was built for.
+   */
+  const wasFocused = document.activeElement;
+  const restore = wasFocused && box.contains(wasFocused) && wasFocused.dataset.cue
+    ? { cue: wasFocused.dataset.cue, act: wasFocused.dataset.act }
+    : null;
 
   box.replaceChildren(...cues.map(c => {
     const row = document.createElement('div');
@@ -1988,25 +2034,42 @@ function paintCues({ available, obs, cues = [] }) {
     toggle.title = c.autopilot
       ? `Stop ${c.name} running by itself. It still counts what it would have done.`
       : `Let ${c.name} run by itself from now on.`;
+    toggle.dataset.cue = c.id;
+    toggle.dataset.act = 'toggle';
     toggle.onclick = () => void cueAction(c.id, c.autopilot ? 'disarm' : 'arm');
 
     const fire = document.createElement('button');
     fire.className = 'btn';
     fire.textContent = 'Run now';
-    fire.title = `Run ${c.name} once, right now, whatever it is set to.`;
-    fire.disabled = !!obsDown;
+    const stuck = obsDown && c.needsObs;
+    fire.title = stuck
+      ? `${c.name} cuts an OBS scene, and OBS is not connected.`
+      : `Run ${c.name} once, right now, whatever it is set to.`;
+    fire.disabled = stuck;
+    fire.dataset.cue = c.id;
+    fire.dataset.act = 'fire';
     fire.onclick = () => void cueAction(c.id, 'fire');
 
     row.append(who, toggle, fire);
     return row;
   }));
 
-  if (obsDown) {
+  if (restore) {
+    const back = box.querySelector(
+      `[data-cue="${CSS.escape(restore.cue)}"][data-act="${restore.act}"]`);
+    // Not if it came back disabled: focusing a disabled button silently does
+    // nothing, which is the same dead keyboard by another route.
+    if (back && !back.disabled) back.focus();
+  }
+
+  if (blocked) {
     const warn = document.createElement('p');
     warn.className = 'hint';
     warn.style.padding = '8px';
-    warn.textContent = 'OBS is not connected, so Run now is off. Arming still works: '
-      + 'a cue armed now starts working the moment OBS comes back.';
+    warn.textContent = `OBS is not connected, so Run now is off for the ${blocked} `
+      + `cue${blocked === 1 ? '' : 's'} that cut a scene. The rest still run by hand, `
+      + 'and arming works for all of them: a cue armed now starts working the '
+      + 'moment OBS comes back.';
     box.append(warn);
   }
 }
@@ -2016,11 +2079,12 @@ async function cueAction(id, action) {
     const res = await fetch(`/api/cues/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
     const out = await res.json();
     if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
-    if (action === 'fire') setText($('cueNote'), '· ran it');
     cueSig = '';            // force the next paint
     await loadCues();
+    // After the repaint, not before it: the repaint writes this same element.
+    if (action === 'fire') cueSay('ran it');
   } catch (err) {
-    setText($('cueNote'), `· ${err.message}`);
+    cueSay(err.message);
   }
 }
 

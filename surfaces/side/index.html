@@ -126,11 +126,24 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
    would be five times the height the panel owns. The floor governs one-line
    facts (a deck row, a ranking); it cannot govern a paragraph. */
 .slide-body {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
+  /* The same two guards .note-body carries, and for the same reason. A flex
+     item's min-height is `auto`, which refuses to shrink below its content,
+     so a six-line slide did not overflow inside the panel: it grew the panel
+     and ran 38px off the bottom of the stage, measured. The pit TV shows
+     1080 and no more, so the last line of the volunteer list was simply not
+     on the television. `overflow: hidden` is the backstop under the fit
+     steps below, not the plan. */
+  flex: 1; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 18px; text-align: center; padding: 0 60px;
   font-family: var(--font-display); font-weight: 700; font-size: 52px;
   line-height: 1.2;
 }
+/* Steps down rather than clipping, the way a long note does. A recognition
+   slide is read off a pit TV from a few feet away, not across the gym, and
+   the names on it are the whole point of putting it up. */
+.slide-body[data-fit="1"] { font-size: 44px; }
+.slide-body[data-fit="2"] { font-size: 37px; }
 .slide-body .sl-line { max-width: 100%; overflow-wrap: anywhere; }
 /* The attribution line on a shout-out reads quieter than the message, and
    ONLY on a shout-out. Unscoped, this demoted the last line of every slide to
@@ -459,6 +472,25 @@ function showSlide() {
     div.textContent = line;
     return div;
   }));
+  fitSlide();
+}
+
+/**
+ * Step a long slide down until it fits the panel it is in.
+ *
+ * Same shape as fitNote, and missing for the same reason it was needed: a
+ * slide carries up to six author-written lines, and at 52px six of them
+ * measured 839px against the 801px this panel owns, so the list ran off the
+ * bottom of the screen. Measured after the lines are in the DOM, because
+ * scrollHeight on an empty box is zero and would report that everything fits.
+ */
+function fitSlide() {
+  const el = $('slideBody');
+  el.removeAttribute('data-fit');
+  for (const step of ['1', '2']) {
+    if (el.scrollHeight <= el.clientHeight) break;
+    el.dataset.fit = step;
+  }
 }
 
 // ---- the event timer --------------------------------------------------------

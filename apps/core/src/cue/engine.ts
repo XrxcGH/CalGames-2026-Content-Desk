@@ -36,6 +36,19 @@ export interface Cue {
   name: string;
   /** What the producer sees when deciding whether to trust it. */
   does: string;
+  /**
+   * True when `run` calls `ctx.scene`, so the cue cannot do its job with OBS
+   * away. The desk greys out "Run now" for these and only these: it used to
+   * grey out ALL of them whenever OBS was disconnected, including the three
+   * music cues and the end game chip, which never touch OBS at all. A desk
+   * running the show on the venue projectors with no stream had show
+   * automation it could not run by hand, under a notice that said why in
+   * terms that were not true of the button it was greying out.
+   *
+   * Declared rather than sniffed, and kept honest by a test that reads each
+   * `run` back and fails if the two disagree.
+   */
+  needsObs?: boolean;
   when: (ev: DeskEvent, state: DeskState) => boolean;
   run: (ctx: CueContext) => void | Promise<void>;
 }
@@ -44,6 +57,8 @@ export interface CueStatus {
   id: string;
   name: string;
   does: string;
+  /** See Cue.needsObs: whether "Run now" can work with OBS disconnected. */
+  needsObs: boolean;
   autopilot: boolean;
   firedAt: number | null;
   /** Times it matched while switched off ("it would have been right N times"). */
@@ -75,6 +90,7 @@ export function defaultCues(): Cue[] {
   return [
     {
       id: 'on-deck',
+      needsObs: true,
       name: 'On deck',
       does: 'Show the alliance overview when a match is loaded.',
       when: ev => ev.type === 'match.loaded',
@@ -87,6 +103,7 @@ export function defaultCues(): Cue[] {
     },
     {
       id: 'armed',
+      needsObs: true,
       name: 'Armed',
       does: 'Cut to the field and bring the score bar in when the field goes ready, before the countdown.',
       when: ev => ev.type === 'match.armed',
@@ -97,6 +114,7 @@ export function defaultCues(): Cue[] {
     },
     {
       id: 'live',
+      needsObs: true,
       name: 'Live',
       does: 'Score bar live, hub indicator on, replay markers armed.',
       when: ev => ev.type === 'match.start',
@@ -161,6 +179,7 @@ export function defaultCues(): Cue[] {
     },
     {
       id: 'hold-celebration',
+      needsObs: true,
       name: 'Hold on the buzzer',
       does: 'Re-take the field wide at the buzzer so the celebration stays on air until the score reveal cues.',
       when: ev => ev.type === 'match.end',
@@ -168,6 +187,7 @@ export function defaultCues(): Cue[] {
     },
     {
       id: 'result',
+      needsObs: true,
       name: 'Score reveal',
       does: 'Reveal the final score, RP badges, and ranking movement.',
       when: ev => ev.type === 'match.score_posted',
@@ -178,6 +198,7 @@ export function defaultCues(): Cue[] {
     },
     {
       id: 'replay',
+      needsObs: true,
       name: 'Take replay',
       does: 'Cut to the replay scene when the operator takes a clip.',
       when: ev => ev.type === 'replay.play',
@@ -185,6 +206,7 @@ export function defaultCues(): Cue[] {
     },
     {
       id: 'gap-filler',
+      needsObs: true,
       name: 'Fill the gap',
       does: 'Cut to the arcade when there is no match for three minutes.',
       // Deliberately not keyed to a specific event type: the moment that
@@ -246,7 +268,7 @@ export class CueEngine {
 
   get status(): CueStatus[] {
     return this.#cues.map(c => ({
-      id: c.id, name: c.name, does: c.does,
+      id: c.id, name: c.name, does: c.does, needsObs: !!c.needsObs,
       autopilot: this.#autopilot.get(c.id) ?? false,
       firedAt: this.#firedAt.get(c.id) ?? null,
       wouldHaveFired: this.#would.get(c.id) ?? 0,

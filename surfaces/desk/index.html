@@ -31,7 +31,14 @@ body { font-size: var(--font-ui-body); }
      every fill to white: every dot printed white on white, so the sheet a
      volunteer walks the venue with before doors carried no pass or fail
      marks at all. The level WORD on each row is what prints. */
-  #vitalsSection .vdot, #vitalsSection .v i { display: none !important; }
+  /* `visibility`, NOT `display`. Each row is a four-column grid whose first
+     column is this 14px swatch, so `display: none` took the cell with it and
+     slid the other three one place left: the level word landed in the 14px
+     column and printed squeezed to nothing, the check name took its place,
+     and the last column emptied. The sheet a volunteer walks the venue with
+     before doors was a grid that no longer lined up with its own headings.
+     Hidden-but-present keeps the cell and still prints nothing. */
+  #vitalsSection .vdot, #vitalsSection .v i { visibility: hidden !important; }
 }
 
 /* Under the injected nav strip, not underneath it: nav.js publishes its
