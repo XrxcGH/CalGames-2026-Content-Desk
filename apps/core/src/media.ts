@@ -210,6 +210,32 @@ export class MediaLibrary {
    * A separate accessor rather than a filter at each call site, because there
    * are several call sites and the one that gets forgotten is the one on air.
    */
+  /**
+   * Sample robot cutouts for a beta test, in memory only.
+   *
+   * #manifest is rebuilt from disk on every load() and is only written by
+   * ingest(), so nothing here reaches media/teams. The src values point at
+   * the server's synthetic /sample/robot route rather than at a file, which
+   * is what keeps this honest: there is no invented photograph of a real
+   * team's robot anywhere on disk, and the placeholder is visibly a
+   * placeholder.
+   *
+   * Sized past AIRABLE_MIN_EDGE on purpose, because the point of seeding
+   * these at all is to prove the photo path works end to end rather than to
+   * watch the tier-3 fallback that every team without a photo already gets.
+   */
+  seedSample(teams: number[]): void {
+    for (const team of teams) {
+      this.#manifest[team] = {
+        team, version: 1, w: 1200, h: 900,
+        src: `/sample/robot/${team}.svg`,
+        uploadedAt: Date.now(),
+        warnings: ['Sample placeholder, not a photograph of this team.'],
+        consent: 'granted',
+      };
+    }
+  }
+
   get airable(): Manifest {
     const out: Manifest = {};
     for (const [team, m] of Object.entries(this.#manifest)) {

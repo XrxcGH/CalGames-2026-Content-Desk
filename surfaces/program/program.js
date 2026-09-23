@@ -916,7 +916,26 @@ function paintSlide(slide) {
 }
 
 function paintCardCall(call) {
-  if (!call) return;
+  /*
+   * Clear the plate rather than leaving the markup's defaults on it.
+   *
+   * This used to return early, and the markup shipped with a chip reading
+   * "Yellow card" over a team number of "0". So taking the card call screen
+   * with no card active put "YELLOW CARD / 0" on the program feed: a penalty
+   * against a team that does not exist, in the graphic whose entire job is to
+   * name who was penalised and why. The markup carries no numbers now either,
+   * so a first paint before any state arrives shows nothing rather than
+   * something wrong.
+   */
+  if (!call) {
+    const blank = $('ccPlate');
+    delete blank.dataset.color;
+    $('ccChip').textContent = '';
+    $('ccTeam').textContent = '';
+    $('ccName').textContent = '';
+    $('ccReason').textContent = '';
+    return;
+  }
   const plate = $('ccPlate');
   plate.dataset.color = call.color;
   $('ccChip').textContent = call.color === 'red' ? 'Red card' : 'Yellow card';

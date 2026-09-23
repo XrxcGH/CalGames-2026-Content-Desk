@@ -118,6 +118,24 @@ export class ProfileBook {
     return p ? withDisplay(p) : null;
   }
 
+  /**
+   * Sample people for a beta test, in memory only.
+   *
+   * #save() is the only thing that writes data/profiles.json and nothing here
+   * calls it, so the book on disk is untouched. A restart clears these.
+   *
+   * The on-camera profile book holds real people's names, which is exactly
+   * why sample names must never reach it: a test that persisted three
+   * invented analysts would leave somebody reading them off a real lower
+   * third weeks later.
+   */
+  seedSample(list: Profile[]): void {
+    for (const [id] of this.#profiles) {
+      if (id.startsWith('sample-')) this.#profiles.delete(id);
+    }
+    for (const p of list) this.#profiles.set(p.id, p);
+  }
+
   async load(): Promise<void> {
     try {
       const raw = JSON.parse(await readFile(this.#file, 'utf8')) as Profile[];

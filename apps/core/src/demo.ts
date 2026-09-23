@@ -10,6 +10,10 @@
 import type { EventBus } from './bus.ts';
 import type { ArcadeStore } from './arcade/store.ts';
 import type { TriviaStore } from './trivia/store.ts';
+import type { Slides, Slide } from './slides.ts';
+import type { ProfileBook, Profile } from './profiles.ts';
+import type { MediaLibrary } from './media.ts';
+import type { CardLedger } from './cards.ts';
 import { REBUILT, type Alliance, type RankingRow, type UpcomingMatch } from './types.ts';
 
 // Every demo emission carries this one tag, so a simulated match can never
@@ -17,6 +21,55 @@ import { REBUILT, type Alliance, type RankingRow, type UpcomingMatch } from './t
 // index.ts additionally refuses --demo alongside --cheesy and keeps demo
 // matches out of the publish auto-queue.
 const DEMO_SOURCE = 'demo';
+
+/*
+ * Everything below says SAMPLE on its face.
+ *
+ * Not decoration. Sample data exists to be put on screens, and a screen is
+ * the one place where the difference between a test and the event stops being
+ * recoverable. If any of this ever reaches a projector by accident, the room
+ * should be able to tell at a glance, without knowing anything about how the
+ * desk works.
+ */
+
+const SAMPLE_SLIDES: Slide[] = [
+  {
+    id: 'sample-shoutout', kind: 'shoutout',
+    title: 'Sample shout-out',
+    lines: [
+      'This is sample data, not a real submission',
+      'Approved shout-outs from the stands look like this',
+    ],
+  },
+  {
+    id: 'sample-recognition', kind: 'recognition',
+    title: 'Sample recognition',
+    lines: ['This is sample data', 'Thanking the setup crew looks like this'],
+  },
+  {
+    id: 'sample-info', kind: 'info',
+    title: 'Sample notice',
+    lines: ['This is sample data', 'Lunch, a schedule change, a lost phone'],
+  },
+];
+
+const SAMPLE_PROFILES: Profile[] = [
+  {
+    id: 'sample-analyst', name: 'Sample Analyst', role: 'Analyst',
+    team: null, student: false, display: 'Sample Analyst',
+    lastUsedAt: 0, uses: 0,
+  },
+  {
+    id: 'sample-host', name: 'Sample Host', role: 'Host',
+    team: null, student: false, display: 'Sample Host',
+    lastUsedAt: 0, uses: 0,
+  },
+  {
+    id: 'sample-student', name: 'Sample Student', role: 'Team captain',
+    team: 846, student: true, display: 'Sample S.',
+    lastUsedAt: 0, uses: 0,
+  },
+];
 
 const RED = [
   { number: 846, name: 'The Funky Monkeys' },
@@ -184,6 +237,20 @@ function seedSelection(bus: EventBus): void {
 export interface DemoExtras {
   arcade?: ArcadeStore;
   trivia?: TriviaStore;
+  /**
+   * The file-backed stores.
+   *
+   * Each one gets its sample content through a seedSample() method that
+   * writes ONLY to memory. None of them touch data/slides.json,
+   * data/profiles.json or media/teams, and that is the whole point: this
+   * project has already shipped test residue into the live slides and profile
+   * files, where it sat afterwards looking like real shout-outs somebody had
+   * approved and real people somebody had put on camera.
+   */
+  slides?: Slides;
+  profiles?: ProfileBook;
+  media?: MediaLibrary;
+  cards?: CardLedger;
 }
 
 /**
@@ -205,9 +272,122 @@ export interface DemoExtras {
  * arrives estimated and the graphics draw it outlined, which is the overlay's
  * existing way of saying "this is a guess".
  */
+/**
+ * Fill the CONTENT stores with sample material, in memory only.
+ *
+ * Separate from the bus events below because these are catalogues rather than
+ * moments: the slide deck the side screens rotate, the people the lower third
+ * can name, the robot photos the overview looks up. A screen that switches to
+ * them needs them to already exist.
+ *
+ * Every one of these goes through a seedSample() that writes only to memory.
+ * Nothing here reaches data/slides.json, data/profiles.json or media/teams.
+ */
+function seedContent(extras: DemoExtras): void {
+  extras.slides?.seedSample(SAMPLE_SLIDES);
+  extras.profiles?.seedSample(SAMPLE_PROFILES);
+  // Two of the six, deliberately. Most teams at an offseason have no photo
+  // and get the tier-3 plinth, so an overview where every robot has a picture
+  // would be a prettier lie than the one the event will actually show.
+  extras.media?.seedSample([846, 971]);
+}
+
+/**
+ * Everything a screen needs in order not to be blank.
+ *
+ * The complaint this answers: after running the exe there is no field, no
+ * arena and no event, so most surfaces render an empty state and nobody can
+ * confirm the desk works. seedStatic covered rankings, the queue, the arcade,
+ * trivia and alliance selection, which is about a third of DeskState.
+ *
+ * TWO THINGS ARE DELIBERATELY NOT SEEDED.
+ *
+ * The status card, the emergency message and the countdown timer are all
+ * TAKEOVERS: the first two paint over whatever screen is up, and the timer
+ * replaces the side screen's whole rotation ("A TAKEOVER, not a pane", says
+ * the surface itself). Seeding any of them would hide the very content a
+ * beta test is trying to look at, for as long as it ran. All three are one
+ * button away on the desk console, so they are already testable, and unlike
+ * a slide or a sponsor they need no catalogue to exist first.
+ *
+ * And no award winner, ever. The winner is the one secret the whole
+ * architecture exists to keep, and it does not enter the bus before the
+ * reveal even in a sample.
+ */
+function seedScreens(bus: EventBus, matchNumber: number): void {
+  const emit = (type: string, payload: unknown): void => {
+    bus.emit({ type: type as never, source: DEMO_SOURCE, payload: payload as never });
+  };
+
+  // Who is on camera, and the name under them.
+  emit('lower_third.show', {
+    name: 'Sample Analyst', role: 'Analyst', kind: 'person',
+  });
+  emit('panel.show', {
+    title: 'Sample analysis desk',
+    people: [
+      { name: 'Sample Analyst', role: 'Analyst', team: null },
+      { name: 'Sample S.', role: 'Team captain', team: 846 },
+    ],
+  });
+
+  // The sponsor plate. Named as a sample, because the whole purpose of this
+  // screen is to show somebody's name and getting that wrong on air is the
+  // one mistake a sponsor actually notices.
+  emit('sponsor.show', {
+    id: 'sample-sponsor', name: 'Sample Sponsor',
+    line: 'This is sample data, not a real sponsor', logo: null,
+  });
+
+  // A slide, so the deck and the slide screen both have something.
+  emit('slide.show', SAMPLE_SLIDES[0]);
+
+  // Discipline: a card on a team, and the card-call screen that explains it.
+  emit('card.issued', {
+    team: 253, alliance: 'red', color: 'yellow', match: `Qualification ${matchNumber}`,
+  });
+  emit('card.call', {
+    team: 253, alliance: 'red', color: 'yellow',
+    reason: 'Sample card call, not a real penalty',
+  });
+
+  // The queuers, the room, and the clock.
+  emit('queue.updated', { nowQueuing: `Qualification ${matchNumber + 1}` });
+  emit('announcement.posted', {
+    text: 'This is sample data. Announcements from the event appear here.',
+    from: 'Sample',
+  });
+
+  /*
+   * An award ON THE PLATE, with no winner.
+   *
+   * award.show carries the title, the description and the on-air blurb and
+   * NOTHING ELSE: the winner appears for the first time at award.presented,
+   * at the moment it stops being a secret. That split is the single most
+   * load-bearing thing in this codebase, so the sample exercises the safe
+   * half of it and leaves the other half alone.
+   */
+  emit('award.show', {
+    id: 'sample-award',
+    title: 'Sample Award',
+    description: 'This is sample data. A real award description appears here.',
+    blurb: 'Presented to nobody, because this is a test.',
+  });
+
+  // How late the day is running, so the side screens and the pit monitor have
+  // a pace line rather than an empty one.
+  emit('pace.updated', {
+    cycleSec: 7 * 60,
+    nextStartAt: Date.now() + 6 * 60_000,
+    behindMin: 6,
+    lastStartAt: Date.now() - 60_000,
+  });
+}
+
 export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
   const matchNumber = 42;
   seedStatic(bus, extras, matchNumber);
+  seedContent(extras);
 
   bus.emit({
     type: 'match.loaded', source: DEMO_SOURCE,
@@ -215,6 +395,9 @@ export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
       id: `q${matchNumber}`,
       displayName: `Qualification ${matchNumber}`,
       red: RED, blue: BLUE,
+      // A surrogate, because the mark that says "this one does not count for
+      // their record" is otherwise impossible to see without a real schedule.
+      surrogates: [253],
     },
   });
   bus.emit({ type: 'match.start', source: DEMO_SOURCE });
@@ -225,8 +408,29 @@ export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
       blue: { autoFuel: 36, teleopFuel: 58, autoTower: 15, teleopTower: 20, fouls: 5 },
     },
   });
-  console.log('[sample] every surface seeded with sample data, tagged '
-    + `"${DEMO_SOURCE}" so it cannot pass for the field`);
+
+  // AFTER the match loads, not before. match.loaded deliberately clears
+  // per-match state (the card call among it), so anything seeded ahead of it
+  // was wiped by the very next event and the screens stayed empty.
+  seedScreens(bus, matchNumber);
+
+  /*
+   * Land the program on the match, with no hold.
+   *
+   * Several of the events above take the screen on purpose: slide.show pins
+   * it and sets screenHold, sponsor.show and card.call move it too. Left
+   * there, the sample would open on whichever of them happened to be last,
+   * held, with the match hidden behind it.
+   *
+   * Two events: the first puts the screen on the match, the second releases
+   * the hold so the desk's own automation can take it from there.
+   */
+  bus.emit({ type: 'screen.change', source: DEMO_SOURCE, payload: { screen: 'match' } });
+  bus.emit({ type: 'screen.change', source: DEMO_SOURCE, payload: { screen: 'auto' } });
+
+  console.log('[sample] sample data seeded on every surface, tagged '
+    + `"${DEMO_SOURCE}" so it cannot pass for the field. Nothing was written `
+    + 'to disk: a restart clears it.');
 }
 
 /** The parts that are the same whether this is a one-shot seed or the loop. */
@@ -257,6 +461,11 @@ export function startDemo(bus: EventBus, extras: DemoExtras = {}): void {
   console.log('[demo] simulated match loop running');
   let matchNumber = 41;
   seedStatic(bus, extras, matchNumber);
+  // The catalogues, so START-PRACTICE.cmd does not leave the slide deck, the
+  // profile book and the robot photos empty while a match plays. NOT
+  // seedScreens: those are momentary overlays, and a lower third pinned over
+  // every match of a running demo is not what anybody wants to watch.
+  seedContent(extras);
 
   const loop = async (): Promise<void> => {
     for (;;) {

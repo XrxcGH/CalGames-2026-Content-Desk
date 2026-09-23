@@ -1554,6 +1554,48 @@ export function startServer(opts: ServerOpts) {
        * leaving available. The events are tagged as demo either way, so the
        * score renders outlined and the event log names the source.
        */
+      /*
+       * A stand-in robot cutout for the sample data, drawn rather than stored.
+       *
+       * The alliance overview needs SOMETHING in the photo slot to prove that
+       * path works end to end, and the alternative was writing invented files
+       * into media/teams for real team numbers. That is precisely the shape of
+       * mistake this project has already made once: test images for teams 1678
+       * and 846 sat in the library for weeks looking like somebody's upload.
+       *
+       * So it is generated per request, obviously a placeholder, and says so
+       * on its face. Nothing is written anywhere.
+       */
+      if (path.startsWith('/sample/robot/')) {
+        const team = Number(path.slice('/sample/robot/'.length).replace(/\.svg$/, ''));
+        if (!Number.isInteger(team) || team <= 0) return json(res, 400, { error: 'bad team' });
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" `
+          + `width="1200" height="900" role="img" aria-label="Sample placeholder">`
+          + `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">`
+          + `<stop offset="0" stop-color="#7A2E93"/><stop offset="1" stop-color="#3D0B4D"/>`
+          + `</linearGradient></defs>`
+          // A chassis, a bumper and a lifted arm: enough silhouette to read as
+          // a robot at a glance, and plainly not a photograph of one.
+          + `<rect x="250" y="360" width="700" height="360" rx="28" fill="url(#g)" `
+          + `stroke="#F0AF00" stroke-width="8"/>`
+          + `<rect x="250" y="600" width="700" height="90" fill="#ED1C24"/>`
+          + `<rect x="560" y="170" width="80" height="210" rx="18" fill="url(#g)" `
+          + `stroke="#F0AF00" stroke-width="8"/>`
+          + `<circle cx="380" cy="740" r="72" fill="#1B0322" stroke="#F0AF00" stroke-width="8"/>`
+          + `<circle cx="820" cy="740" r="72" fill="#1B0322" stroke="#F0AF00" stroke-width="8"/>`
+          + `<text x="600" y="540" text-anchor="middle" font-family="sans-serif" `
+          + `font-weight="700" font-size="150" fill="#F0AF00">${team}</text>`
+          + `<text x="600" y="855" text-anchor="middle" font-family="sans-serif" `
+          + `font-weight="700" font-size="42" fill="#FFFFFF" opacity="0.75">SAMPLE</text>`
+          + `</svg>`;
+        res.writeHead(200, {
+          'content-type': 'image/svg+xml',
+          'cache-control': 'no-store',
+        });
+        res.end(svg);
+        return;
+      }
+
       if (path === '/api/sample' && req.method === 'POST') {
         if (!seedSample) {
           return json(res, 503, { error: 'Sample data is not available on this desk.' });

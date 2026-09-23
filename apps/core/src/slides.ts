@@ -106,6 +106,26 @@ export class Slides {
     });
   }
 
+  /**
+   * Sample slides for a beta test, in memory only.
+   *
+   * They go into #config, which is the list config.json supplies, and #config
+   * is the half of the deck that is NEVER written back: #writeNow persists
+   * {added, queue} and nothing else. So a desk filled with sample data and
+   * then closed leaves data/slides.json exactly as it found it.
+   *
+   * That distinction is not academic. This project already shipped residue
+   * from a test into the live slides file, where it sat looking like real
+   * shout-outs somebody had approved.
+   *
+   * Ids are prefixed so they are obvious in any list, and re-seeding replaces
+   * the previous sample rather than stacking a second copy.
+   */
+  seedSample(list: Slide[]): void {
+    this.#config = this.#config.filter(s => !s.id.startsWith('sample-'));
+    this.#config.push(...list);
+  }
+
   async load(): Promise<void> {
     try {
       const raw = JSON.parse(await readFile(this.#file, 'utf8')) as

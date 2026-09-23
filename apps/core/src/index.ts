@@ -730,7 +730,9 @@ const server = startServer({
   rundown, sponsors, awards, slides, lanBase, content,
   // For the Sample data button on the desk. The server refuses to call it
   // while the field bridge is up; see the route.
-  seedSample: () => seedSampleState(bus, { arcade, trivia }),
+  seedSample: () => seedSampleState(bus, {
+    arcade, trivia, slides, profiles, media, cards: cardLedger,
+  }),
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).
@@ -756,7 +758,7 @@ if (replayFile) {
   } else {
     // The demo also seeds dummy standings, schedule, arcade, and trivia so
     // every surface can be judged aesthetically without a field.
-    startDemo(bus, { arcade, trivia });
+    startDemo(bus, { arcade, trivia, slides, profiles, media, cards: cardLedger });
   }
 }
 

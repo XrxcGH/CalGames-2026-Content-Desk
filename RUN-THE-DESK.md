@@ -34,6 +34,43 @@ out a wrong graphic. The show is a team sport.
 
 ---
 
+## Checking it works before the event
+
+Start the desk with nothing attached and most screens are empty, because there
+is no field, no match and no event yet. That is correct, and it is also
+useless for finding out whether the thing works.
+
+So: open the desk console, find **Sample data**, and press **Fill the screens
+with sample data**.
+
+Every screen then has something on it, and you can walk the screen buttons
+along the top of the console (Pre-match, Match, Final, Selection, Explainer,
+Analysis, Card call, Arcade, Sponsor) and see each one. The side screens, the
+pit monitor and the phone page fill in too.
+
+Things to know:
+
+- **All of it says SAMPLE.** The teams are real numbers but the slide, the
+  sponsor, the people on camera and the award all say so on their face. If any
+  of it ever reaches a projector by accident, the room can tell.
+- **Scores draw outlined, not solid.** That is the desk's way of saying a
+  number is a guess. It is how you can tell a sample apart from the field at a
+  glance, and it is why you can leave this up while you set a monitor.
+- **Nothing is saved.** The sample slides, people and robot photos exist only
+  while the desk is running. Restart and they are gone, and the real event
+  files are untouched.
+- **It refuses while the field bridge is up**, because at that point you are
+  at an event and invented teams have no business on a screen.
+- **The status card, the safety message and the timer are not filled in.**
+  Each of those covers the whole screen, which would hide what you came to
+  look at. Press them yourself from the console when you want to see them.
+- **No award winner is ever shown.** That is the one thing the desk keeps
+  secret until the reveal, and a sample does not get an exception.
+
+`START-PRACTICE.cmd` does the same filling in and then runs a match on a loop,
+which is the better choice if you want to watch the clock and the score move.
+
+
 ## Chapter 1 · What this thing is
 
 The content desk is one program that runs on one laptop. Everything else

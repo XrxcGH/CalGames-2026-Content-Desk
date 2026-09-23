@@ -79,6 +79,12 @@ const OPEN_GET_PREFIXES = [
   // coverage report at /api/coverage stays gated: it carries the operational
   // gap list, which is the desk's business.
   '/api/coverage/team/',
+  // The drawn stand-in robot cutout used by sample data. It has to be open
+  // for the same reason /media/ is: the alliance overview is an audience
+  // surface and an OBS browser source cannot type a PIN. There is nothing in
+  // it to protect, because there is nothing in it at all: it is an SVG drawn
+  // from a team number, holding no event data and no photograph.
+  '/sample/robot/',
 ];
 
 /**
