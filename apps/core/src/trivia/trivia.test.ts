@@ -810,3 +810,87 @@ test('observe() ignores other events and a malformed snapshot', () => {
   assert.equal(snap.asked, 0);
   assert.equal(snap.phase, 'idle');
 });
+
+// ---------------------------------------------------------------------------
+// The join link follows the desk's address
+// ---------------------------------------------------------------------------
+
+/** Every trivia.updated a store puts on the bus, with the tag it went out under. */
+const published = (bus: EventBus) => {
+  const out: { source: string; joinUrl: string | null }[] = [];
+  bus.subscribe(ev => {
+    if (ev.type !== 'trivia.updated') return;
+    out.push({ source: ev.source, joinUrl: (ev.payload as { joinUrl: string | null }).joinUrl });
+  });
+  return out;
+};
+
+test('a new desk address reaches the big screen without waiting for a trivia action', () => {
+  // setJoinUrl only stored the value, so the QR on the projector kept the old
+  // address until the host next opened a question. Nothing in the room
+  // prompts that publish: the laptop changes address while the gym watches.
+  const bus = new EventBus();
+  const out = published(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  store.setJoinUrl('http://localhost:8720/s/quiz');
+  store.join('Ana');                                  // the room is live
+  assert.equal(out.length, 1);
+
+  store.setJoinUrl('http://172.22.0.23:8720/s/quiz');
+  assert.equal(out.length, 2, 'the change is published at once');
+  assert.deepEqual(out[1], { source: 'manual', joinUrl: 'http://172.22.0.23:8720/s/quiz' });
+  assert.equal(store.snapshot().joinUrl, 'http://172.22.0.23:8720/s/quiz');
+});
+
+test('the same address reported again publishes nothing', () => {
+  // The watcher re-probes every few seconds and reports whatever it finds.
+  const bus = new EventBus();
+  const out = published(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  store.join('Ana');
+  store.setJoinUrl('http://172.22.0.23:8720/s/quiz');
+  const after = out.length;
+  for (let i = 0; i < 5; i++) store.setJoinUrl('http://172.22.0.23:8720/s/quiz');
+  assert.equal(out.length, after, 'a repeat is not news, and not a line in the event log');
+});
+
+test('setting the link at boot publishes nothing and does not end the restore', () => {
+  // index.ts calls setJoinUrl twice before the rebuild has run. A publish here
+  // would set #live, and observe() refuses once the store is live, so the
+  // morning's leaderboard would come back empty after every restart.
+  const bus = new EventBus();
+  const log = recording(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  const ana = store.join('Ana', 846).playerId;
+  store.open(20); store.answer(ana, 0); store.reveal(); store.next();
+
+  const freshBus = new EventBus();
+  const emitted = published(freshBus);
+  const after = new TriviaStore(freshBus, [...ROUNDS]);
+  after.setJoinUrl('http://localhost:8720/s/quiz');
+  after.setJoinUrl('http://172.22.0.23:8720/s/quiz');
+  assert.equal(emitted.length, 0, 'nothing is on any screen yet, so nothing to correct');
+  for (const ev of log) after.observe(ev);
+
+  const snap = after.snapshot();
+  assert.deepEqual(snap.standings.map(r => r.name), ['Ana'], 'the restore still ran');
+  assert.equal(snap.asked, 1);
+  assert.equal(snap.joinUrl, 'http://172.22.0.23:8720/s/quiz', 'and the link is the current one');
+  assert.equal(emitted.length, 0, 'restoring still publishes nothing');
+});
+
+test('an address change during a sample seed is not published as sample data', () => {
+  // A real change must never go out tagged 'demo', and a snapshot taken
+  // mid-seed holds sample players that are not marked as sample yet.
+  const bus = new EventBus();
+  const out = published(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  store.join('Ana');                                  // live
+  const before = out.length;
+
+  store.asSample(() => { store.setJoinUrl('http://172.22.0.99:8720/s/quiz'); });
+  assert.equal(out.length, before, 'no event of any tag came from the change');
+  assert.equal(out.some(e => e.source === 'demo'), false);
+  assert.equal(store.snapshot().joinUrl, 'http://172.22.0.99:8720/s/quiz',
+    'the link is still current for the next publish');
+});

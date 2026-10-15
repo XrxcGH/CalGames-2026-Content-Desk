@@ -323,14 +323,16 @@ function paintAccess(a) {
 /**
  * The on-deck list and where each row sits in time, worked out by the desk
  * (apps/core/src/deck.ts, which holds the reasoning and the tests). `offs[i]`
- * is whole cycles after pace.nextStartAt, or null for the match on the field.
+ * is null for the match on the field; `etas[i]` is the row's estimated start,
+ * which already waits out lunch and the night instead of walking with the
+ * clock.
  * This page used to count "rows already started" itself, and with a Nexus
  * queue it counted wrong: Nexus drops a match the moment a queuer marks it On
  * field, so every estimate read a cycle early. The fallback is only for a
  * state from a desk too old to send a deck.
  */
 const deckOf = s => s.deck ?? {
-  rows: s.upcoming ?? [], offs: (s.upcoming ?? []).map((_, i) => i),
+  rows: s.upcoming ?? [], offs: (s.upcoming ?? []).map((_, i) => i), etas: [],
 };
 
 /**
@@ -404,14 +406,14 @@ function paint(s) {
   $('rank').hidden = head.length === 0;
   if (head.length) setHTML($('rank'), head.join(''));
 
-  // Each row's estimate, as the desk placed it: the next start plus one cycle
-  // per row after it. With no pace yet, the row's own time (the printed
-  // schedule, or the queuers' estimate under Nexus).
+  // Each row's estimate, as the desk projected it. With no pace yet, the
+  // row's own time (the printed schedule, or the queuers' estimate under
+  // Nexus).
   const deck = deckOf(s);
   const eta = i => deck.offs[i] === null
     ? 'On field now'
-    : s.pace?.nextStartAt && s.pace?.cycleSec
-      ? `~${clock(s.pace.nextStartAt + deck.offs[i] * s.pace.cycleSec * 1000)}`
+    : deck.etas?.[i] != null
+      ? `~${clock(deck.etas[i])}`
       : (deck.rows[i]?.time ? clock(Date.parse(deck.rows[i].time)) : '');
 
   const chip = (n, cls) =>

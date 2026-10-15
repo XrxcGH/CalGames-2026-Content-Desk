@@ -9,6 +9,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { EventBus, EmitInit } from './bus.ts';
@@ -177,6 +178,19 @@ export interface ServerOpts {
    * a served lockout releases, which cannot wait the real minute.
    */
   lockoutBaseMs?: number;
+  /**
+   * The clock the brute-force lockout reads, in milliseconds. Defaults to
+   * Date.now; nothing in the running desk passes this, for the same reason as
+   * lockoutBaseMs above.
+   *
+   * Injected so the test that proves a lockout holds, and then releases, can
+   * move time itself. Against the real clock it had a 450 ms window to land
+   * its "still locked out" requests in (the lockout is 700 ms and the failed
+   * guess that starts it answers 250 ms later), and any stall of the process
+   * longer than that, a busy machine running the whole suite in parallel for
+   * one, turned a 429 into a 401 and failed a test of a control that worked.
+   */
+  lockoutClock?: () => number;
 }
 
 export function startServer(opts: ServerOpts) {
@@ -186,7 +200,7 @@ export function startServer(opts: ServerOpts) {
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
           lanBase = null, content = null, seedSample = null, clearSample = null,
-          lockoutBaseMs } = opts;
+          lockoutBaseMs, lockoutClock } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -311,6 +325,58 @@ export function startServer(opts: ServerOpts) {
     });
 
   /**
+   * What a parsed JSON value is, in words, when it is NOT a plain object; null
+   * when it is one. JSON.parse also hands back null, arrays, numbers, strings
+   * and booleans, and `as T` on any of them is a lie the next property read
+   * finds out.
+   */
+  const notAnObject = (v: unknown): string | null =>
+    v === null ? 'null'
+      : Array.isArray(v) ? 'an array'
+        : typeof v === 'object' ? null
+          : `a ${typeof v}`;
+
+  /**
+   * Read a request body that has to be a JSON OBJECT.
+   *
+   * Every POST route used to `JSON.parse(...) as { ... }` and read fields off
+   * the result. A body of literal `null` made that first read a TypeError, and
+   * a number, string or array quietly read as an object with nothing in it.
+   * Where the route's own catch took the TypeError it answered 422 with
+   * "Cannot read properties of null (reading 'team')", a sentence meant for
+   * the person who wrote the code, in front of an operator who pressed a
+   * button; where it did not, the generic handler answered 500 and logged a
+   * stack. Both bury what this is: a malformed request, the caller's to fix,
+   * not a fault in the desk. The sign-in doors learned this first (see
+   * parsePinBody) because theirs also leaked a guessing slot.
+   *
+   * Answers 400 itself and returns undefined, so a route reads
+   *
+   *     const body = await readJsonObject<{ team?: number }>(req, res, 4096);
+   *     if (!body) return;
+   *
+   * and carries on with a real object. `allowEmpty` is for routes whose body
+   * is optional: zero bytes means {}, as those routes always read it.
+   *
+   * Text that is not JSON at all still throws the parser's SyntaxError, and a
+   * body over the limit still rejects, exactly as before: every caller maps a
+   * throw to its own 422 and this changes neither.
+   */
+  const readJsonObject = async <T extends object = Record<string, unknown>>(
+    req: IncomingMessage, res: ServerResponse, limit: number, allowEmpty = false,
+  ): Promise<T | undefined> => {
+    const raw = await readBody(req, limit);
+    if (allowEmpty && raw.length === 0) return {} as T;
+    const parsed: unknown = JSON.parse(raw.toString('utf8'));
+    const wrong = notAnObject(parsed);
+    if (wrong) {
+      json(res, 400, { error: `The request body must be a JSON object, not ${wrong}.` });
+      return undefined;
+    }
+    return parsed as T;
+  };
+
+  /**
    * Chapter landmarks, kept for the whole day.
    *
    * bus.recent is a 5000-event ring, and realtime score traffic alone
@@ -371,6 +437,7 @@ export function startServer(opts: ServerOpts) {
   const FAIL_LIMIT = 5;
   const LOCKOUT_BASE_MS = lockoutBaseMs ?? 60_000;
   const LOCKOUT_MAX_MS = 15 * 60_000;
+  const lockoutNow = lockoutClock ?? Date.now;
   // Below the limit, every miss still waits this long for its verdict, so
   // even a spread-out attack is capped at a few guesses a second.
   const FAIL_DELAY_MS = 250;
@@ -423,7 +490,7 @@ export function startServer(opts: ServerOpts) {
   const authBlocked = (addr: string, door = 'desk'): boolean => {
     const rec = authFails.get(failKey(door, addr));
     if (!rec) return false;
-    const now = Date.now();
+    const now = lockoutNow();
     if (rec.blockedUntil && rec.blockedUntil <= now) {
       rec.count = 0;
       rec.blockedUntil = 0;
@@ -464,9 +531,8 @@ export function startServer(opts: ServerOpts) {
    */
   const parsePinBody = (raw: Buffer): { pin?: unknown } => {
     const parsed: unknown = JSON.parse(raw.toString('utf8'));
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new SyntaxError('Body must be a JSON object.');
-    }
+    const wrong = notAnObject(parsed);
+    if (wrong) throw new SyntaxError(`Body must be a JSON object, not ${wrong}.`);
     return parsed as { pin?: unknown };
   };
 
@@ -502,7 +568,7 @@ export function startServer(opts: ServerOpts) {
       // line documents had never once happened.
       rec.rounds += 1;
       const ms = Math.min(LOCKOUT_BASE_MS * 2 ** (rec.rounds - 1), LOCKOUT_MAX_MS);
-      rec.blockedUntil = Date.now() + ms;
+      rec.blockedUntil = lockoutNow() + ms;
       console.warn(`[auth] ${door} door: ${addr} locked out for ${Math.round(ms / 1000)}s ` +
         `after ${rec.count} failed attempts (round ${rec.rounds})`);
     }
@@ -745,8 +811,8 @@ export function startServer(opts: ServerOpts) {
 
       if (path === '/api/media/consent' && req.method === 'POST') {
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { team?: number; consent?: string };
+          const body = await readJsonObject<{ team?: number; consent?: string }>(req, res, 4 * 1024);
+          if (!body) return;
           const team = Number(body.team);
           if (!Number.isInteger(team) || team <= 0) return json(res, 400, { error: 'Which team?' });
           const consent = body.consent;
@@ -779,10 +845,11 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/clips' && req.method === 'POST') {
         if (!clips) return json(res, 503, { error: 'Recording is not available: ffmpeg not found.' });
         try {
-          const body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8')) as {
+          const body = await readJsonObject<{
             sourceId?: string; fromMs?: number; toMs?: number;
             ranges?: Range[]; label?: string; speed?: number;
-          };
+          }>(req, res, 64 * 1024);
+          if (!body) return;
           if (!body.sourceId) return json(res, 400, { error: 'sourceId is required' });
 
           const ranges = body.ranges?.length
@@ -808,8 +875,8 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/clips/match' && req.method === 'POST') {
         if (!clips) return json(res, 503, { error: 'Recording is not available: ffmpeg not found.' });
         try {
-          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
-            { sourceId?: string } | null;
+          const body = await readJsonObject<{ sourceId?: string }>(req, res, 8 * 1024);
+          if (!body) return;
           const st = bus.state;
           const startedAt = st.matchStartedAt ?? bus.lastMatchStartedAt;
           if (startedAt == null) return json(res, 409, { error: 'No match has started yet.' });
@@ -821,7 +888,7 @@ export function startServer(opts: ServerOpts) {
           });
 
           const clip = await clips.extract({
-            sourceId: body?.sourceId ?? 'program',
+            sourceId: body.sourceId ?? 'program',
             ranges,
             label: st.match?.displayName ?? 'match',
           });
@@ -839,8 +906,8 @@ export function startServer(opts: ServerOpts) {
         if (!arcade) return json(res, 503, { error: 'Arcade is not available.' });
         const action = path.slice('/api/arcade/'.length);
         try {
-          const raw = await readBody(req, 32 * 1024);
-          const body = raw.length ? JSON.parse(raw.toString('utf8')) as Record<string, unknown> : {};
+          const body = await readJsonObject(req, res, 32 * 1024, true);
+          if (!body) return;
 
           switch (action) {
             case 'set':
@@ -881,8 +948,9 @@ export function startServer(opts: ServerOpts) {
       // themselves, and this must do neither.
       if (path === '/api/emergency' && req.method === 'POST') {
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { message?: string; detail?: string; kind?: string; clear?: boolean };
+          const body = await readJsonObject<
+            { message?: string; detail?: string; kind?: string; clear?: boolean }>(req, res, 4 * 1024);
+          if (!body) return;
           if (body.clear) {
             bus.emit({ type: 'emergency.clear', source: 'manual', payload: {} });
             return json(res, 200, { cleared: true });
@@ -913,8 +981,8 @@ export function startServer(opts: ServerOpts) {
 
       if (path === '/api/scene' && req.method === 'POST') {
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { scene?: string };
+          const body = await readJsonObject<{ scene?: string }>(req, res, 4 * 1024);
+          if (!body) return;
           const wanted = String(body.scene ?? '').trim();
           if (!wanted) return json(res, 400, { error: 'Name a scene.' });
 
@@ -973,8 +1041,8 @@ export function startServer(opts: ServerOpts) {
        */
       if (path === '/api/emit' && req.method === 'POST') {
         try {
-          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
-            { id?: string };
+          const body = await readJsonObject<{ id?: string }>(req, res, 8 * 1024);
+          if (!body) return;
           const action = CONTROL_ACTIONS.find(a => a.id === String(body.id ?? ''));
           if (!action || action.path !== '/api/emit') {
             return json(res, 422, {
@@ -1015,8 +1083,8 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/sponsors' && req.method === 'POST') {
         if (!sponsors) return json(res, 503, { error: 'No sponsors are configured.' });
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { action?: string; id?: string };
+          const body = await readJsonObject<{ action?: string; id?: string }>(req, res, 4 * 1024);
+          if (!body) return;
           switch (body.action) {
             case 'next': return json(res, 200, sponsors.next());
             case 'show': return json(res, 200, sponsors.show(String(body.id ?? '')));
@@ -1148,10 +1216,11 @@ export function startServer(opts: ServerOpts) {
         }
         if (!awards) return json(res, 503, { error: 'Awards are not available.' });
         try {
-          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
+          const body = await readJsonObject<
             { action?: string; id?: string; title?: string; description?: string;
               blurb?: string; day?: string; delta?: number;
-              winner?: string; team?: number };
+              winner?: string; team?: number }>(req, res, 8 * 1024);
+          if (!body) return;
           switch (body.action) {
             case 'show':
               awards.show(body);
@@ -1202,8 +1271,10 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/slides' && req.method === 'POST') {
         if (!slides) return json(res, 503, { error: 'Slides are not available.' });
         try {
-          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
-            { action?: string; id?: string; kind?: string; title?: string; lines?: string[] };
+          const body = await readJsonObject<
+            { action?: string; id?: string; kind?: string; title?: string; lines?: string[] }>(
+            req, res, 8 * 1024);
+          if (!body) return;
           switch (body.action) {
             case 'show': return json(res, 200, slides.show(String(body.id ?? '')));
             case 'next': return json(res, 200, slides.next());
@@ -1229,8 +1300,9 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/gp' && req.method === 'POST') {
         if (!slides) return json(res, 503, { error: 'Shout-outs are not on right now.' });
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { name?: string; team?: number; to?: string; message?: string };
+          const body = await readJsonObject<
+            { name?: string; team?: number; to?: string; message?: string }>(req, res, 4 * 1024);
+          if (!body) return;
           const sub = await slides.submit(body, req.socket.remoteAddress ?? 'unknown');
           return json(res, 200, { ok: true, id: sub.id });
         } catch (err) {
@@ -1245,8 +1317,9 @@ export function startServer(opts: ServerOpts) {
       // face the field. It clears itself when a match starts.
       if (path === '/api/timer' && req.method === 'POST') {
         try {
-          const body = JSON.parse((await readBody(req, 2 * 1024)).toString('utf8')) as
-            { label?: string; seconds?: number; clear?: boolean };
+          const body = await readJsonObject<
+            { label?: string; seconds?: number; clear?: boolean }>(req, res, 2 * 1024);
+          if (!body) return;
           if (body.clear) {
             bus.emit({ type: 'timer.cleared', source: 'manual', payload: {} });
             return json(res, 200, { ok: true });
@@ -1273,8 +1346,10 @@ export function startServer(opts: ServerOpts) {
       // typed here because no field system supplies one.
       if (path === '/api/cardcall' && req.method === 'POST') {
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { team?: number; color?: string; alliance?: string; reason?: string; clear?: boolean };
+          const body = await readJsonObject<
+            { team?: number; color?: string; alliance?: string; reason?: string; clear?: boolean }>(
+            req, res, 4 * 1024);
+          if (!body) return;
 
           if (body.clear) {
             bus.emit({ type: 'card.call_clear', source: 'manual', payload: {} });
@@ -1322,8 +1397,8 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/rundown' && req.method === 'POST') {
         if (!rundown) return json(res, 503, { error: 'No run of show is configured.' });
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { action?: string; id?: string };
+          const body = await readJsonObject<{ action?: string; id?: string }>(req, res, 4 * 1024);
+          if (!body) return;
           switch (body.action) {
             case 'start':   return json(res, 200, rundown.start(String(body.id ?? '')));
             case 'advance': return json(res, 200, rundown.advance());
@@ -1389,8 +1464,9 @@ export function startServer(opts: ServerOpts) {
         }
         if (!config || !content) return json(res, 503, { error: 'Setup is not available.' });
         try {
-          const body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8')) as
-            { section?: string; value?: unknown };
+          const body = await readJsonObject<{ section?: string; value?: unknown }>(
+            req, res, 64 * 1024);
+          if (!body) return;
           const section = String(body.section ?? '');
           // The settings page writes event content. It does not write the
           // ceremony: `awards` has a sanitizer only so the Judge Advisor's own
@@ -1496,8 +1572,8 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/profiles' && req.method === 'POST') {
         if (!profiles) return json(res, 503, { error: 'Profiles are not available.' });
         try {
-          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
-            Record<string, unknown>;
+          const body = await readJsonObject(req, res, 8 * 1024);
+          if (!body) return;
           return json(res, 200, await profiles.upsert(body as unknown as ProfileInput));
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
@@ -1507,8 +1583,8 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/profiles/delete' && req.method === 'POST') {
         if (!profiles) return json(res, 503, { error: 'Profiles are not available.' });
         try {
-          const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { id?: string };
+          const body = await readJsonObject<{ id?: string }>(req, res, 4 * 1024);
+          if (!body) return;
           return json(res, 200, { removed: await profiles.remove(String(body.id ?? '')) });
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
@@ -1524,8 +1600,9 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/panel' && req.method === 'POST') {
         if (!profiles) return json(res, 503, { error: 'Profiles are not available.' });
         try {
-          const body = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8')) as
-            { title?: string; people?: ProfileInput[] };
+          const body = await readJsonObject<{ title?: string; people?: ProfileInput[] }>(
+            req, res, 16 * 1024);
+          if (!body) return;
           const wanted = Array.isArray(body.people) ? body.people : [];
           // Six is what the graphic can render legibly across a 1920 frame
           // (docs/08). Refusing is better than rendering a seventh nobody in
@@ -1705,8 +1782,8 @@ export function startServer(opts: ServerOpts) {
         if (!audio) return json(res, 503, { error: 'House audio is not configured.' });
         const action = path.slice('/api/audio/'.length);
         try {
-          const raw = await readBody(req, 32 * 1024);
-          const body = raw.length ? JSON.parse(raw.toString('utf8')) as Record<string, unknown> : {};
+          const body = await readJsonObject(req, res, 32 * 1024, true);
+          if (!body) return;
 
           switch (action) {
             // The house player checking in. Not an operator action: it is how
@@ -1783,8 +1860,8 @@ export function startServer(opts: ServerOpts) {
         if (!trivia) return json(res, 503, { error: 'Trivia is not available.' });
         const action = path.slice('/api/trivia/'.length);
         try {
-          const raw = await readBody(req, 16 * 1024);
-          const body = raw.length ? JSON.parse(raw.toString('utf8')) as Record<string, unknown> : {};
+          const body = await readJsonObject(req, res, 16 * 1024, true);
+          if (!body) return;
           switch (action) {
             case 'join': {
               // The store already evicts idle players at its ceiling; this
@@ -1931,10 +2008,8 @@ export function startServer(opts: ServerOpts) {
             'so the broadcast title cannot be changed from here.' });
         }
         try {
-          const raw = await readBody(req, 4 * 1024);
-          const body = raw.length
-            ? JSON.parse(raw.toString('utf8')) as { day?: number }
-            : {};
+          const body = await readJsonObject<{ day?: number }>(req, res, 4 * 1024, true);
+          if (!body) return;
           const day = body.day ?? 1;
           if (!Number.isInteger(day) || day < 1) {
             return json(res, 400, { error: 'day must be a positive whole number' });
@@ -2010,9 +2085,10 @@ export function startServer(opts: ServerOpts) {
           // awards ceremony, a single award. The operator marks the bounds,
           // because nothing on the bus knows when a ceremony started.
           if (action === 'segment') {
-            const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as {
+            const body = await readJsonObject<{
               segment?: string; fromMs?: number; toMs?: number; note?: string; sourceId?: string;
-            };
+            }>(req, res, 8 * 1024);
+            if (!body) return;
             if (!body.segment || body.fromMs == null || body.toMs == null) {
               return json(res, 400, { error: 'segment, fromMs and toMs are required' });
             }
@@ -2083,8 +2159,10 @@ export function startServer(opts: ServerOpts) {
       if (path === '/api/frame' && req.method === 'POST') {
         if (!clips) return json(res, 503, { error: 'Recording is not available: ffmpeg not found.' });
         try {
-          const body = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) as
-            { sourceId?: string; atMs?: number; analyst?: string; send?: boolean };
+          const body = await readJsonObject<
+            { sourceId?: string; atMs?: number; analyst?: string; send?: boolean }>(
+            req, res, 8 * 1024);
+          if (!body) return;
           if (body.atMs == null) return json(res, 400, { error: 'atMs is required' });
 
           const frame = await clips.frameAt(body.sourceId ?? 'program', body.atMs);
@@ -2485,6 +2563,12 @@ ${sections}</body></html>`;
     ws.on('message', raw => {
       let msg: { t?: string; init?: EmitInit; channel?: string; data?: unknown; pin?: string };
       try { msg = JSON.parse(String(raw)) as typeof msg; } catch { return; }
+      // A frame of literal `null` parses fine and the next line reads `.t`
+      // off it. That throw happens inside an EventEmitter listener, so it is
+      // not a 400 to answer but an uncaught exception, which index.ts's one
+      // handler logs and carries on from once the show is up. A frame that is
+      // not an object is as meaningless as one that is not JSON: ignore it.
+      if (notAnObject(msg) !== null) return;
 
       if (msg.t === 'auth') {
         if (authBlocked(addr)) {
@@ -2596,8 +2680,22 @@ ${sections}</body></html>`;
     console.error('[http] server error:', err);
   });
 
+  /**
+   * Resolves with the port actually bound, once the server is accepting.
+   *
+   * Passing port 0 asks the operating system for a free one, which is how a
+   * test avoids the fixed port that two runs of the same suite (or a desk left
+   * running on the same machine) would fight over: the loser's EADDRINUSE
+   * exits the whole process. The running desk always passes a real port and
+   * never reads this.
+   */
+  const listening = new Promise<number>(ok => {
+    http.once('listening', () => ok((http.address() as AddressInfo).port));
+  });
+
   http.listen(port, host, () => {
-    console.log(`[core] http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
+    const bound = (http.address() as AddressInfo).port;
+    console.log(`[core] http://${host === '0.0.0.0' ? 'localhost' : host}:${bound}`);
     for (const s of SURFACES) console.log(`         ${surfacePath(s).padEnd(24)} ${s.name}`);
 
     // Said at startup rather than left to be discovered. At a venue the desk
@@ -2627,5 +2725,6 @@ ${sections}</body></html>`;
   return {
     close: () => { clearInterval(heartbeat); unsubscribe(); unsubChapters(); wss.close(); http.close(); },
     broadcastCount: () => wss.clients.size,
+    listening,
   };
 }

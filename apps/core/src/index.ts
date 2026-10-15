@@ -159,7 +159,7 @@ attachMarkers(bus);
 
 // Schedule pace: actual cycle time + behind-schedule estimate, so the side
 // screens can print an honest "est. start" instead of the printed fiction.
-attachPace(bus);
+const pace = attachPace(bus);
 
 // Loaded here rather than with the publish section it mostly serves, because
 // the recorder's camera list lives in config.json too.
@@ -669,6 +669,9 @@ coverage.attach(bus);
     // held until the first restart. Their events carry whole snapshots; the
     // stores take the last one and publish nothing while doing it.
     trivia, arcade,
+    // Today's match starts, so the cycle time and every "when do we play"
+    // estimate are there the moment the desk is back, not two matches later.
+    pace,
     // The overlay's card marks read the STATE SNAPSHOT (the program overlay
     // is an open surface; /api/discipline is gated), and the snapshot opens
     // empty: the ledger came back after a restart while every match graphic
@@ -679,7 +682,7 @@ coverage.attach(bus);
   ]);
   if (rebuilt.events) {
     console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log file(s): ` +
-      'cards, coverage, run of show, sponsor counts, trivia and arcade carried over'
+      'cards, coverage, run of show, sponsor counts, trivia, arcade and match pace carried over'
       + (rebuilt.skipped ? ` (${rebuilt.skipped} torn line(s) skipped)` : '')
       + (rebuilt.otherDay ? ` (${rebuilt.otherDay} from another day left alone)` : ''));
   }

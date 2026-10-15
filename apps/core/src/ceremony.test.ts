@@ -25,7 +25,6 @@ import { startServer } from './server.ts';
 import { Awards } from './awards.ts';
 import { DEFAULTS } from './config.ts';
 
-const PORT = 18751;
 const DESK_PIN = '0864';
 const JA_PIN = '1357';
 
@@ -101,10 +100,11 @@ test('a winner is unreachable from the stands until the reveal, all evening', as
   const awards = new Awards(dir, bus, LIST);
   awards.attach();
   const server = startServer({
-    bus, media: new MediaLibrary(dir), root: dir, port: PORT, host: '127.0.0.1',
+    bus, media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
     config: structuredClone(DEFAULTS), awards,
   });
-  const base = `http://127.0.0.1:${PORT}`;
+  const port = await server.listening;
+  const base = `http://127.0.0.1:${port}`;
 
   const jar: Record<string, string> = {};
   const call = async (path: string, opts: {
@@ -140,7 +140,7 @@ test('a winner is unreachable from the stands until the reveal, all evening', as
    * that payload does not move /api/state at all.
    */
   const heard: string[] = [];
-  const spectator = new WebSocket(`ws://127.0.0.1:${PORT}/ws?surface=stands`);
+  const spectator = new WebSocket(`ws://127.0.0.1:${port}/ws?surface=stands`);
   spectator.on('message', d => heard.push(String(d)));
   await new Promise((res, rej) => { spectator.on('open', res); spectator.on('error', rej); });
   const nothingHeardYet = (when: string) => {

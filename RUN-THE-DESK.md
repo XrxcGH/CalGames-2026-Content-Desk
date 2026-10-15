@@ -154,6 +154,9 @@ same by hand.) With the field connected, watch one match and tick these off:
 - [ ] The numbers are **solid** (not outlined) when the field is connected.
 - [ ] When the score posts, the program shows the final score by itself.
 - [ ] The side screens show the next matches, without anyone touching them.
+      On Friday those are the next **practice** matches; Saturday's matches
+      take over once practice is done. If the field crew runs the field's Test
+      Match to check a robot, nothing on the desk moves: that is correct.
 - [ ] The music ducks when the emcee talks, if you armed that cue
       (chapter 6, *Show automation*).
 - [ ] OBS is recording, and the stream (watched on a phone) has no music.

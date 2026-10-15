@@ -24,16 +24,16 @@ import { Awards } from './awards.ts';
 // about what an ALREADY-AUTHORIZED session may do, not about the door.
 process.env['REMOTE_PIN'] = '';
 
-const PORT = 18733;
 
 test('a desk session cannot reach the award family or the field\'s confidence tier', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'cg-server-'));
   const bus = new EventBus();
   const server = startServer({
-    bus, media: new MediaLibrary(dir), root: dir, port: PORT, host: '127.0.0.1',
+    bus, media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
   });
+  const port = await server.listening;
   try {
-    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?surface=test`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?surface=test`);
     await new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
     const frames: { t?: string; reason?: string }[] = [];
     ws.on('message', d => frames.push(JSON.parse(String(d))));
@@ -69,7 +69,7 @@ test('a desk session cannot reach the award family or the field\'s confidence ti
 
     // 3. The Stream Deck route has the same clamp: a mapped button press is
     //    an operator's hand too.
-    const res = await fetch(`http://127.0.0.1:${PORT}/api/emit`, {
+    const res = await fetch(`http://127.0.0.1:${port}/api/emit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'match.score' }),
     });
@@ -104,7 +104,8 @@ test('a declined team\'s photo is unreachable by every path spelling', async () 
   assert.equal(media.manifest[254]?.consent, 'declined', 'fixture sanity');
 
   const bus = new EventBus();
-  const server = startServer({ bus, media, root: dir, port: PORT + 1, host: '127.0.0.1' });
+  const server = startServer({ bus, media, root: dir, port: 0, host: '127.0.0.1' });
+  const port = await server.listening;
   try {
     const spellings = [
       '/media/teams/254/robot.v1.png',            // the plain path
@@ -116,7 +117,7 @@ test('a declined team\'s photo is unreachable by every path spelling', async () 
       '/media/teams/253/../254/robot.v1.png',     // dot-segment resolution
     ];
     for (const p of spellings) {
-      const res = await fetch(`http://127.0.0.1:${PORT + 1}${p}`);
+      const res = await fetch(`http://127.0.0.1:${port}${p}`);
       assert.equal(res.status, 404, `${p} must not serve a declined team's photo`);
     }
   } finally {
@@ -134,10 +135,11 @@ test('the three codes open three doors, and none opens another\'s', async () => 
   const dir = await mkdtemp(join(tmpdir(), 'cg-tiers-'));
   const bus = new EventBus();
   const server = startServer({
-    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 2, host: '127.0.0.1',
+    bus, media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
     config: structuredClone(DEFAULTS), content: new EventContent(dir),
   });
-  const base = `http://127.0.0.1:${PORT + 2}`;
+  const port = await server.listening;
+  const base = `http://127.0.0.1:${port}`;
   try {
     // The desk session (gate off via REMOTE_PIN='') cannot read settings.
     const deskRead = await fetch(`${base}/api/setup`);
@@ -187,9 +189,10 @@ test('a concurrent flood cannot walk the PIN keyspace, and the doors are indepen
   const dir = await mkdtemp(join(tmpdir(), 'cg-flood-'));
   const bus = new EventBus();
   const server = startServer({
-    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 3, host: '127.0.0.1',
+    bus, media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
   });
-  const base = `http://127.0.0.1:${PORT + 3}`;
+  const port = await server.listening;
+  const base = `http://127.0.0.1:${port}`;
   const post = (path: string, pin: string) =>
     fetch(base + path, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -221,10 +224,11 @@ test('the open urls route never echoes a credential embedded in the field feed',
   config.kiosk.fieldStreamUrl = 'rtsp://admin:hunter2@10.0.0.9:554/stream1';
   const bus = new EventBus();
   const server = startServer({
-    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 4, host: '127.0.0.1', config,
+    bus, media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1', config,
   });
+  const port = await server.listening;
   try {
-    const urls = await fetch(`http://127.0.0.1:${PORT + 4}/api/urls`).then(r => r.json()) as
+    const urls = await fetch(`http://127.0.0.1:${port}/api/urls`).then(r => r.json()) as
       { fieldStream: string };
     assert.equal(urls.fieldStream.includes('hunter2'), false, 'the camera password must not leak');
     assert.equal(urls.fieldStream.includes('admin'), false, 'nor the username');
@@ -245,11 +249,12 @@ test('a secondary tier can lock itself again', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'cg-signout-'));
   const bus = new EventBus();
   const server = startServer({
-    bus, media: new MediaLibrary(dir), root: dir, port: PORT + 5, host: '127.0.0.1',
+    bus, media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
     config: structuredClone(DEFAULTS), content: new EventContent(dir),
     awards: new Awards(dir, bus, [{ id: 'directors', title: "Directors' Award" }]),
   });
-  const base = `http://127.0.0.1:${PORT + 5}`;
+  const port = await server.listening;
+  const base = `http://127.0.0.1:${port}`;
   try {
     const auth = await fetch(`${base}/api/awards/auth`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

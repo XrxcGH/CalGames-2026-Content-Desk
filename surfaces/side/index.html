@@ -639,14 +639,16 @@ function restartRotation() {
 /**
  * The on-deck list and where each row sits in time, worked out by the desk
  * (apps/core/src/deck.ts, which holds the reasoning and the tests). `offs[i]`
- * is whole cycles after pace.nextStartAt, or null for the match on the field.
+ * is null for the match on the field; `etas[i]` is the row's estimated start,
+ * which already waits out lunch and the night instead of walking with the
+ * clock.
  * This page used to count "rows already started" itself, and with a Nexus
  * queue it counted wrong: Nexus drops a match the moment a queuer marks it On
  * field, so every estimate read a cycle early. The fallback is only for a
  * state from a desk too old to send a deck.
  */
 const deckOf = s => s.deck ?? {
-  rows: s.upcoming ?? [], offs: (s.upcoming ?? []).map((_, i) => i),
+  rows: s.upcoming ?? [], offs: (s.upcoming ?? []).map((_, i) => i), etas: [],
 };
 
 function paint(s) {
@@ -711,13 +713,12 @@ function paint(s) {
   // teamLabel, not the raw number: a second robot is registered under a
   // made-up number (9999) that nobody in the room knows, and prints as 100B.
   const teamSpans = list => list.map(n => `<span>${escapeHtml(teamLabel(s, n))}</span>`).join('');
-  // Estimated start per row: the projected next start plus one median cycle
-  // per row after it, as the desk placed them. Only shown once the pace model
-  // has real signal. The match on the field gets the plain fact instead.
+  // Estimated start per row, as the desk projected it. Only once the pace
+  // model has real signal. The match on the field gets the plain fact instead.
   const eta = i => deck.offs[i] === null
     ? '<div class="deck-eta deck-eta--field">On field</div>'
-    : s.pace?.nextStartAt && s.pace?.cycleSec
-      ? `<div class="deck-eta">~${clock(s.pace.nextStartAt + deck.offs[i] * s.pace.cycleSec * 1000)}</div>`
+    : deck.etas?.[i] != null
+      ? `<div class="deck-eta">~${clock(deck.etas[i])}</div>`
       : '';
   $('deck').innerHTML = up.length
     ? up.map((m, i) => `

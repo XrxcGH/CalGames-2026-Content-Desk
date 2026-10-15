@@ -177,17 +177,17 @@ test('a listener that throws cannot break the request that triggered it', () => 
 test('the served routes resolve the address per request: /api/urls and the start panel follow a new IP', async () => {
   // The gate off: this is about the address, not the door.
   process.env['REMOTE_PIN'] = '';
-  const PORT = 18861;
   const dir = await mkdtemp(join(tmpdir(), 'cg-lan-'));
   let now: string | null = null;
   const server = startServer({
-    bus: new EventBus(), media: new MediaLibrary(dir), root: dir, port: PORT, host: '127.0.0.1',
+    bus: new EventBus(), media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
     lanBase: () => now,
   });
+  const port = await server.listening;
   const urls = async (): Promise<{ base: string | null }> =>
-    fetch(`http://127.0.0.1:${PORT}/api/urls`).then(r => r.json()) as Promise<{ base: string | null }>;
+    fetch(`http://127.0.0.1:${port}/api/urls`).then(r => r.json()) as Promise<{ base: string | null }>;
   const index = async (): Promise<string> =>
-    fetch(`http://127.0.0.1:${PORT}/`).then(r => r.text());
+    fetch(`http://127.0.0.1:${port}/`).then(r => r.text());
   try {
     // Started with no network: the QR base is null (the poster refuses to
     // print, the side screen hides its code) and the panel says so.
@@ -216,24 +216,24 @@ test('the start panel shows the PIN only to a browser that asked for the desk by
   // DNS rebinding: a web page open on the desk laptop points its own domain
   // at 127.0.0.1. The connection is local, but the Host header is the page's.
   process.env['REMOTE_PIN'] = '4726';
-  const PORT = 18863;
   const dir = await mkdtemp(join(tmpdir(), 'cg-lan-'));
   const server = startServer({
-    bus: new EventBus(), media: new MediaLibrary(dir), root: dir, port: PORT, host: '127.0.0.1',
+    bus: new EventBus(), media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
     lanBase: 'http://172.22.0.23:8720',
   });
+  const port = await server.listening;
   const { request } = await import('node:http');
   const get = (host: string): Promise<string> => new Promise((resolve, reject) => {
-    request({ host: '127.0.0.1', port: PORT, path: '/', headers: { host } }, res => {
+    request({ host: '127.0.0.1', port, path: '/', headers: { host } }, res => {
       let body = '';
       res.on('data', c => { body += c; });
       res.on('end', () => resolve(body));
     }).on('error', reject).end();
   });
   try {
-    assert.match(await get(`localhost:${PORT}`), /4726/);
-    assert.match(await get(`127.0.0.1:${PORT}`), /4726/);
-    const rebound = await get(`attacker.example:${PORT}`);
+    assert.match(await get(`localhost:${port}`), /4726/);
+    assert.match(await get(`127.0.0.1:${port}`), /4726/);
+    const rebound = await get(`attacker.example:${port}`);
     assert.doesNotMatch(rebound, /4726/);
     assert.match(rebound, /172\.22\.0\.23:8720/, 'the address is still shown to everyone');
   } finally {
@@ -245,14 +245,14 @@ test('the start panel shows the PIN only to a browser that asked for the desk by
 
 test('a fixed string base still works for callers that predate the live one', async () => {
   process.env['REMOTE_PIN'] = '';
-  const PORT = 18862;
   const dir = await mkdtemp(join(tmpdir(), 'cg-lan-'));
   const server = startServer({
-    bus: new EventBus(), media: new MediaLibrary(dir), root: dir, port: PORT, host: '127.0.0.1',
+    bus: new EventBus(), media: new MediaLibrary(dir), root: dir, port: 0, host: '127.0.0.1',
     lanBase: 'http://172.22.0.23:8720',
   });
+  const port = await server.listening;
   try {
-    const urls = await fetch(`http://127.0.0.1:${PORT}/api/urls`).then(r => r.json()) as
+    const urls = await fetch(`http://127.0.0.1:${port}/api/urls`).then(r => r.json()) as
       { base: string | null };
     assert.equal(urls.base, 'http://172.22.0.23:8720');
   } finally {

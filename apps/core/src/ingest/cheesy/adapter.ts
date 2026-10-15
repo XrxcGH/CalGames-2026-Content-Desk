@@ -251,6 +251,26 @@ export class CheesyAdapter {
   #autoFuel: Record<Alliance, number> = { red: 0, blue: 0 };
   #autoWinnerSent = false;
   #matchLoaded = false;
+  /**
+   * The arena has its Test Match loaded, whatever the desk is still showing.
+   *
+   * The test load itself is suppressed (see #onMatchLoad), so the desk keeps
+   * the last real match on screen. That alone was half a fix: the test
+   * match's start, buzzer, realtime scores and arming all still flowed, and
+   * the desk filed every one of them against the real match it was holding.
+   * An FTA checking a robot on the Test Match while Q43 waited started Q43's
+   * clock, cut program to the score bar, put the test's fuel on Q43's score,
+   * minted replay markers, gave the pace model a cycle that never happened
+   * and told the on-deck list Q43 was on the field. At the end of quals the
+   * test load's own all-zero score frame landed on the posted final and
+   * blanked its breakdown and bonus badges on the Final screen.
+   *
+   * So while this is set, nothing per-match is emitted. The next real load
+   * clears it, because that is the arena saying the test is over.
+   */
+  #testLoaded = false;
+  /** arenaStatus has reported the test match (id 0) since it loaded. See #checkTestStillLoaded. */
+  #testSeenOnStatus = false;
   /** Whether any matchTime frame has arrived yet, in this desk's lifetime. */
   #sawMatchTime = false;
   /**
@@ -283,7 +303,11 @@ export class CheesyAdapter {
   #lastAggUp: boolean | null = null;
   /** Display name of the loaded match, riding on card.issued for phasing. */
   #loadedMatchName = '';
-  /** When Nexus last delivered a queue, so the schedule poll can defer to it. */
+  /**
+   * When Nexus last delivered a queue LIST, so the schedule poll can defer to
+   * it. Only a payload carrying `upcoming` counts: see the subscription in the
+   * constructor.
+   */
   #nexusQueueAt = 0;
   /**
    * Where the field is in the schedule: the loaded match's type and its order
@@ -381,15 +405,31 @@ export class CheesyAdapter {
         });
       },
     });
+
+    /*
+     * Watch the queuers' source so the schedule poll knows when to yield.
+     *
+     * Only a LIST is proof that Nexus is alive. The Nexus adapter also sends
+     * {nowQueuing: null} on its own, after three failed polls, to take a stale
+     * "now queuing" banner down; counting that as a delivery meant the one
+     * message that says "Nexus has stopped answering" restarted the 90s
+     * deferral instead. A bad or revoked key then kept the field's queue off
+     * the screens for another minute and a half or more, with a played match
+     * sitting as next up after its score had been committed.
+     *
+     * Here rather than in start() so the arbitration holds from construction
+     * and can be exercised without opening sockets to an arena.
+     */
+    this.#bus.subscribe(ev => {
+      if (ev.type !== 'queue.updated' || ev.source !== 'nexus') return;
+      const list = (ev.payload as { upcoming?: unknown } | null)?.upcoming;
+      if (Array.isArray(list)) this.#nexusQueueAt = ev.ts;
+    });
   }
 
   get client(): CheesyClient { return this.#client; }
 
   start(): void {
-    // Watch for the queuers' source so the schedule poll knows when to yield.
-    this.#bus.subscribe(ev => {
-      if (ev.type === 'queue.updated' && ev.source === 'nexus') this.#nexusQueueAt = ev.ts;
-    });
     this.#client.connect();
     // Schedule and rankings are REST-only. 60s is deliberate: they change on
     // the order of once a match, and the field network is not ours to load up.
@@ -481,39 +521,70 @@ export class CheesyAdapter {
       if (live) return;
 
       try {
-        const qual = await this.#client.get<MatchWithResult[]>('/api/matches/qualification');
-        // Playoff matches live under their own type. Polling qualification
-        // alone emptied the Sunday on-deck queue: once the last qual match is
-        // played, nothing in that list is Scheduled any more. Sequential, to
-        // hold the one-concurrent-request budget.
-        let playoff: MatchWithResult[] = [];
-        // Not before there is a bracket. Asking costs the same full table
-        // walk as a real answer, and the answer is an empty array until
-        // alliance selection has finalized. The alliance board is the desk's
-        // own witness to that, and the loaded match type is the other: once
-        // the field is playing playoffs there is certainly a bracket.
-        const bracketExists = this.#loadedType === MatchType.Playoff
-          || (this.#bus.state.selection?.alliances ?? []).some(a => a.teams.some(t => t > 0));
-        if (bracketExists) {
-          try {
-            playoff = await this.#client.get<MatchWithResult[]>('/api/matches/playoff');
-          } catch {
-            // Quals alone is still a correct queue.
-          }
-        }
         // The arena's rule, applied per list because TypeOrder only orders
         // within a type: a qual floor means nothing to a playoff row.
         const floor = (t: number): number | undefined =>
           this.#loadedType === t && this.#loadedTypeOrder !== null
             ? this.#loadedTypeOrder : undefined;
-        const upcoming = [
-          ...mapUpcoming(qual, { fromTypeOrder: floor(MatchType.Qualification) }),
-          // Four, as in the arena's numPlayoffMatchesToShow: past the next
-          // few, which alliance plays which is genuinely not known yet.
-          ...mapUpcoming(playoff, {
-            fromTypeOrder: floor(MatchType.Playoff), limit: 4,
-          }),
-        ].slice(0, 8);
+
+        /*
+         * FRIDAY IS PRACTICE.
+         *
+         * This used to read qualification and playoff only, so through the
+         * whole of Friday's practice session the on-deck list on every venue
+         * screen and pit monitor was Saturday's qualification schedule, with
+         * times the desk projected from practice cycles, and the practice
+         * match actually on the field never had a row at all.
+         *
+         * The arena's own queueing display shows the loaded match's type, so
+         * this does the same: practice loaded, practice listed, with the same
+         * TypeOrder floor. Instead of quals, not as well as, which keeps the
+         * request count where it was.
+         *
+         * Back to quals once practice has nothing left at or above the floor.
+         * Friday night the field sits on its test match with the last
+         * practice match still the last one loaded, and the next thing
+         * anyone will play is Qualification 1, which is what the screens
+         * should say until the scorekeeper loads it on Saturday.
+         */
+        let practice: MatchWithResult[] = [];
+        let upcoming: UpcomingMatch[] = [];
+        if (this.#loadedType === MatchType.Practice) {
+          practice = await this.#client.get<MatchWithResult[]>('/api/matches/practice');
+          upcoming = mapUpcoming(practice, { fromTypeOrder: floor(MatchType.Practice) });
+        }
+
+        let qual: MatchWithResult[] = [];
+        // Playoff matches live under their own type. Polling qualification
+        // alone emptied the Sunday on-deck queue: once the last qual match is
+        // played, nothing in that list is Scheduled any more. Sequential, to
+        // hold the one-concurrent-request budget.
+        let playoff: MatchWithResult[] = [];
+        if (!upcoming.length) {
+          qual = await this.#client.get<MatchWithResult[]>('/api/matches/qualification');
+          // Not before there is a bracket. Asking costs the same full table
+          // walk as a real answer, and the answer is an empty array until
+          // alliance selection has finalized. The alliance board is the desk's
+          // own witness to that, and the loaded match type is the other: once
+          // the field is playing playoffs there is certainly a bracket.
+          const bracketExists = this.#loadedType === MatchType.Playoff
+            || (this.#bus.state.selection?.alliances ?? []).some(a => a.teams.some(t => t > 0));
+          if (bracketExists) {
+            try {
+              playoff = await this.#client.get<MatchWithResult[]>('/api/matches/playoff');
+            } catch {
+              // Quals alone is still a correct queue.
+            }
+          }
+          upcoming = [
+            ...mapUpcoming(qual, { fromTypeOrder: floor(MatchType.Qualification) }),
+            // Four, as in the arena's numPlayoffMatchesToShow: past the next
+            // few, which alliance plays which is genuinely not known yet.
+            ...mapUpcoming(playoff, {
+              fromTypeOrder: floor(MatchType.Playoff), limit: 4,
+            }),
+          ].slice(0, 8);
+        }
 
         // Nexus arbitration: when the queuers' live estimates are flowing,
         // this poll stays quiet. Both sources write state.upcoming wholesale,
@@ -533,8 +604,11 @@ export class CheesyAdapter {
 
         // Which matches have a result, sent whatever the queue source: the
         // deck uses it to keep a played match from being listed as next when
-        // Nexus cannot tell played from on-the-field. Only on change.
-        const played = [...qual, ...playoff]
+        // Nexus cannot tell played from on-the-field. Only on change. Practice
+        // included: the queuers run Friday from Nexus too, and a played
+        // practice match is exactly as capable of sitting at the top of it.
+        const rows = [...practice, ...qual, ...playoff];
+        const played = rows
           .filter(m => m.Status === MatchStatus.RedWon || m.Status === MatchStatus.BlueWon
             || m.Status === MatchStatus.Tie)
           .map(m => m.LongName ?? m.ShortName ?? '')
@@ -545,7 +619,9 @@ export class CheesyAdapter {
           this.#emit({ type: 'schedule.played', payload: { names: played } });
         }
 
-        this.#noticeCorrections([...qual, ...playoff]);
+        // Practice too: practice matches go to the channel as well, and a
+        // corrected practice score is just as wrong in a video description.
+        this.#noticeCorrections(rows);
       } catch (err) {
         console.warn('[cheesy] schedule poll failed:', (err as Error).message);
       }
@@ -774,14 +850,50 @@ export class CheesyAdapter {
      * screen, which is what the room is still talking about, and the operator
      * moves it on. The publish queue refuses a test match separately, because
      * a scorekeeper can commit one deliberately during Friday checkout.
+     *
+     * And REMEMBERED, because the FTA can also load it on purpose, mid
+     * schedule, to check a robot while a real match waits, and then run it.
+     * Everything that match does (start, buzzer, scores, cards, arming) is
+     * the test's and not the waiting match's; see #testLoaded for what it
+     * did before. The field-level notices still flow while it is loaded: a
+     * timeout started for alliance selection has the test match loaded, and
+     * its break card and its end are exactly what the room needs.
      */
     if (matchKind(m.Type) === 'test') {
-      if (this.#loadedMatchId !== null) {
-        console.log('[cheesy] the field has loaded its test match: nothing is ' +
-          'queued. Holding the last real match on screen.');
+      if (this.#loadedMatchId !== null && !this.#testLoaded) {
+        console.log('[cheesy] the field has loaded its test match: holding the ' +
+          'last real match on screen, and nothing the test match does is ' +
+          'filed against it until a real match is loaded.');
+      }
+      this.#testLoaded = true;
+      this.#testSeenOnStatus = false;
+      // If the desk joined after a buzzer, the match that buzzer belonged to
+      // is this one, and a test match ending is nothing to report. Leaving
+      // it set handed "ended before join" to the next REAL match loaded,
+      // which then read as already over before it had started.
+      this.#joinedAfterBuzzer = false;
+      /*
+       * The one start that can slip through. A desk that restarts while a
+       * test match is running can hear matchTime on one socket before
+       * matchLoad on another, and a running first frame is announced as a
+       * late join before anything says what is loaded. Left alone, the clock
+       * it started runs out the timeline and the desk's own ticker fires a
+       * buzzer for it, filed against whatever the coverage ledger last saw
+       * loaded. Unloading is the honest correction, and only when the desk
+       * has nothing loaded at all, which is exactly the restart case: it
+       * touches no real match.
+       */
+      if (this.#started && this.#loadedMatchId === null && this.#bus.state.match === null) {
+        this.#started = false;
+        this.#emit({ type: 'match.unloaded' });
       }
       return;
     }
+    // Any real load ends a test, including one the echo guards below would
+    // otherwise swallow: after a test, the same id coming back is the field
+    // genuinely loading it again, not a socket replaying it.
+    const afterTest = this.#testLoaded;
+    this.#testLoaded = false;
     const teamAt = (key: string, fallback: number | undefined): Team | null => {
       const t = msg.Teams?.[key];
       const number = t?.Id ?? fallback;
@@ -854,12 +966,17 @@ export class CheesyAdapter {
     // match that was already over. A genuine scorekeeper replay of the same
     // match arrives after the field has returned to PreMatch, so it still
     // resets.
+    //
+    // Neither guard applies straight after a test match. #matchState is then
+    // the TEST's state (a frame race can leave it reading PostMatch when the
+    // waiting match is reloaded), and the waiting match's own state has to
+    // be rebuilt from scratch anyway, including re-arming it.
     const inProgress = this.#matchState === MatchState.StartMatch
       || this.#matchState === MatchState.AutoPeriod
       || this.#matchState === MatchState.PausePeriod
       || this.#matchState === MatchState.TeleopPeriod
       || this.#matchState === MatchState.PostMatch;
-    if (inProgress && match.id === this.#loadedMatchId) return;
+    if (!afterTest && inProgress && match.id === this.#loadedMatchId) return;
     // The OTHER reconnect window: the field sits in PreMatch for minutes
     // after a score posts, and a socket blip there replays the finished
     // match's matchLoad. Running the reset wiped the just-posted score off
@@ -868,7 +985,7 @@ export class CheesyAdapter {
     // replay flag, score still on the board: that is a reconnect echo, not a
     // scorekeeper re-run. A GENUINE re-run of the same match arrives with
     // IsReplay set (or after the score has been cleared) and still resets.
-    if (match.id === this.#loadedMatchId && !msg.IsReplay
+    if (!afterTest && match.id === this.#loadedMatchId && !msg.IsReplay
         && this.#bus.state.scorePostedAt !== null) {
       return;
     }
@@ -913,14 +1030,27 @@ export class CheesyAdapter {
     // orders: frame first (the load then picks it up), or load first.
     if (!this.#sawMatchTime) {
       this.#sawMatchTime = true;
-      this.#joinedAfterBuzzer = state === MatchState.PostMatch;
+      // A test match that has buzzed is not a real match that ended.
+      this.#joinedAfterBuzzer = state === MatchState.PostMatch && !this.#testLoaded;
       if (this.#joinedAfterBuzzer && this.#matchLoaded) this.#endedBeforeJoin();
     } else if (state !== MatchState.PostMatch) {
       this.#joinedAfterBuzzer = false;
     }
     if (state === this.#matchState) return;
     const previous = this.#matchState;
+    // Tracked through a test match too: the schedule poll must still hold off
+    // while one runs (it costs the arena's loop the same), and the load
+    // guards need to know where the field really is.
     this.#matchState = state;
+    /*
+     * Everything below that belongs to a match is skipped while the arena has
+     * its test match loaded: start, late join, the teleop re-anchor, the
+     * buzzer and the abort. Each would land on the real match the desk is
+     * holding. Prestart and the break card are about the FIELD, not the
+     * match, so they still go: a timeout started at the end of quals has the
+     * test match loaded, and the room needs that card and its end.
+     */
+    const test = this.#testLoaded;
 
     /*
      * Joining a match already in progress.
@@ -940,7 +1070,7 @@ export class CheesyAdapter {
      * hall. Without a usable time the event still fires: a clock that is a
      * few seconds out beats a screen frozen on the wrong graphic.
      */
-    const joinedLate = !this.#started
+    const joinedLate = !test && !this.#started
       && (state === MatchState.AutoPeriod
         || state === MatchState.PausePeriod
         || state === MatchState.TeleopPeriod)
@@ -968,12 +1098,12 @@ export class CheesyAdapter {
     switch (state) {
       case MatchState.StartMatch:
       case MatchState.AutoPeriod:
-        if (!this.#started) { this.#started = true; this.#emit({ type: 'match.start' }); }
+        if (!test && !this.#started) { this.#started = true; this.#emit({ type: 'match.start' }); }
         break;
       case MatchState.PostMatch:
         // Only a real match end (coming back from a timeout isn't one).
-        if (previous === MatchState.TeleopPeriod || previous === MatchState.AutoPeriod
-            || previous === MatchState.PausePeriod) {
+        if (!test && (previous === MatchState.TeleopPeriod || previous === MatchState.AutoPeriod
+            || previous === MatchState.PausePeriod)) {
           /*
            * An ABORT looks exactly like a buzzer from here: AbortMatch sets
            * the arena's state straight to PostMatch, so the desk emitted
@@ -1013,7 +1143,7 @@ export class CheesyAdapter {
         // type, not a shift_change: the ticker owns shift1..4, and a foreign
         // phase value in that stream would reach every surface that renders
         // shift labels.
-        if (previous === MatchState.PausePeriod || previous === MatchState.AutoPeriod) {
+        if (!test && (previous === MatchState.PausePeriod || previous === MatchState.AutoPeriod)) {
           this.#emit({ type: 'match.teleop_start' });
         }
         break;
@@ -1061,6 +1191,21 @@ export class CheesyAdapter {
   }
 
   #onRealtimeScore(msg: RealtimeScoreMessage): void {
+    /*
+     * A test match's scores are nobody's. All of it goes: the score bar
+     * (score.realtime), the replay markers and timeline (score.delta), the
+     * hub indicator and auto winner (hub.state) and card marks (card.issued).
+     *
+     * Including the very first frame, which the arena sends as part of
+     * loading the test match: all zeros, with every bonus false. At the end
+     * of quals that frame landed on the last qual's posted result, still up
+     * on the Final screen, and zeroed its breakdown and switched its bonus
+     * badges off. The total survived only because it had been adopted.
+     *
+     * #last is left alone rather than zeroed: the next real load resets it,
+     * and that load is the only way out of a test.
+     */
+    if (this.#testLoaded) return;
     const summaries: Record<Alliance, ScoreSummary | undefined> = {
       red: msg.Red?.ScoreSummary,
       blue: msg.Blue?.ScoreSummary,
@@ -1070,6 +1215,24 @@ export class CheesyAdapter {
       red: this.#totals(summaries.red, summaries.blue),
       blue: this.#totals(summaries.blue, summaries.red),
     };
+
+    /*
+     * The same zero frame, when it beats its own load onto the desk.
+     *
+     * matchLoad and realtimeScore can each be taken from a different socket
+     * (see #owner), and the arena sends them back to back, so either can land
+     * first. When the test match's load is second, #testLoaded is not set
+     * yet and the guard above cannot see it. A pre-match frame with nothing
+     * on the board, arriving while the loaded match's result is posted, is
+     * the arena resetting for whatever it loads next, never a fact about the
+     * result on screen, and the next load starts this match's ledger from
+     * zero regardless.
+     */
+    const blank = ALLIANCES.every(side =>
+      fuelOf(next[side]) + towerOf(next[side]) + next[side].foulsAgainst === 0);
+    if (blank && msg.MatchState === MatchState.PreMatch && this.#bus.state.scorePostedAt !== null) {
+      return;
+    }
 
     // Synthesize the deltas Cheesy never sends.
     for (const side of ALLIANCES) {
@@ -1185,11 +1348,35 @@ export class CheesyAdapter {
     // a scorekeeper correction needs. When either id is unknown (an older arena
     // build, or a boot where scorePosted lands before matchLoad) behaviour is
     // unchanged.
+    //
+    // A committed TEST match is never a result. The arena fires this notifier
+    // for one regardless, and the identity check below cannot catch it when
+    // nothing real has been loaded yet: Friday's field checkout, before the
+    // first practice match, would have revealed a test score on program and
+    // queued it for upload. Judged on the posted match's own type rather
+    // than on #testLoaded, because the last qual's genuine result is posted
+    // a moment BEFORE the arena loads its test match, and a socket running a
+    // little behind could otherwise deliver the two the other way round and
+    // lose the end of quals.
+    if (matchKind(msg.Match?.Type) === 'test') {
+      console.log('[cheesy] ignoring a posted score for the test match: it is not a result.');
+      return;
+    }
+    //
+    // A desk that boots while the arena sits on its test match has no real
+    // id to compare with, but it does know what is loaded: nothing that can
+    // have been committed. Whatever scorePosted the arena replays then is an
+    // older result (last night's final practice match, on a Saturday
+    // morning), and revealing it cut program to a score screen for a match
+    // the desk had never seen.
     const posted = msg.Match?.Id === undefined ? null : String(msg.Match.Id);
-    if (posted !== null && this.#loadedMatchId !== null && posted !== this.#loadedMatchId) {
+    const stale = posted !== null && (this.#loadedMatchId !== null
+      ? posted !== this.#loadedMatchId
+      : this.#testLoaded);
+    if (stale) {
       console.warn(`[cheesy] ignoring a posted score for match ${posted} while ` +
-        `${this.#loadedMatchId} is loaded: this is the arena replaying its last ` +
-        'result to a reconnecting display, not a new result.');
+        `${this.#loadedMatchId ?? 'the test match'} is loaded: this is the arena ` +
+        'replaying its last result to a reconnecting display, not a new result.');
       return;
     }
     this.#emit({
@@ -1238,7 +1425,40 @@ export class CheesyAdapter {
 
   // ---- field health -------------------------------------------------------
 
+  /**
+   * The safety net under #testLoaded: a real match must never be silenced
+   * because the desk missed the load that ended a test.
+   *
+   * A real matchLoad is what ends a test, and a matchLoad CAN be missed: each
+   * arena-side listener is a five-deep channel with a non-blocking send, and
+   * the owning socket's copy is the only one taken. Missing a load has
+   * always meant the desk showing the previous match; after a test it would
+   * have meant much worse, the whole of the waiting match going unannounced,
+   * its clock dead and its posted score never reaching the publish queue.
+   *
+   * arenaStatus carries the loaded match's id twice a second, and the test
+   * match is id 0. A real id while a test is believed loaded is the arena
+   * saying it has moved on. But only once this socket has itself reported
+   * id 0 since the test load: arenaStatus travels on a different socket
+   * from matchLoad, so a frame generated just BEFORE the test was loaded can
+   * arrive just after, and must not end the test it predates. Frames on one
+   * socket stay in order, so after a 0 any real id is genuinely newer.
+   *
+   * Only ever clears. An arena build that sends no MatchId, or always 0,
+   * leaves this inert rather than suppressing real matches.
+   */
+  #checkTestStillLoaded(matchId: number | undefined): void {
+    if (!this.#testLoaded || typeof matchId !== 'number') return;
+    if (matchId === 0) { this.#testSeenOnStatus = true; return; }
+    if (matchId > 0 && this.#testSeenOnStatus) {
+      console.warn(`[cheesy] the field has match ${matchId} loaded but the desk never ` +
+        'saw it load after the test match: resuming match events against the match on screen.');
+      this.#testLoaded = false;
+    }
+  }
+
   #onArenaStatus(msg: ArenaStatusMessage): void {
+    this.#checkTestStillLoaded(msg.MatchId);
     // "What happened to 846?" is the replay marker nobody thinks to hit,
     // because it happens while everyone is watching the other end of the field.
     const down: number[] = [];
@@ -1286,8 +1506,12 @@ export class CheesyAdapter {
     // `match.armed` here flips program to the score bar BEFORE anyone says
     // "3, 2, 1". The graphic must never change mid-countdown. Latched so a
     // robot dropping and relinking doesn't re-fire it.
+    //
+    // Never for a test match: every robot linking for the FTA's checkout
+    // would flip program to the score bar of the real match still waiting,
+    // long before anybody counts that match down.
     const state = msg.MatchState ?? this.#matchState;
-    if (this.#matchLoaded && !this.#armedSent && !this.#started
+    if (this.#matchLoaded && !this.#testLoaded && !this.#armedSent && !this.#started
         && state === MatchState.PreMatch
         && fielded > 0 && linked === fielded
         && !(msg.FieldEStop ?? false)) {

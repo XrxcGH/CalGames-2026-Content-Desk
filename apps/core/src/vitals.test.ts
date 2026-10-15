@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { EventBus } from './bus.ts';
 import { Vitals, type Vital, type VitalsDeps, type VitalsReport } from './vitals.ts';
 import { DEFAULTS, type Config } from './config.ts';
@@ -7,8 +8,21 @@ import { DEFAULTS, type Config } from './config.ts';
 const cfg = (over: Partial<Config> = {}): Config =>
   ({ ...structuredClone(DEFAULTS), ...over });
 
+const GB = 1024 ** 3;
+
+/**
+ * A roomy disk, injected rather than read.
+ *
+ * The disk check is a blocking one and it reads the REAL drive, so every test
+ * built on a bare `base()` passed on a laptop with space and failed on one
+ * without: "a bare desk reports off rather than broken" asserts there are no
+ * blockers, and under two hours of recording is one. Nothing in these tests is
+ * about the disk except the ones that say so, and those set their own.
+ */
+const roomy = async (): Promise<number> => 10_000 * GB;
+
 const base = (over: Partial<VitalsDeps> = {}): VitalsDeps => ({
-  bus: new EventBus(), config: cfg(), root: process.cwd(), ...over,
+  bus: new EventBus(), config: cfg(), root: process.cwd(), freeBytes: roomy, ...over,
 });
 
 const find = (report: VitalsReport, id: string): Vital =>
@@ -24,6 +38,67 @@ test('a bare desk reports off rather than broken', async () => {
   assert.equal(find(r, 'publish').level, 'off');
   assert.equal(r.blockers.length, 0, 'off is not a blocker');
   assert.notEqual(r.worst, 'fail');
+  assert.equal(find(r, 'disk').level, 'ok', 'and the injected disk, not this machine\'s, was read');
+});
+
+test('a nearly full disk is a blocker, with what to do about it', async () => {
+  // The other half of the bare-desk test: injecting a roomy disk there must not
+  // mean the check can no longer fail. 1GB is about ten minutes of one source.
+  const r = await new Vitals(base({ freeBytes: async () => 1 * GB })).report();
+  const disk = find(r, 'disk');
+  assert.equal(disk.level, 'fail');
+  assert.equal(disk.blocking, true);
+  assert.match(disk.detail, /1GB free/);
+  assert.match(disk.detail, /0\.\d hours of recording/);
+  assert.ok(disk.fix, 'a blocker without a fix is just bad news');
+  assert.ok(r.blockers.some(b => b.id === 'disk'), 'it holds the doors shut');
+  assert.equal(r.worst, 'fail');
+});
+
+test('the disk check hands the probe the folder it is recording into', async () => {
+  const asked: string[] = [];
+  const root = join(process.cwd(), 'somewhere');
+  await new Vitals(base({ root, freeBytes: async dir => { asked.push(dir); return 10_000 * GB; } })).report();
+  assert.deepEqual(asked, [root]);
+});
+
+test('the disk levels sit where the doors check says they do', async () => {
+  // Two hours blocks, five warns, past five is fine. Measured in the one unit
+  // the decision is made in, so the test sets hours and not gigabytes.
+  const perSec = 1_000_000;
+  const config = cfg();
+  const sources = Math.max(1, config.recording.sources.filter(s => s.enabled !== false).length);
+  const bytesFor = (hours: number) => hours * 3600 * perSec * sources;
+  const levelAt = async (hours: number) => find(await new Vitals(base({
+    config, recordBytesPerSec: perSec, freeBytes: async () => bytesFor(hours),
+  })).report(), 'disk').level;
+
+  assert.equal(await levelAt(1.9), 'fail');
+  assert.equal(await levelAt(3), 'warn');
+  assert.equal(await levelAt(6), 'ok');
+});
+
+test('a drive that cannot be read is unknown, not a pass and not a crash', async () => {
+  const gone = await new Vitals(base({ freeBytes: async () => { throw new Error('no such drive'); } }))
+    .report();
+  assert.equal(find(gone, 'disk').level, 'unknown');
+  assert.match(find(gone, 'disk').detail, /no such drive/);
+  assert.ok(gone.checks.length > 3, 'the other checks still ran');
+
+  // NaN fails every comparison, so without a guard it would read as "ok".
+  const odd = await new Vitals(base({ freeBytes: async () => NaN })).report();
+  assert.equal(find(odd, 'disk').level, 'unknown');
+  assert.doesNotMatch(find(odd, 'disk').detail, /NaN hours/);
+});
+
+test('with nothing injected the disk check still asks the operating system', async () => {
+  // The default is unchanged: this is the one test that reads the real drive,
+  // and it asserts only that an answer came back in the right shape, never how
+  // much room the machine has.
+  const r = await new Vitals({ bus: new EventBus(), config: cfg(), root: process.cwd() }).report();
+  const disk = find(r, 'disk');
+  assert.notEqual(disk.level, 'unknown', disk.detail);
+  assert.match(disk.detail, /GB free, about \d+\.\d hours of recording/);
 });
 
 test('a stopped recording source is a blocking failure, named', async () => {

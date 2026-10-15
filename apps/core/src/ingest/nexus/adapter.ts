@@ -102,9 +102,11 @@ export function onFieldCut(matches: NexusMatch[]): number {
  * The match a queuer has marked On field before it starts is dropped from the
  * pending list, and so is the one still playing when they mark the next. The
  * deck has to find the field's loaded match among them (deck.ts), and a
- * queuer catching up in a burst can mark several at once, so a few spare.
+ * queuer catching up in a burst can mark several at once, so plenty spare: a
+ * queuer who marked a dozen at the end of a long stretch without the tablet
+ * still leaves the field's match findable.
  */
-const RECENT_ROWS = 8;
+const RECENT_ROWS = 16;
 
 const teamNumbers = (raw: (string | null)[] | undefined): number[] =>
   (raw ?? []).map(t => Number(t)).filter(n => Number.isInteger(n) && n > 0);

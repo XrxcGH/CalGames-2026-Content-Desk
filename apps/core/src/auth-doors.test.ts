@@ -16,8 +16,6 @@ import { MediaLibrary } from './media.ts';
 import { startServer } from './server.ts';
 import { DEFAULTS, type Config } from './config.ts';
 
-const PORT = 18841;
-
 /** Set env vars for one test and put them back, whatever the test does. */
 async function withEnv(vars: Record<string, string | undefined>, run: () => Promise<void>) {
   const saved: Record<string, string | undefined> = {};
@@ -54,9 +52,11 @@ test('a body that parses but is not an object never locks a door', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cg-doors-'));
     const server = startServer({
       bus: new EventBus(), media: new MediaLibrary(dir), root: dir,
-      port: PORT, host: '127.0.0.1', config: structuredClone(DEFAULTS),
+      // Port 0: the operating system picks a free one, so a second run of this
+      // suite (or a desk left open on the machine) cannot take a fixed number.
+      port: 0, host: '127.0.0.1', config: structuredClone(DEFAULTS),
     });
-    const base = `http://127.0.0.1:${PORT}`;
+    const base = `http://127.0.0.1:${await server.listening}`;
     try {
       const doors: [string, string][] = [
         ['/api/auth', '0864'],
@@ -93,9 +93,9 @@ test('an unquoted numeric pin in config.json boots and signs in', async () => {
     config.setup = { pin: 8642 as unknown as string };
     const server = startServer({
       bus: new EventBus(), media: new MediaLibrary(dir), root: dir,
-      port: PORT + 1, host: '127.0.0.1', config,
+      port: 0, host: '127.0.0.1', config,
     });
-    const base = `http://127.0.0.1:${PORT + 1}`;
+    const base = `http://127.0.0.1:${await server.listening}`;
     try {
       // Typed into the page as text, which is how the browser sends it.
       assert.equal(await post(base, '/api/awards/auth', JSON.stringify({ pin: '2468' })), 200);

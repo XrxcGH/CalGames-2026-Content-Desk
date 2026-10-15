@@ -67,7 +67,24 @@ export interface VitalsDeps {
   coverage?: CoverageLedger | null;
   /** Bytes per second the recorder is expected to write, for hours-remaining. */
   recordBytesPerSec?: number;
+  /**
+   * Bytes free on the drive that holds `root`. Defaults to asking the
+   * operating system, which is what the running desk does and nothing passes.
+   *
+   * Injectable so a test can say how full the disk is instead of inheriting
+   * the answer from whichever machine runs it. The disk check is a BLOCKING
+   * one, so a test that reads the real drive passes on a roomy laptop and
+   * fails on a nearly full one, for a reason that has nothing to do with the
+   * code under test.
+   */
+  freeBytes?: (root: string) => Promise<number>;
 }
+
+/** What the operating system says is free for an ordinary process on `root`'s drive. */
+const driveFreeBytes = async (root: string): Promise<number> => {
+  const fs = await statfs(root);
+  return fs.bavail * fs.bsize;
+};
 
 /** 12Mbps video plus audio, per source, which is the launcher's default. */
 const DEFAULT_BYTES_PER_SEC = (12_000_000 / 8) * 1.05;
@@ -125,8 +142,13 @@ export class Vitals {
    */
   async #disk(): Promise<Vital[]> {
     try {
-      const fs = await statfs(this.#d.root);
-      const freeBytes = fs.bavail * fs.bsize;
+      const freeBytes = await (this.#d.freeBytes ?? driveFreeBytes)(this.#d.root);
+      // A drive that answers with nonsense is an unreadable drive, not a
+      // healthy one: NaN fails every comparison below and would have read as
+      // "ok" with "NaN hours" on a check people trust to stop them opening doors.
+      if (!Number.isFinite(freeBytes) || freeBytes < 0) {
+        throw new Error(`the drive reported ${freeBytes} bytes free`);
+      }
       // The sources the recorder will actually open, not every source in the
       // file. It skips `enabled: false` ones, so four configured with three
       // disabled reported a QUARTER of the true hours, enough to trip the

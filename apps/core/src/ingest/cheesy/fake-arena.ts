@@ -131,6 +131,10 @@ export function startFakeArena(opts: FakeArenaOpts) {
     // The scripted event never reaches Sunday. An empty list is what a real
     // arena serves before the bracket exists, and the desk polls this type.
     if (path === '/api/matches/playoff') return json([]);
+    // Asked for only while a practice match is loaded, which this script
+    // never does. Served anyway, as an arena with no practice schedule serves
+    // it, so a rehearsal edited to load one gets an answer rather than a 404.
+    if (path === '/api/matches/practice') return json([]);
     res.writeHead(404).end('fake-arena: not found');
   });
 

@@ -36,7 +36,7 @@ test('refuses REST paths outside the read allowlist', () => {
     assert.throws(() => assertPathAllowed(path), /Refusing to request/, path);
   }
   for (const path of ['/api/rankings', '/api/alliances', '/api/matches/qualification',
-    '/api/teams/846/avatar', '/api/bracket/svg']) {
+    '/api/matches/practice', '/api/teams/846/avatar', '/api/bracket/svg']) {
     assert.doesNotThrow(() => assertPathAllowed(path), path);
   }
 });
@@ -1825,5 +1825,516 @@ test('a desk that starts before or during a match never claims it was over', () 
     adapter.ingest('matchTime', { MatchState: first, MatchTimeSec: 30 });
     adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
     assert.equal(types.includes('match.ended_before_join'), false, String(first));
+  }
+});
+
+// ---- Friday practice --------------------------------------------------------
+
+/** A practice row, flat like every schedule row, on Friday evening's clock. */
+const practiceRow = (n: number, status: number) => ({
+  Id: 200 + n, Type: 1, TypeOrder: n,
+  ShortName: `P${n}`, LongName: `Practice ${n}`, Status: status,
+  Time: new Date(Date.UTC(2026, 9, 17, 1, 0) + n * 7 * 60_000).toISOString(),
+  Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670,
+});
+
+test('during practice the on-deck list is the practice schedule, not Saturday\'s quals', async () => {
+  /*
+   * The poll read qualification and playoff only, so through the whole of
+   * Friday's practice session the venue screens and pit monitors listed
+   * Saturday's quals with times projected from practice cycles, and the
+   * practice match on the field never had a row at all.
+   */
+  let practice = [1, 2, 3, 4, 5].map(n => practiceRow(n, n === 1 ? MatchStatus.RedWon : MatchStatus.Scheduled));
+  const asked: string[] = [];
+  const server = createServer((req, res) => {
+    asked.push(req.url ?? '');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.url?.includes('rankings')) return res.end('{"Rankings":[]}');
+    if (req.url?.endsWith('/practice')) return res.end(JSON.stringify(practice));
+    if (req.url?.endsWith('/qualification')) {
+      return res.end(JSON.stringify([1, 2, 3, 4].map(n => qual(n, MatchStatus.Scheduled))));
+    }
+    res.end('[]');
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const bus = new EventBus();
+  const decks: string[][] = [];
+  bus.subscribe(ev => {
+    if (ev.type === 'queue.updated' && ev.source === 'cheesy') {
+      decks.push((ev.payload as { upcoming: { shortName: string }[] }).upcoming.map(u => u.shortName));
+    }
+  });
+  const adapter = new CheesyAdapter({ bus, host: `127.0.0.1:${port}`, displayId: 'test' });
+  const schedule = () => asked.filter(u => u.startsWith('/api/matches/'));
+
+  try {
+    adapter.ingest('matchLoad', {
+      Match: { Id: 202, Type: 1, TypeOrder: 2, LongName: 'Practice 2', ShortName: 'P2' },
+    });
+    await adapter.pollNow();
+    assert.deepEqual(schedule(), ['/api/matches/practice'],
+      'practice is asked for INSTEAD of quals, so the request count does not grow');
+    assert.deepEqual(decks.at(-1), ['P2', 'P3', 'P4', 'P5'], 'the practice match on the field heads the list');
+    assert.deepEqual(bus.state.fieldPlayed, ['Practice 1'],
+      'and the played list carries practice, so the deck can tell a played practice match from the next one');
+
+    // A practice match on the field is still a match on the field: no table walk.
+    asked.length = 0;
+    adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+    adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+    await adapter.pollNow();
+    assert.deepEqual(schedule(), [], 'never while a match is live, practice included');
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+
+    // Practice runs out. The last practice match is still the last one loaded,
+    // and the next thing anybody will play is Qualification 1.
+    practice = practice.map(p => ({ ...p, Status: MatchStatus.BlueWon }));
+    adapter.ingest('matchLoad', {
+      Match: { Id: 205, Type: 1, TypeOrder: 5, LongName: 'Practice 5', ShortName: 'P5' },
+    });
+    asked.length = 0;
+    await adapter.pollNow();
+    assert.deepEqual(schedule(), ['/api/matches/practice', '/api/matches/qualification']);
+    assert.deepEqual(decks.at(-1), ['Q1', 'Q2', 'Q3', 'Q4'], 'practice is over, so quals are up next');
+    assert.ok(bus.state.fieldPlayed.includes('Practice 5'));
+
+    // Saturday: a qual is loaded, and practice is not asked about again.
+    adapter.ingest('matchLoad', {
+      Match: { Id: 1, Type: 2, TypeOrder: 1, LongName: 'Qualification 1', ShortName: 'Q1' },
+    });
+    asked.length = 0;
+    await adapter.pollNow();
+    assert.deepEqual(schedule(), ['/api/matches/qualification']);
+    assert.deepEqual(decks.at(-1), ['Q1', 'Q2', 'Q3', 'Q4']);
+  } finally {
+    adapter.stop();
+    await new Promise(r => server.close(r));
+  }
+});
+
+// ---- the test match ---------------------------------------------------------
+
+const TEST_LOAD = { Match: { Id: 0, Type: 0, ShortName: 'T', LongName: 'Test Match' } };
+
+/** Everything that belongs to one match rather than to the field. */
+const PER_MATCH = [
+  'match.loaded', 'match.armed', 'match.start', 'match.teleop_start', 'match.end',
+  'match.aborted', 'match.ended_before_join', 'match.score_posted',
+  'score.realtime', 'score.delta', 'hub.state', 'card.issued',
+];
+
+test('a test match run while a real match waits is not that match', () => {
+  /*
+   * The FTA loads Cheesy's Test Match to check a robot while Q43 waits. The
+   * load itself was already suppressed, so the desk held Q43 on screen, but
+   * everything the test match then did was filed against Q43: its clock
+   * started, program cut to the score bar, the test's fuel landed on Q43's
+   * score with replay markers, the pace model recorded a cycle and the
+   * on-deck list marked Q43 on the field.
+   */
+  const bus = new EventBus();
+  const types: string[] = [];
+  bus.subscribe(ev => types.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  const q43 = {
+    Match: { Id: 43, Type: 2, TypeOrder: 43, LongName: 'Qualification 43', Red1: 846, Blue1: 100 },
+  };
+  const linked = {
+    MatchState: MatchState.PreMatch,
+    AllianceStations: {
+      R1: { Team: { Id: 846 }, DsConn: { RobotLinked: true } },
+      B1: { Team: { Id: 100 }, DsConn: { RobotLinked: true } },
+    },
+  };
+
+  adapter.ingest('matchLoad', q43);
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  types.length = 0;
+
+  adapter.ingest('matchLoad', TEST_LOAD);
+  // The arena's own zero frame, sent as part of loading the test match.
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.PreMatch, Red: { ScoreSummary: {} }, Blue: { ScoreSummary: {} },
+  });
+  adapter.ingest('arenaStatus', linked);
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.AutoPeriod,
+    Red: { ScoreSummary: { AutoFuelPoints: 6 }, ActiveRemainingSec: 15 },
+    Blue: { ScoreSummary: { AutoFuelPoints: 2 }, ActiveRemainingSec: 15 },
+    RedCards: { '846': 'yellow' },
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PausePeriod, MatchTimeSec: 20 });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 23 });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.TeleopPeriod,
+    Red: { ScoreSummary: { AutoFuelPoints: 6, TeleopFuelPoints: 30 }, ActiveRemainingSec: 20 },
+    Blue: { ScoreSummary: { AutoFuelPoints: 2 }, ActiveRemainingSec: 0 },
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  // The FTA commits it, the arena fires scorePosted for it anyway, and
+  // LoadNextMatch has nothing to offer after a test match but the test match.
+  adapter.ingest('scorePosted', {
+    Match: TEST_LOAD.Match,
+    RedScoreSummary: { Score: 36 }, BlueScoreSummary: { Score: 2 },
+    RedWon: true, BlueWon: false,
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  adapter.ingest('matchLoad', TEST_LOAD);
+
+  for (const type of PER_MATCH) {
+    assert.equal(types.includes(type), false, `${type} belonged to the test match, not to Q43`);
+  }
+  assert.ok(types.includes('match.prestart'), 'the field returning to pre-match is still field news');
+  assert.equal(bus.state.match?.displayName, 'Qualification 43');
+  assert.equal(bus.state.matchStartedAt, null, 'Q43\'s clock never started');
+  assert.equal(bus.state.matchEndedAt, null, 'and Q43 is not over');
+  assert.equal(bus.state.scorePostedAt, null, 'and nothing was revealed');
+  assert.equal(bus.state.score.red.total, 0, 'and the test\'s fuel is not on Q43\'s score');
+  assert.equal(bus.state.screen, 'overview', 'and program never left the overview');
+
+  // The scorekeeper reloads Q43. That ends the test, and Q43 plays normally.
+  types.length = 0;
+  adapter.ingest('matchLoad', q43);
+  assert.equal(types.filter(t => t === 'match.loaded').length, 1,
+    'the same id after a test is a genuine load, not a reconnect echo');
+  adapter.ingest('arenaStatus', linked);
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.AutoPeriod,
+    Red: { ScoreSummary: { AutoFuelPoints: 4 } }, Blue: { ScoreSummary: {} },
+  });
+  assert.equal(types.filter(t => t === 'match.armed').length, 1, 'Q43 arms');
+  assert.equal(types.filter(t => t === 'match.start').length, 1, 'Q43 starts');
+  assert.ok(types.includes('score.delta'), 'Q43 scores');
+  assert.equal(bus.state.score.red.fuel, 4, 'from zero, not from the test match\'s total');
+});
+
+test('the waiting match reloaded after a test is a fresh load, even ahead of the pre-match frame', () => {
+  // The reconnect-echo guards key off #matchState, which through a test is
+  // the TEST's state. A reload landing before the field's pre-match frame
+  // read as Q43 replayed mid-match and was swallowed, leaving Q43 latched as
+  // armed from before the test and never re-armed for its real countdown.
+  const bus = new EventBus();
+  const types: string[] = [];
+  bus.subscribe(ev => types.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  const q43 = { Match: { Id: 43, Type: 2, TypeOrder: 43, LongName: 'Qualification 43' } };
+  const linked = {
+    MatchState: MatchState.PreMatch,
+    AllianceStations: { R1: { Team: { Id: 846 }, DsConn: { RobotLinked: true } } },
+  };
+
+  adapter.ingest('matchLoad', q43);
+  adapter.ingest('arenaStatus', linked);
+  assert.equal(types.filter(t => t === 'match.armed').length, 1, 'fixture sanity: Q43 armed');
+
+  adapter.ingest('matchLoad', TEST_LOAD);
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  types.length = 0;
+
+  adapter.ingest('matchLoad', q43);
+  assert.equal(types.filter(t => t === 'match.loaded').length, 1, 'a genuine load, not an echo');
+  assert.equal(bus.state.screen, 'overview');
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  adapter.ingest('arenaStatus', linked);
+  assert.equal(types.filter(t => t === 'match.armed').length, 1, 'and Q43 arms for its own countdown');
+});
+
+const bonus = (on: boolean) => ({
+  EnergizedBonusRankingPoint: on, SuperchargedBonusRankingPoint: false, TraversalBonusRankingPoint: false,
+});
+
+/** The frame the arena sends as part of loading a match: nothing on the board. */
+const zeroFrame = {
+  MatchState: MatchState.PreMatch,
+  Red: { ScoreSummary: { AutoFuelPoints: 0, TeleopFuelPoints: 0, TeleopTowerPoints: 0, ...bonus(false) } },
+  Blue: { ScoreSummary: { AutoFuelPoints: 0, TeleopFuelPoints: 0, TeleopTowerPoints: 0, ...bonus(false) } },
+};
+
+/** The last qual of the day, played, committed and up on the Final screen. */
+function lastQualPosted() {
+  const bus = new EventBus();
+  const types: string[] = [];
+  bus.subscribe(ev => types.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', {
+    Match: { Id: 80, Type: 2, TypeOrder: 80, LongName: 'Qualification 80', Red1: 846, Blue1: 100 },
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 60 });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.TeleopPeriod,
+    Red: { ScoreSummary: { TeleopFuelPoints: 120, TeleopTowerPoints: 30, ...bonus(true) } },
+    Blue: { ScoreSummary: { TeleopFuelPoints: 40, ...bonus(false) } },
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  adapter.ingest('scorePosted', {
+    Match: { Id: 80, Type: 2, LongName: 'Qualification 80' },
+    RedScoreSummary: { Score: 150, ...bonus(true) },
+    BlueScoreSummary: { Score: 40, ...bonus(false) },
+    RedWon: true, BlueWon: false,
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  assert.equal(bus.state.screen, 'score', 'fixture sanity: the final is up');
+  return { bus, types, adapter };
+}
+
+test('the test match loading after the last qual leaves the final score on screen', () => {
+  /*
+   * LoadNextMatch finds nothing after the last qual and loads the test match,
+   * which sends an all-zero realtime frame with every bonus false. That frame
+   * landed on the last qual's posted result, still up on the Final screen,
+   * and zeroed its breakdown and switched its bonus badges off.
+   *
+   * Both orders: matchLoad and realtimeScore can be taken from different
+   * sockets, and the arena sends them back to back.
+   */
+  for (const order of ['load first', 'frame first']) {
+    const { bus, adapter } = lastQualPosted();
+    if (order === 'load first') {
+      adapter.ingest('matchLoad', TEST_LOAD);
+      adapter.ingest('realtimeScore', zeroFrame);
+    } else {
+      adapter.ingest('realtimeScore', zeroFrame);
+      adapter.ingest('matchLoad', TEST_LOAD);
+    }
+    assert.equal(bus.state.match?.displayName, 'Qualification 80', order);
+    assert.equal(bus.state.screen, 'score', order);
+    assert.equal(bus.state.score.red.teleopFuel, 120, `${order}: the breakdown survives`);
+    assert.equal(bus.state.score.red.rp.energized, true,
+      `${order}: and so does the badge the field awarded`);
+    assert.equal(bus.state.score.red.total, 150, order);
+  }
+});
+
+test('a timeout with the test match loaded still puts the break card up, and takes it down', () => {
+  // Alliance selection runs under a timeout after the last qual, with the
+  // test match loaded. The break card is the field's, not the match's.
+  const { bus, types, adapter } = lastQualPosted();
+  adapter.ingest('matchLoad', TEST_LOAD);
+  types.length = 0;
+  adapter.ingest('matchTiming', { TimeoutDurationSec: 900 });
+  adapter.ingest('matchLoad', { ...TEST_LOAD, BreakDescription: 'Alliance Selection' });
+  adapter.ingest('matchTime', { MatchState: MatchState.TimeoutActive });
+  const brk = bus.recent.filter(e => e.type === 'break.started').at(-1)?.payload as
+    { label?: string; seconds?: number } | undefined;
+  assert.equal(brk?.label, 'Alliance Selection');
+  assert.equal(brk?.seconds, 900);
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  assert.ok(types.includes('match.prestart'), 'and so does its end');
+  assert.equal(types.includes('match.loaded'), false, '"Test Match" still never goes on air');
+});
+
+test('Friday checkout on the test match, before anything is loaded, never reaches air', () => {
+  // The identity check on posted scores has nothing to compare with before
+  // the first real load, so a committed checkout match was revealed on
+  // program and handed to the publish queue.
+  const bus = new EventBus();
+  const types: string[] = [];
+  bus.subscribe(ev => types.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  const screen = bus.state.screen;
+
+  adapter.ingest('matchLoad', TEST_LOAD);
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.AutoPeriod, Red: { ScoreSummary: { AutoFuelPoints: 3 } }, Blue: { ScoreSummary: {} },
+  });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  adapter.ingest('scorePosted', {
+    Match: TEST_LOAD.Match, RedScoreSummary: { Score: 3 }, BlueScoreSummary: { Score: 0 },
+  });
+
+  for (const type of PER_MATCH) assert.equal(types.includes(type), false, type);
+  assert.equal(bus.state.matchStartedAt, null);
+  assert.equal(bus.state.scorePostedAt, null);
+  assert.equal(bus.state.screen, screen, 'program is where the operator left it');
+});
+
+test('a desk that boots on the test match does not reveal the arena\'s last result', () => {
+  // Saturday morning, the arena sitting on its test match: every display that
+  // connects is sent the last committed result, which is Friday's final
+  // practice match. Nothing real is loaded, so nothing can have been posted.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', TEST_LOAD);
+  adapter.ingest('scorePosted', {
+    Match: { Id: 220, Type: 1, LongName: 'Practice 20' },
+    RedScoreSummary: { Score: 90 }, BlueScoreSummary: { Score: 70 },
+  });
+  assert.equal(bus.state.scorePostedAt, null);
+  assert.notEqual(bus.state.screen, 'score');
+
+  // And the first real result of the day still lands.
+  adapter.ingest('matchLoad', { Match: { Id: 1, Type: 2, TypeOrder: 1, LongName: 'Qualification 1' } });
+  adapter.ingest('scorePosted', {
+    Match: { Id: 1, Type: 2 }, RedScoreSummary: { Score: 101 }, BlueScoreSummary: { Score: 99 },
+  });
+  assert.equal(bus.state.screen, 'score');
+  assert.equal(bus.state.score.red.total, 101);
+});
+
+test('a desk that joins after a test match buzzed does not call the next real match over', () => {
+  // "Ended before join" is for the match loaded at that moment, which here is
+  // the test match. Handing it to the next real load put that match in the
+  // post-match state before it had been played, whenever the load beat the
+  // field's pre-match frame onto the desk.
+  for (const order of ['load first', 'frame first']) {
+    const bus = new EventBus();
+    const types: string[] = [];
+    bus.subscribe(ev => types.push(ev.type));
+    const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+    if (order === 'load first') {
+      adapter.ingest('matchLoad', TEST_LOAD);
+      adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+    } else {
+      adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+      adapter.ingest('matchLoad', TEST_LOAD);
+    }
+    adapter.ingest('matchLoad', { Match: { Id: 1, Type: 1, TypeOrder: 1, LongName: 'Practice 1' } });
+    assert.equal(types.includes('match.ended_before_join'), false, order);
+    assert.equal(bus.state.matchEndedAt, null, `${order}: Practice 1 has not been played`);
+
+    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+    adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+    assert.equal(types.filter(t => t === 'match.start').length, 1, `${order}: and it plays`);
+  }
+});
+
+test('a lost reload after a test match does not silence the real match', () => {
+  /*
+   * Only a real matchLoad ends a test, and the owning socket's copy is the
+   * only one taken, so one dropped frame would have left the whole of Q43
+   * unannounced: no clock, no score, no posted result for the publish queue.
+   * arenaStatus carries the loaded match id twice a second and is the net.
+   */
+  const bus = new EventBus();
+  const types: string[] = [];
+  bus.subscribe(ev => types.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchLoad', { Match: { Id: 43, Type: 2, TypeOrder: 43, LongName: 'Qualification 43' } });
+  adapter.ingest('matchLoad', TEST_LOAD);
+  types.length = 0;
+
+  // A status frame generated just before the test load, arriving just after
+  // it on its own socket, must not end the test it predates.
+  adapter.ingest('arenaStatus', { MatchId: 43, MatchState: MatchState.PreMatch });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.PreMatch, Red: { ScoreSummary: { TeleopFuelPoints: 9 } }, Blue: { ScoreSummary: {} },
+  });
+  assert.equal(types.includes('score.realtime'), false, 'still the test match');
+
+  adapter.ingest('arenaStatus', { MatchId: 0, MatchState: MatchState.PreMatch });
+  // Q43 is reloaded, and the desk's copy of that load is lost.
+  adapter.ingest('arenaStatus', { MatchId: 43, MatchState: MatchState.PreMatch });
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.AutoPeriod, Red: { ScoreSummary: { AutoFuelPoints: 2 } }, Blue: { ScoreSummary: {} },
+  });
+  assert.equal(types.filter(t => t === 'match.start').length, 1, 'Q43 starts');
+  assert.ok(types.includes('score.realtime'), 'and scores');
+});
+
+test('a desk restarted during a test match takes back the start it could not know was a test', () => {
+  // matchTime can beat matchLoad onto a desk that has just started, and a
+  // running first frame is announced as a late join before anything says
+  // what is loaded. Left running, the desk's own clock would have buzzed it.
+  const bus = new EventBus();
+  const types: string[] = [];
+  bus.subscribe(ev => types.push(ev.type));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 40 });
+  assert.ok(bus.state.matchStartedAt !== null, 'fixture sanity: the late join fired');
+
+  adapter.ingest('matchLoad', TEST_LOAD);
+  assert.ok(types.includes('match.unloaded'));
+  assert.equal(bus.state.matchStartedAt, null, 'the clock is stopped');
+
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  assert.equal(types.includes('match.end'), false, 'and the test match buzzing is not a result');
+});
+
+// ---- Nexus freshness --------------------------------------------------------
+
+test('only a Nexus list holds the field\'s queue off, not the banner clear when Nexus goes quiet', async () => {
+  /*
+   * The Nexus adapter sends {nowQueuing: null} on its own after three failed
+   * polls, to take a stale "now queuing" banner down. Counting that as a
+   * delivery restarted the 90s deferral at the very moment Nexus had been
+   * shown to be gone, so a bad or revoked key kept the field's queue off the
+   * screens for another minute and a half or more, with a played match
+   * sitting as next up after its score had been committed.
+   */
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.url?.includes('rankings')) return res.end('{"Rankings":[]}');
+    if (req.url?.endsWith('/qualification')) {
+      return res.end(JSON.stringify([
+        qual(42, MatchStatus.RedWon), qual(43, MatchStatus.Scheduled), qual(44, MatchStatus.Scheduled),
+      ]));
+    }
+    res.end('[]');
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const bus = new EventBus();
+  const fieldQueues: unknown[] = [];
+  bus.subscribe(ev => {
+    if (ev.type === 'queue.updated' && ev.source === 'cheesy') fieldQueues.push(ev.payload);
+  });
+  const adapter = new CheesyAdapter({ bus, host: `127.0.0.1:${port}`, displayId: 'test' });
+  const nexusList = (ts: number) => bus.emit({
+    type: 'queue.updated', source: 'nexus', confidence: 'derived', ts,
+    payload: {
+      upcoming: [{ name: 'Qualification 42', shortName: 'Q42', time: null, red: [], blue: [] }],
+      recent: [], nowQueuing: 'Qualification 42', from: 'nexus',
+    },
+  });
+
+  try {
+    // The production path: start() opens the sockets (there is no arena here,
+    // so they fail and back off) and runs the first poll. Wait that out so the
+    // polls below are not swallowed by the overlap guard.
+    adapter.start();
+    for (let i = 0; i < 300 && !bus.recent.some(e => e.type === 'schedule.played'); i++) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+    assert.ok(bus.recent.some(e => e.type === 'schedule.played'), 'fixture sanity: the first poll ran');
+
+    // Nexus is up and listing: the field's printed schedule yields to it.
+    nexusList(Date.now());
+    fieldQueues.length = 0;
+    await adapter.pollNow();
+    assert.equal(fieldQueues.length, 0, 'a live Nexus list is deferred to');
+
+    // Nexus stops answering. Its last list is two minutes old, and then the
+    // Nexus adapter takes the banner down.
+    nexusList(Date.now() - 120_000);
+    bus.emit({
+      type: 'queue.updated', source: 'nexus', confidence: 'derived', payload: { nowQueuing: null },
+    });
+    await adapter.pollNow();
+    assert.equal(fieldQueues.length, 1, 'the banner clear is not a queue: the field takes over now');
+    assert.equal(bus.state.queueFrom, 'field');
+    assert.equal(bus.state.upcoming[0]?.shortName, 'Q43', 'and the played Q42 is no longer next up');
+  } finally {
+    adapter.stop();
+    await new Promise(r => server.close(r));
   }
 });

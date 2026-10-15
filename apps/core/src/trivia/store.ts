@@ -133,7 +133,40 @@ export class TriviaStore {
     this.#questions = questions.filter(q => q.kind !== 'match');
   }
 
-  setJoinUrl(url: string): void { this.#joinUrl = url; }
+  /**
+   * The link the big screen's QR code and the phone page's invitation carry.
+   *
+   * Stored, and PUSHED when it actually changes. The desk's LAN address moves
+   * mid-event (a cable swapped, a router that hands out a new lease, a laptop
+   * that got its first address after the desk started), and index.ts calls
+   * this from the address watcher. Storing alone left the snapshot's joinUrl
+   * stale on every surface until the next trivia action happened to publish,
+   * so the QR on the projector kept sending phones to a dead address while
+   * the host stood there with nothing in the room to prompt a publish.
+   *
+   * Three conditions on publishing, each for its own reason:
+   *
+   * - Only when the value CHANGED. The watcher re-reports the same address
+   *   every probe, and a repeat must not put an event in the log per probe.
+   * - Only once the store is LIVE. The boot-time rebuild feeds the morning's
+   *   snapshots through observe(), which refuses once #live is set, and the
+   *   first publish is what sets it. This is called twice during boot (the
+   *   localhost placeholder, then the first real address), before that
+   *   restore has run: publishing here would end the restore before it began
+   *   and the leaderboard the gym spent the morning on would come back empty.
+   *   A store nobody has touched has put nothing on any screen, so there is
+   *   no stale link to correct either.
+   * - Never WHILE a sample seed is running, because #publish would tag the
+   *   event as sample, and the real address change is not sample data. The
+   *   seed is synchronous so this cannot really interleave; it is refused
+   *   rather than trusted, since a mid-seed snapshot carries sample players
+   *   that are not yet marked as sample and would be logged as real ones.
+   */
+  setJoinUrl(url: string): void {
+    if (url === this.#joinUrl) return;
+    this.#joinUrl = url;
+    if (this.#live && !this.#sample) this.#publish();
+  }
 
   #publish(): void {
     this.#live = true;

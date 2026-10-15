@@ -712,7 +712,13 @@ export interface DeskState {
    * time. Derived from the fields above on every event; never sent by a
    * source. See deck.ts.
    */
-  deck: { rows: UpcomingMatch[]; offs: (number | null)[] };
+  deck: {
+    rows: UpcomingMatch[];
+    offs: (number | null)[];
+    /** Each row's estimated start (epoch ms), null on the field or with no pace yet. */
+    etas: (number | null)[];
+    breakBefore?: boolean;
+  };
   /**
    * The names of every match the FIELD has a result for (Cheesy's schedule:
    * status red won, blue won or tie). The one source that knows for certain
@@ -821,7 +827,7 @@ export const initialState = (): DeskState => ({
   queueFrom: null,
   queueRecent: [],
   fieldPlayed: [],
-  deck: { rows: [], offs: [] },
+  deck: { rows: [], offs: [], etas: [] },
   matchRun: 1,
   officialWinner: null,
   tiebreakReason: null,

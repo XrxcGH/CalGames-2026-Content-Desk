@@ -8,7 +8,7 @@
 
 import { clockDisplay, clockFrom, hubActiveAt, isLockdown, phaseAt } from './clock.ts';
 import { phaseOf } from './types.ts';
-import { buildDeck, sameDeckInputs } from './deck.ts';
+import { buildDeck, projectDeck, sameDeckInputs } from './deck.ts';
 import {
   emptyAllianceScore, REBUILT,
   type Alliance, type AllianceScore, type CardCall, type Confidence,
@@ -916,10 +916,11 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
  */
 function safeDeck(s: DeskState): DeskState['deck'] {
   try {
-    return buildDeck(s);
+    const deck = buildDeck(s);
+    return { ...deck, etas: projectDeck(deck, s.pace, s.queueFrom) };
   } catch {
     const rows = s.upcoming ?? [];
-    return { rows, offs: rows.map((_, i) => i) };
+    return { rows, offs: rows.map((_, i) => i), etas: rows.map(() => null) };
   }
 }
 

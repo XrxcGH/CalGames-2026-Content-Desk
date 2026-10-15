@@ -11,7 +11,8 @@
  */
 
 import type { EventBus } from './bus.ts';
-import type { DeskState, UpcomingMatch } from './types.ts';
+import type { DeskEvent } from './types.ts';
+import { projectDeck, scheduledAt } from './deck.ts';
 
 /** Cycles longer than this are breaks, not pace, so exclude from the median. */
 const MAX_CYCLE_MS = 20 * 60_000;
@@ -82,71 +83,9 @@ export function behindMinutes(
   return Math.abs(min) > MAX_CREDIBLE_BEHIND_MIN ? null : min;
 }
 
-const norm = (x: string | null | undefined): string => (x ?? '').trim().toLowerCase();
-
-/**
- * The PUBLISHED start of a deck row, epoch ms, or null when nobody published
- * one.
- *
- * A Nexus row's `time` is the queuers' estimate, recomputed on every poll, so
- * "behind schedule" measured against it was the desk's projection minus
- * Nexus's projection: about zero, all day, however late the event ran. Only
- * the row's `scheduled` counts there. A field row's `time` is the arena's
- * published schedule. A row the deck made up for the loaded match has none.
- */
-export function scheduledAt(
-  row: Pick<UpcomingMatch, 'time' | 'scheduled'> | undefined, queueFrom: DeskState['queueFrom'],
-): number | null {
-  if (!row) return null;
-  const raw = row.scheduled ?? (queueFrom === 'nexus' ? null : row.time);
-  const t = raw ? Date.parse(raw) : NaN;
-  return Number.isFinite(t) ? t : null;
-}
-
-/**
- * Is on-deck row 0 the match that is on the field right now?
- *
- * The two queue sources disagree about this, and a figure built on the wrong
- * answer is a whole cycle out. The field's queue (Cheesy, and the sample loop)
- * keeps a match listed until its score commits, so while it plays it IS row 0.
- * Nexus drops a match from its list the moment it is "On field" (see
- * pendingMatches), so there row 0 is already the next match to play. Asking
- * the queue's source is not enough, because Nexus can lag the field and a test
- * match was never in any queue; the one witness that is right every time is
- * the loaded match's own name.
- *
- * With no loaded match to compare against, fall back to the source's
- * convention: believe the field's queue, not Nexus's.
- */
-export function headIsPlaying(
-  head: Pick<UpcomingMatch, 'name' | 'shortName'> | undefined,
-  match: { displayName: string } | null | undefined,
-  queueFrom: DeskState['queueFrom'],
-): boolean {
-  if (!head) return false;
-  const playing = norm(match?.displayName);
-  if (!playing) return queueFrom !== 'nexus';
-  return norm(head.name) === playing || (norm(head.shortName) !== '' && norm(head.shortName) === playing);
-}
-
-/**
- * How many rows at the head of the on-deck queue have already started: 1 from
- * match.start until that match's score commits (it is still listed, as row 0),
- * otherwise 0.
- *
- * `nextStartAt` projects the first match that has not started, so every
- * per-row estimate has to skip this many rows first. Counting from row 0
- * regardless put the next match's start time on the match already playing and
- * every later row one full cycle late, from match start until the score
- * committed, then snapped back. The surfaces carry a copy of this rule inline
- * (they are plain browser JS); this is the one that is tested.
- */
-export function startedRows(
-  s: Pick<DeskState, 'lastMatchStartedAt' | 'scorePostedAt' | 'match' | 'upcoming' | 'queueFrom'>,
-): 0 | 1 {
-  if (s.lastMatchStartedAt === null || s.scorePostedAt !== null) return 0;
-  return headIsPlaying(s.upcoming[0], s.match, s.queueFrom) ? 1 : 0;
-}
+// The queue rules live with the deck, which is what they serve. Re-exported
+// here because pace's tests and older callers import them from pace.
+export { headIsPlaying, scheduledAt, startedRows } from './deck.ts';
 
 /**
  * Projected start for on-deck row `row`, or null when there is none to give:
@@ -165,7 +104,10 @@ export function etaForRow(
  * picture changes. Re-emits on a slow tick too. "est. start" keeps walking
  * forward while the field is stalled, without any new events.
  */
-export function attachPace(bus: EventBus): () => void {
+/** Stops the pace model; `observe` feeds it the day's logged starts after a restart. */
+export type PaceHandle = (() => void) & { observe(ev: DeskEvent): void };
+
+export function attachPace(bus: EventBus): PaceHandle {
   // Each start with whether it was the sample's. A sample start and the first
   // real one an hour later are not a cycle, and one minutes apart is a wrong
   // one, so the sample's are dropped the moment the field starts a real match.
@@ -176,6 +118,11 @@ export function attachPace(bus: EventBus): () => void {
     for (let i = starts.length - 1; i >= 0; i--) if (starts[i]!.sample) starts.splice(i, 1);
   };
   let lastEmit = '';
+  // A real start with nothing after it yet (no end, no score, no new load).
+  // The one way the field takes such a start back is the adapter's unload:
+  // a desk restarted during the FTA's test match hears the test's clock
+  // before it hears that a test match is what is loaded.
+  let openStart = false;
   // While a match plays, the figure is latched at its start (this match
   // against its own published time) and held until its score commits or
   // another match loads. Comparing the NEXT match's projection mid-match is
@@ -190,23 +137,22 @@ export function attachPace(bus: EventBus): () => void {
     const nextStartAt = projectNextStart(lastStartAt, cycleMs, now);
     const holding = held !== null && s.lastMatchStartedAt !== null && s.scorePostedAt === null
       && (s.match?.id ?? null) === held.match;
-    // The row nextStartAt belongs to, by the deck's reckoning, is offset 0.
-    // When it has no published time (a replay, a practice match, a row the
-    // deck made up for the loaded match), the first row after it that has one
-    // stands in, at its own projected start. Never across a break: past lunch
-    // the projection stops meaning anything.
+    // The first upcoming row with a published time, at its own projected
+    // start, by the same projection every screen prints (deck.ts): the next
+    // to start when it has a published time, the first after it that does
+    // when it does not (a replay, a practice match, a row the deck made up for
+    // the loaded match). Across a break the projection already waits for the
+    // published restart, so lunch reads as lunch and not as running early.
     const behind = (): number | null => {
       const deck = s.deck;
       if (!deck || nextStartAt === null) return null;
+      const etas = projectDeck(deck, {
+        nextStartAt, cycleSec: cycleMs === null ? null : cycleMs / 1000, lastStartAt,
+      }, s.queueFrom);
       for (let i = 0; i < deck.rows.length; i++) {
-        const off = deck.offs[i];
-        if (off === null || off === undefined) continue;
+        if (deck.offs[i] === null) continue;
         const at = scheduledAt(deck.rows[i], s.queueFrom);
-        if (at !== null) {
-          if (off > 0 && cycleMs === null) return null;
-          return behindMinutes(nextStartAt + off * (cycleMs ?? 0), at);
-        }
-        if (deck.rows[i]!.breakAfter) return null;
+        if (at !== null) return behindMinutes(etas[i] ?? null, at);
       }
       return null;
     };
@@ -245,25 +191,62 @@ export function attachPace(bus: EventBus): () => void {
         ? { behindMin: latched, match: s.match?.id ?? null }
         : null;
       const sample = ev.source === 'demo';
-      if (!sample) dropSample();
+      if (!sample) { dropSample(); openStart = true; }
       starts.push({ ts: ev.ts, sample });
       while (starts.length > KEEP + 1) starts.shift();
       emit();
     } else if (ev.type === 'match.unloaded') {
-      // The sample data's clear. Its starts go, and the figure is published
-      // again even if it has not changed, because the clear has just wiped
-      // what the sample put in state.pace.
+      // The sample data's clear, or the field taking back a start that was a
+      // test match's (see openStart). Those starts go, and the figure is
+      // published again even if it has not changed, because the clear has
+      // just wiped what the sample put in state.pace.
       dropSample();
+      if (ev.source !== 'demo' && openStart) {
+        for (let i = starts.length - 1; i >= 0; i--) {
+          if (!starts[i]!.sample) { starts.splice(i, 1); break; }
+        }
+      }
+      openStart = false;
       held = null;
       lastEmit = '';
       emit();
     } else if (ev.type === 'queue.updated' || ev.type === 'match.loaded'
-      || ev.type === 'match.score_posted' || ev.type === 'match.ended_before_join') {
+      || ev.type === 'match.score_posted' || ev.type === 'match.ended_before_join'
+      || ev.type === 'schedule.played' || ev.type === 'match.end' || ev.type === 'match.aborted') {
       // Any of these can move which row is next, or end the latch.
+      if (ev.type !== 'queue.updated' && ev.type !== 'schedule.played') openStart = false;
       emit();
     }
   });
 
   const timer = setInterval(emit, 30_000);
-  return () => { unsubscribe(); clearInterval(timer); };
+
+  /*
+   * After a restart, today's starts come back from the event log.
+   *
+   * The starts lived only in memory, so a desk restarted at 2pm had no cycle
+   * time and printed no estimates anywhere until two more matches had
+   * started: a quarter of an hour of blank "when do we play" rows, right
+   * after whatever went wrong enough to need a restart. Fed by rebuildFromLog
+   * (only today's events, sample events never), and published once at the
+   * end of the burst rather than per event.
+   */
+  let refresh: NodeJS.Timeout | null = null;
+  const observe = (ev: DeskEvent): void => {
+    if (ev.type !== 'match.start' || ev.source === 'demo' || !Number.isFinite(ev.ts)) return;
+    starts.push({ ts: ev.ts, sample: false });
+    starts.sort((a, b) => a.ts - b.ts);
+    while (starts.length > KEEP + 1) starts.shift();
+    if (!refresh) {
+      refresh = setTimeout(() => { refresh = null; lastEmit = ''; emit(); }, 0);
+      refresh.unref?.();
+    }
+  };
+
+  const stop = (): void => {
+    unsubscribe();
+    clearInterval(timer);
+    if (refresh) clearTimeout(refresh);
+  };
+  return Object.assign(stop, { observe });
 }

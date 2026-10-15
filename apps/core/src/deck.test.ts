@@ -2,7 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from './bus.ts';
 import { attachPace } from './pace.ts';
+import { projectDeck } from './deck.ts';
 import { fieldMatchKey, matchKey, sameMatch } from './match-key.ts';
+import { rebuildFromLog } from './rebuild.ts';
+import { localStamp } from './bus.ts';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { NexusAdapter } from './ingest/nexus/adapter.ts';
 import { NexusClient, type NexusEventStatus, type NexusMatch } from './ingest/nexus/client.ts';
 import type { UpcomingMatch } from './types.ts';
@@ -330,8 +336,9 @@ test('the Nexus adapter sends the rows it dropped, and the published time apart 
       : m),
   ]);
   const p = seen[0] as { recent: UpcomingMatch[]; upcoming: UpcomingMatch[] };
-  assert.deepEqual(p.recent.map(m => m.shortName), ['Q39', 'Q40', 'Q41', 'Q42', 'Q43', 'Q44', 'Q45', 'Q46'],
-    'the last eight before the cut, in Nexus order');
+  assert.deepEqual(p.recent.map(m => m.shortName),
+    ['Q38', 'Q39', 'Q40', 'Q41', 'Q42', 'Q43', 'Q44', 'Q45', 'Q46'],
+    'the rows before the cut (up to sixteen), in Nexus order');
   assert.equal(p.upcoming[0]?.scheduled, new Date(1_700_000_000_000).toISOString());
   assert.equal(p.upcoming[0]?.time, new Date(1_700_000_900_000).toISOString(), 'time stays the estimate');
 });
@@ -357,12 +364,10 @@ test('in the bug window every printed estimate is right, and behind schedule rea
     d.load('Qualification 43');
     d.nexus(sched(43));                          // marked On field, not started
 
-    const s = d.bus.state;
-    const { rows, offs } = s.deck;
-    const eta = (i: number) => s.pace.nextStartAt! + offs[i]! * s.pace.cycleSec! * 1000;
+    const { rows, etas } = d.bus.state.deck;
     assert.equal(rows[0]?.shortName, 'Q43');
-    assert.equal(eta(0), at(43), 'Q43 is estimated at its own slot');
-    assert.equal(eta(1), at(44), 'and Q44 one cycle after, not at Q43\'s');
+    assert.equal(etas[0], at(43), 'Q43 is estimated at its own slot');
+    assert.equal(etas[1], at(44), 'and Q44 one cycle after, not at Q43\'s');
     assert.equal(updates.at(-1)!.behindMin, 0, 'the old pairing read 7 minutes AHEAD here');
   } finally {
     detach();
@@ -416,6 +421,146 @@ test('the sample\'s match start never makes a cycle with the field\'s first real
     d.load('Qualification 1'); d.start(t + 5 * MIN); d.commit();
     d.load('Qualification 2'); d.start(t + 12 * MIN);
     assert.equal(d.bus.state.pace.cycleSec, 7 * 60, 'the real cycle, not the median of 5 and 7');
+  } finally {
+    detach();
+  }
+});
+
+// ---- breaks, restarts, bursts ---------------------------------------------------
+
+const qrow = (n: number, at: number | null, extra: Partial<UpcomingMatch> = {}): UpcomingMatch => ({
+  name: `Qualification ${n}`, shortName: `Q${n}`, time: at === null ? null : new Date(at).toISOString(),
+  red: [], blue: [], ...extra,
+});
+
+test('lunch: the first match after it is estimated at its published time, not at the clock', () => {
+  // Q50 went at 11:55 on a 7 minute cycle; lunch; Q51 is printed for 12:45.
+  // It is 12:10. The estimate used to walk with the clock: "~12:10".
+  const t1155 = Date.parse('2026-10-17T11:55:00');
+  const now = t1155 + 15 * MIN;
+  const deck = { rows: [qrow(51, t1155 + 50 * MIN), qrow(52, t1155 + 57 * MIN)], offs: [0, 1] };
+  const etas = projectDeck(deck, { nextStartAt: now, cycleSec: 420, lastStartAt: t1155 }, 'field');
+  assert.deepEqual(etas, [t1155 + 50 * MIN, t1155 + 57 * MIN]);
+
+  // A field running late into lunch comes back no earlier than printed, and
+  // later if the morning ran over it.
+  const late = projectDeck(deck, {
+    nextStartAt: t1155 + 60 * MIN, cycleSec: 420, lastStartAt: t1155 + 53 * MIN,
+  }, 'field');
+  assert.deepEqual(late, [t1155 + 60 * MIN, t1155 + 67 * MIN]);
+});
+
+test('a break in the middle of the list is waited out there, and only there', () => {
+  const t0 = Date.parse('2026-10-17T11:41:00');
+  const deck = {
+    rows: [qrow(48, t0), qrow(49, t0 + 7 * MIN), qrow(50, t0 + 14 * MIN), qrow(51, t0 + 64 * MIN)],
+    offs: [0, 1, 2, 3],
+  };
+  const etas = projectDeck(deck, {
+    nextStartAt: t0 + 5 * MIN, cycleSec: 420, lastStartAt: t0 - 2 * MIN,
+  }, 'field');
+  assert.deepEqual(etas, [t0 + 5 * MIN, t0 + 12 * MIN, t0 + 19 * MIN, t0 + 64 * MIN],
+    'five behind through the morning, back on the printed time after lunch');
+});
+
+test('the queuers\' "break after" is a break, with Nexus\'s own estimate as the floor', () => {
+  const t0 = Date.parse('2026-10-17T11:55:00');
+  const deck = {
+    rows: [qrow(51, t0 + 50 * MIN), qrow(52, t0 + 57 * MIN)], offs: [0, 1], breakBefore: true,
+  };
+  const etas = projectDeck(deck, { nextStartAt: t0 + 15 * MIN, cycleSec: 420, lastStartAt: t0 }, 'nexus');
+  assert.equal(etas[0], t0 + 50 * MIN, 'no published time under Nexus: its estimate is the floor');
+
+  // Through the real adapter: the row before the cut carries the break.
+  const d = desk();
+  const ms = quals(50).map(m => (m.label === 'Qualification 50' ? { ...m, breakAfter: 'Lunch' } : m));
+  d.load('Qualification 50'); d.start(); d.commit();
+  d.nexus(ms);
+  assert.equal(d.bus.state.deck.breakBefore, true);
+});
+
+test('overnight: a desk left running from Friday practice waits for Saturday\'s first match', () => {
+  const fri = Date.parse('2026-10-16T19:40:00');
+  const sat9 = Date.parse('2026-10-17T09:00:00');
+  const deck = { rows: [qrow(1, sat9), qrow(2, sat9 + 7 * MIN)], offs: [0, 1] };
+  const etas = projectDeck(deck, {
+    nextStartAt: sat9 - 60 * MIN, cycleSec: 420, lastStartAt: fri,
+  }, 'field');
+  assert.deepEqual(etas, [sat9, sat9 + 7 * MIN]);
+});
+
+test('after a restart the pace comes back from the day\'s log, not two matches later', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cg-pace-'));
+  try {
+    const t = Date.now() - 30 * MIN;
+    const line = (ts: number, source = 'cheesy') => JSON.stringify({
+      id: String(ts), ts, matchClock: null, source, confidence: 'authoritative',
+      type: 'match.start', payload: {},
+    });
+    await writeFile(join(dir, `${localStamp(new Date())}.ndjson`),
+      [line(t), line(t + 7 * MIN), line(t + 14 * MIN, 'demo'), line(t + 21 * MIN)].join('\n') + '\n');
+    const bus = new EventBus();
+    const pace = attachPace(bus);
+    try {
+      await rebuildFromLog(dir, [pace]);
+      await new Promise(r => setTimeout(r, 5));
+      assert.equal(bus.state.pace.lastStartAt, t + 21 * MIN, 'the last real start; the sample one skipped');
+      assert.equal(bus.state.pace.cycleSec, 7 * 60 * 1.5,
+        'median of the real cycles, 7 and 14 minutes: the sample start never joined them');
+    } finally {
+      pace();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a queuer catching up a dozen matches in one go still leaves the field\'s match findable', () => {
+  const d = desk();
+  const many: NexusMatch[] = [];
+  for (let n = 30; n <= 60; n++) many.push(row(`Qualification ${n}`, n <= 54 ? 'On field' : 'Queuing soon'));
+  d.load('Qualification 43'); d.start();
+  d.nexus(many);
+  assert.deepEqual(d.view().slice(0, 2), ['Q43:field', 'Q44:0']);
+});
+
+test('a replay loaded before the queuers have added its Replay row', () => {
+  const d = desk();
+  played(d, ['Qualification 24', 'Qualification 30']);
+  d.load('Qualification 24', 2);
+  d.nexus([
+    row('Qualification 24', 'On field'), row('Qualification 30', 'On field'),
+    row('Qualification 31', 'On field'),   // marked, not yet played
+    row('Qualification 32', 'On deck'),
+  ]);
+  assert.deepEqual(d.view(), ['Q24R:0', 'Q31:1', 'Q32:2']);
+
+  // Without the field's word on what is played, the marked rows cannot be
+  // sorted, so the old rule stands.
+  const e = desk();
+  e.load('Qualification 24', 2);
+  e.nexus([row('Qualification 30', 'On field'), row('Qualification 31', 'On deck')]);
+  assert.deepEqual(e.view(), ['Q31:0']);
+});
+
+test('a start the field takes back (a test match after a restart) is not a cycle', () => {
+  const d = desk();
+  const detach = attachPace(d.bus);
+  try {
+    const t = Date.now() - 30 * MIN;
+    d.load('Qualification 1'); d.start(t); d.commit();
+    d.load('Qualification 2'); d.start(t + 7 * MIN); d.commit();
+    // The test match's clock arrives first, then the adapter learns a test
+    // match is what is loaded and takes it back.
+    d.bus.emit({ type: 'match.start', source: 'cheesy', ts: t + 9 * MIN });
+    d.bus.emit({ type: 'match.unloaded', source: 'cheesy' });
+    assert.equal(d.bus.state.pace.lastStartAt, t + 7 * MIN);
+    assert.equal(d.bus.state.pace.cycleSec, 420);
+
+    // A real match that ended is never taken back.
+    d.load('Qualification 3'); d.start(t + 14 * MIN); d.bus.emit({ type: 'match.end', source: 'cheesy' });
+    d.bus.emit({ type: 'match.unloaded', source: 'cheesy' });
+    assert.equal(d.bus.state.pace.lastStartAt, t + 14 * MIN);
   } finally {
     detach();
   }
