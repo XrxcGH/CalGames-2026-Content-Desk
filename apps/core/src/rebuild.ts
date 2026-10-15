@@ -23,14 +23,17 @@
  * 1. It feeds `observe()` DIRECTLY and never touches the bus. Re-emitting the
  *    morning would re-fire cues, re-cut clips, re-announce cards, and take the
  *    program screen to whatever was up at 9am. Nothing here reaches air.
- * 2. It reads TODAY's logs only. A three-day event is three days of separate
- *    tournament phases and separate rundowns; dragging Friday's practice cards
- *    into Sunday is the thing the phase rule in cards.ts exists to prevent.
+ * 2. It feeds TODAY's events only, judged by each event's own timestamp. A
+ *    three-day event is three days of separate tournament phases and separate
+ *    rundowns; dragging Friday's practice cards into Sunday is the thing the
+ *    phase rule in cards.ts exists to prevent. It opens yesterday's files as
+ *    well as today's to find them, because a file is named for the moment it
+ *    was opened and the desk does not restart at midnight: see rebuildFromLog.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { localStamp } from './bus.ts';
+import { localDay } from './bus.ts';
 import type { DeskEvent } from './types.ts';
 
 /** Anything that can be fed a logged event to rebuild itself. */
@@ -54,13 +57,30 @@ export function isFromDay(name: string, day: string): boolean {
 }
 
 export interface RebuildResult {
+  /** Log files opened: today's and yesterday's. */
   files: number;
+  /** Events from today that reached the observers. */
   events: number;
+  /** Torn lines and sample-data events, left out. */
   skipped: number;
+  /** Events read from a file but stamped on a different day, left where they were. */
+  otherDay: number;
 }
 
 /**
  * Feed today's logged events to each observer, oldest first.
+ *
+ * Which file an event sits in is not what decides whether it is today's: its
+ * own `ts` is. A log file is named for the moment it was OPENED, and the desk
+ * runs Friday to Sunday without restarting, so before the bus rotated its
+ * log at midnight the whole of Saturday sat in a Friday-named file, and a
+ * Saturday restart (which chose files by name) rebuilt from nothing. The bus
+ * rotates now, but a file can still straddle midnight: the rotation happens
+ * on the first event of the new day, a desk that was killed at 23:59 and
+ * restarted at 00:10 never rotated at all, and a log copied in from another
+ * machine is whatever it is. So yesterday's files are opened too, and every
+ * event is placed on its own day. Yesterday's events in them are dropped;
+ * today's are kept, whatever the name on the file says.
  *
  * Never throws. A missing log directory is the normal first-boot case, and a
  * torn last line is what a power cut leaves behind. Neither is a reason to
@@ -72,12 +92,19 @@ export async function rebuildFromLog(
   // Local, via the same helper logPathFor names with. A UTC day here put the
   // boundary at 5pm local: an evening restart matched no files at all, and the
   // next morning matched the previous evening's.
-  const day = localStamp(now).slice(0, 10);
-  const result: RebuildResult = { files: 0, events: 0, skipped: 0 };
+  const day = localDay(now);
+  // Yesterday by the local calendar, not by subtracting 24 hours: across the
+  // autumn clock change 24 hours back lands on today's date again.
+  const eve = new Date(now);
+  eve.setDate(eve.getDate() - 1);
+  const yesterday = localDay(eve);
+  const result: RebuildResult = { files: 0, events: 0, skipped: 0, otherDay: 0 };
 
   let names: string[];
   try {
-    names = (await readdir(dir)).filter(n => isFromDay(n, day)).sort();
+    names = (await readdir(dir))
+      .filter(n => isFromDay(n, day) || isFromDay(n, yesterday))
+      .sort();
   } catch {
     return result;                       // no logs yet: a fresh desk
   }
@@ -91,6 +118,8 @@ export async function rebuildFromLog(
       continue;
     }
     result.files++;
+    // The day on the file name, for an event with no usable stamp of its own.
+    const fileDay = name.slice(0, 10);
 
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
@@ -102,6 +131,22 @@ export async function rebuildFromLog(
         result.skipped++;
         continue;
       }
+      // Sample data is never history. The Sample data button logs into the
+      // real day's log like anything else on the bus, and this loop used to
+      // fold it back in on every restart: press the button on event morning,
+      // restart, and a real team carried the sample's yellow card through the
+      // rest of qualifications, the sample sponsor sat in the sponsor report,
+      // and a sample match sat in the coverage ledger. Everything the sample
+      // emits is tagged demo, which is exactly what this checks.
+      if (ev.source === 'demo') { result.skipped++; continue; }
+      // Placed by its own stamp, in local time like the file names. The name
+      // only says when the file was opened; a Saturday 00:03 match.end in a
+      // file opened Friday 08:00 is Saturday's, and Friday's last card in the
+      // same file is not. An event with no usable stamp (a hand-edited log)
+      // is taken to belong to the file it is in rather than dropped.
+      const evDay = typeof ev.ts === 'number' && Number.isFinite(ev.ts)
+        ? localDay(new Date(ev.ts)) : fileDay;
+      if (evDay !== day) { result.otherDay++; continue; }
       result.events++;
       for (const o of observers) {
         // One observer throwing must not cost the others their history.

@@ -1,10 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EventBus } from './bus.ts';
+import { EventBus, localDay } from './bus.ts';
 import { EVENT_SCHEMA_VERSION, type DeskEvent } from './types.ts';
+
+/** A moment in October 2026, in LOCAL time: the clock the log is named and rotated on. */
+const local = (day: number, hour: number, minute = 0, second = 0): Date =>
+  new Date(2026, 9, day, hour, minute, second);
+
+/** The event types in a log file, in order. */
+const typesIn = async (path: string): Promise<string[]> =>
+  (await readFile(path, 'utf8')).split('\n').filter(Boolean)
+    .map(l => (JSON.parse(l) as DeskEvent).type);
 
 test('every event carries the envelope version and a monotonic seq', () => {
   const bus = new EventBus();
@@ -86,6 +95,78 @@ test('a replayed log is renumbered on this process rather than keeping old seqs'
     await bus.replay(file, 0);
 
     assert.deepEqual(seqs, [1, 2], 'renumbered on this process, not carried over');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the log rotates at local midnight, so Saturday is never filed under Friday', async () => {
+  // The log was opened once and named for the day the PROCESS started, and the
+  // desk runs Friday to Sunday without restarting, so all of Saturday went into
+  // a Friday-named file. rebuildFromLog chooses files by the day in their name:
+  // a Saturday restart rebuilt nothing while the file sat right there.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-bus-rotate-'));
+  try {
+    const bus = new EventBus();
+    const friday = local(16, 23, 59);
+    await bus.openLog(dir, { now: friday });
+    bus.emit({ type: 'match.loaded', payload: { displayName: 'Practice 12' }, ts: friday.getTime() });
+    bus.emit({ type: 'match.end', ts: local(16, 23, 59, 40).getTime() });
+    // The first event of Saturday is what opens Saturday's file.
+    bus.emit({ type: 'match.loaded', payload: { displayName: 'Qualification 1' }, ts: local(17, 0, 0, 10).getTime() });
+    assert.ok(bus.logPath?.startsWith(join(dir, localDay(local(17, 0)))),
+      'the open file is now named for Saturday');
+    bus.emit({ type: 'match.start', ts: local(17, 0, 1).getTime() });
+    await bus.closeLog();
+
+    const files = (await readdir(dir)).sort();
+    assert.equal(files.length, 2, 'one file per local day');
+    assert.ok(files[0]!.startsWith(localDay(friday)), `${files[0]} is Friday's`);
+    assert.ok(files[1]!.startsWith(localDay(local(17, 0))), `${files[1]} is Saturday's`);
+    assert.deepEqual(await typesIn(join(dir, files[0]!)), ['match.loaded', 'match.end'],
+      "Friday's file holds Friday, flushed to the last line");
+    assert.deepEqual(await typesIn(join(dir, files[1]!)), ['match.loaded', 'match.start'],
+      "Saturday's file holds Saturday");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a rehearsal tag follows the log across midnight', async () => {
+  // A --demo tech check that runs past midnight has to stay out of the next
+  // day's rebuild exactly as it stayed out of this one's. Rotated into an
+  // untagged file, its fabricated matches would be Saturday's history.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-bus-rotate-'));
+  try {
+    const bus = new EventBus();
+    await bus.openLog(dir, { tag: 'rehearsal', now: local(16, 23, 50) });
+    bus.emit({ type: 'match.loaded', payload: { displayName: 'Test' }, ts: local(16, 23, 50).getTime() });
+    bus.emit({ type: 'match.loaded', payload: { displayName: 'Test' }, ts: local(17, 0, 5).getTime() });
+    await bus.closeLog();
+
+    const files = (await readdir(dir)).sort();
+    assert.equal(files.length, 2);
+    for (const f of files) assert.ok(f.endsWith('.rehearsal.ndjson'), `${f} is tagged`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an event stamped behind the open file stays in it', async () => {
+  // Forward only. A replay restamps its events near the wall clock, and a few
+  // seconds behind midnight they must not flip the log back onto a file named
+  // for yesterday; rebuildFromLog places every event by its own stamp anyway.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-bus-rotate-'));
+  try {
+    const bus = new EventBus();
+    await bus.openLog(dir, { now: local(17, 10) });
+    bus.emit({ type: 'match.loaded', payload: { displayName: 'Late' }, ts: local(16, 23, 59).getTime() });
+    bus.emit({ type: 'match.start', ts: local(17, 10, 1).getTime() });
+    await bus.closeLog();
+
+    const files = await readdir(dir);
+    assert.equal(files.length, 1, 'no yesterday-named file was opened');
+    assert.deepEqual(await typesIn(join(dir, files[0]!)), ['match.loaded', 'match.start']);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

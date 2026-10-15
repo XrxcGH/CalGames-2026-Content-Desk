@@ -158,14 +158,19 @@ CalGames 2026 Content Desk
 Double-click START-DESK.cmd to run the desk for real.
 Double-click START-PRACTICE.cmd to try it with a pretend match instead.
 
-Either way, a window opens and after a minute it prints READY with an
-address like http://172.22.0.23:8720/
-Type that address into any pit monitor, laptop, or phone on the same
-network to see the screens. Leave the window open: closing it stops
-the desk.
+Nothing appears for up to a minute the first time. Then your web browser
+opens by itself on the desk's front page. The "Start here" box at the top
+shows this desk's address on the network and the PIN: write both on the
+whiteboard. Type that address into any pit monitor, laptop or phone on the
+same network to see the screens.
 
-Audience screens need no PIN. Control screens ask for the event PIN,
-which the READY message prints.
+There is no other window, on purpose. If something goes wrong, a red error
+box says what. Lost the browser tab, or something looks stuck? Double-click
+again: if the desk is running it just reopens it, and it never stops a show.
+
+To check every screen before there is a show, press "Fill the screens with
+sample data" in the Start here box. Restart the desk before the first
+practice match so the sample clears.
 
 Do not delete config.json or data/trivia.json: those are yours, and the
 launcher leaves them alone when it updates everything else.

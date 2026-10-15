@@ -95,9 +95,10 @@ input:focus-visible, textarea:focus-visible {
 </head>
 <body>
   <h1>Shout-outs<div class="tick"></div></h1>
-  <p class="sub">See somebody do a genuinely gracious thing? Tell the whole
-    gym. A content desk volunteer reads every submission, and the good ones go
-    up on the screens between matches, signed with the name you give below.</p>
+  <p class="sub">A volunteer who went out of their way, a team that lent you a
+    part, a mentor, the ref crew: tell the whole gym. A content desk volunteer
+    reads every submission, and the good ones go up on the screens between
+    matches, signed with the name you give below.</p>
 
   <form class="card" id="form">
     <!-- Consent has to be informed BEFORE the typing, not discovered from the
@@ -119,9 +120,11 @@ input:focus-visible, textarea:focus-visible {
     <p class="field-why">If the desk puts your shout-out up, these two are
       printed underneath it, on the screens in the gym and on the stream. A
       first name on its own is plenty.</p>
-    <label for="msg">Who did the gracious thing, and what was it?</label>
+    <label for="to">Who is it for?</label>
+    <input id="to" maxlength="60" placeholder="The queuing volunteers">
+    <label for="msg">What did they do?</label>
     <textarea id="msg" maxlength="200"
-      placeholder="Team 1868 lent us their spare radio five minutes before our match"></textarea>
+      placeholder="Found our pit when we were lost and got us on the field with a minute to spare"></textarea>
     <div class="count" id="count" aria-hidden="true">200 left</div>
     <button class="btn-go" id="send" type="submit">Send it to the desk</button>
     <p class="err" id="err" hidden aria-live="polite"></p>
@@ -160,6 +163,7 @@ $('form').addEventListener('submit', async e => {
       body: JSON.stringify({
         name: $('name').value.trim(),
         team: Number($('team').value) || undefined,
+        to: $('to').value.trim(),
         message: $('msg').value.trim(),
       }),
     });
@@ -179,11 +183,12 @@ $('form').addEventListener('submit', async e => {
 });
 
 $('again').onclick = () => {
+  $('to').value = '';
   $('msg').value = '';
   $('count').textContent = '200 left';
   $('done').hidden = true;
   $('form').hidden = false;
-  $('msg').focus();
+  $('to').focus();
 };
 </script>
 </body>

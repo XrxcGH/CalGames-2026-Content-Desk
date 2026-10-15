@@ -9,7 +9,7 @@
 
 import { mkdir, readFile } from 'node:fs/promises';
 import { createWriteStream, type WriteStream } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { phaseAt, PHASE_ORDER } from './clock.ts';
 import { reduce, tick } from './state.ts';
 import {
@@ -31,6 +31,17 @@ export class EventBus {
   #state: DeskState = initialState();
   #subscribers = new Set<Subscriber>();
   #log: WriteStream | null = null;
+  /**
+   * Where the log lives and how it is tagged, kept so the stream can be
+   * reopened under a fresh stamp when the local day changes (see #rotateLog).
+   * Null until openLog() runs, which is also what "logging is off" means.
+   */
+  #logDir: string | null = null;
+  #logTag: string | undefined;
+  /** The local day (YYYY-MM-DD) the open log file is named for. */
+  #logDay = '';
+  /** Rotated-out files still flushing their tails; closeLog() waits on them too. */
+  #flushing = new Set<Promise<void>>();
   /** Recent history, for late-joining surfaces and the replay timeline. */
   #ring: DeskEvent[] = [];
   #ringMax = 5000;
@@ -57,16 +68,83 @@ export class EventBus {
   /** Where the current (or just-finished) match began. Survives the buzzer. */
   get lastMatchStartedAt(): number | null { return this.#state.lastMatchStartedAt; }
 
-  async openLog(path: string): Promise<void> {
-    await mkdir(dirname(path), { recursive: true });
-    this.#log = createWriteStream(path, { flags: 'a' });
+  /**
+   * Start appending to a log in `dir`, named for the local day and time it
+   * opens (see logPathFor), and ROTATE it at local midnight.
+   *
+   * The rotation is the point. The desk runs Friday to Sunday without a
+   * restart, and the file used to be opened once and named for the day the
+   * PROCESS started, so all of Saturday's events landed in a Friday-named
+   * file. rebuildFromLog picks files by the day in their name, so a Saturday
+   * restart rebuilt nothing: cards, coverage, run of show, sponsor counts and
+   * awards-presented all gone, with the file holding them sitting right
+   * there. Now the first event stamped on a new local day closes the old file
+   * and opens one named for that day.
+   *
+   * `tag` marks a rehearsal (see logPathFor) and follows every rotated file,
+   * so a --demo session that runs across midnight stays out of the rebuild.
+   * `now` exists for tests; it is the wall clock otherwise.
+   */
+  async openLog(dir: string, opts: { tag?: string; now?: Date } = {}): Promise<void> {
+    await mkdir(dir, { recursive: true });
+    const now = opts.now ?? new Date();
+    this.#logDir = dir;
+    this.#logTag = opts.tag;
+    this.#logDay = localDay(now);
+    this.#log = this.#openStream(logPathFor(dir, now, opts.tag));
+  }
+
+  #openStream(path: string): WriteStream {
+    const stream = createWriteStream(path, { flags: 'a' });
     // A write failure mid-show (disk full, media ejected) raises the stream's
     // 'error' event, and an unhandled one kills the whole process. Losing the
     // log is survivable; losing the overlay is not.
-    this.#log.on('error', err => {
+    stream.on('error', err => {
+      // Only the CURRENT stream may switch logging off. A rotated-out file is
+      // still flushing its tail when the new day's file opens, and a failure
+      // on the old one must not null out the new one with it.
+      if (this.#log !== stream) {
+        console.error('[bus] rotated-out event log failed to flush:', err.message);
+        return;
+      }
       console.error('[bus] event log write failed, logging disabled:', err.message);
       this.#log = null;
     });
+    return stream;
+  }
+
+  /**
+   * Reopen the log under a new name when `ts` falls on a later local day than
+   * the open file is named for.
+   *
+   * Driven by the event's own stamp rather than a midnight timer. A timer
+   * drifts, is missed while the laptop sleeps through midnight, and would fire
+   * on a day nothing happens and leave an empty file; the first event of the
+   * new day is exactly the moment the new file is needed. Forward only: an
+   * event stamped behind the file's day (a replay restamped near, not past,
+   * midnight) stays in the open file, where rebuildFromLog places it by its
+   * own ts regardless of the name.
+   */
+  #rotateLog(ts: number): void {
+    if (!this.#log || !this.#logDir || !Number.isFinite(ts)) return;
+    const at = new Date(ts);
+    const day = localDay(at);
+    if (day <= this.#logDay) return;
+    const old = this.#log;
+    this.#log = this.#openStream(logPathFor(this.#logDir, at, this.#logTag));
+    this.#logDay = day;
+    // end() flushes the old tail in the background. Nothing here waits on it
+    // (the first event of the day must not stall behind a disk), but the tail
+    // is remembered so a shutdown moments later still waits for it.
+    const done = new Promise<void>(res => old.end(() => res()));
+    this.#flushing.add(done);
+    void done.then(() => this.#flushing.delete(done));
+  }
+
+  /** The file the log is currently being written to, or null when logging is off. */
+  get logPath(): string | null {
+    const log = this.#log;
+    return log ? String(log.path) : null;
   }
 
   /**
@@ -78,8 +156,9 @@ export class EventBus {
   closeLog(): Promise<void> {
     const log = this.#log;
     this.#log = null;
-    if (!log) return Promise.resolve();
-    return new Promise(res => log.end(() => res()));
+    const tails = [...this.#flushing];
+    if (log) tails.push(new Promise(res => log.end(() => res())));
+    return Promise.all(tails).then(() => undefined);
   }
 
   emit<T>(init: EmitInit<T>): DeskEvent<T> {
@@ -186,6 +265,7 @@ export class EventBus {
   #record(ev: DeskEvent): void {
     this.#ring.push(ev);
     if (this.#ring.length > this.#ringMax) this.#ring.shift();
+    this.#rotateLog(ev.ts);
     this.#log?.write(JSON.stringify(ev) + '\n');
     for (const fn of this.#subscribers) {
       try { fn(ev, this.#state); }
@@ -296,6 +376,13 @@ export function localStamp(d: Date): string {
   return `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
     `-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
+
+/**
+ * The local calendar day a moment belongs to, as the first ten characters of
+ * its localStamp. The one definition of "which day" shared by the log name,
+ * the midnight rotation and rebuildFromLog's per-event filter.
+ */
+export const localDay = (d: Date): string => localStamp(d).slice(0, 10);
 
 /**
  * `tag` marks a session whose events must never feed the boot-time rebuild:

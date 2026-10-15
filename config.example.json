@@ -187,7 +187,62 @@
     "//": "Recognition and info slides: volunteer thank-yous, SystemCore session times, meeting calls, food-truck hours. The side screens rotate the deck on their own; the desk can take any slide to the program. More get typed at the event and persist to data/slides.json.",
     "//kinds": "recognition (thank-you card) or info (announcement card). Shout-outs approved from /s/gp join the deck as a third kind.",
     "//example": "{ \"id\": \"syscore\", \"kind\": \"info\", \"title\": \"SystemCore session\", \"lines\": [\"Saturday 12:30, Room 201\", \"Limelight walks through the 2027 controller\"] }",
-    "list": []
+    "list": [
+      {
+        "id": "thanks-wrrf-board",
+        "kind": "recognition",
+        "title": "Thank you, WRRF Board of Directors",
+        "lines": [
+          "For making CalGames possible",
+          "Western Region Robotics Forum"
+        ]
+      },
+      {
+        "id": "thanks-wrrf-interns",
+        "kind": "recognition",
+        "title": "Thank you, WRRF Interns",
+        "lines": [
+          "For the hours behind the scenes",
+          "that made this weekend run"
+        ]
+      },
+      {
+        "id": "thanks-planning-committee",
+        "kind": "recognition",
+        "title": "Thank you, CalGames Planning Committee",
+        "lines": [
+          "Months of planning",
+          "for three days of robots"
+        ]
+      },
+      {
+        "id": "thanks-volunteers",
+        "kind": "recognition",
+        "title": "Thank you, volunteers",
+        "lines": [
+          "Referees, scorekeepers, queuers,",
+          "inspectors, judges, field reset,",
+          "safety, and everyone in a lanyard"
+        ]
+      },
+      {
+        "id": "thanks-host",
+        "kind": "recognition",
+        "title": "Thank you, Woodside High School",
+        "lines": [
+          "For hosting CalGames 2026"
+        ]
+      },
+      {
+        "id": "how-to-shout-out",
+        "kind": "info",
+        "title": "Send a shout-out",
+        "lines": [
+          "Scan the code on this screen",
+          "to thank a volunteer, a team or a mentor"
+        ]
+      }
+    ]
   },
 
   "rundown": {
@@ -211,8 +266,9 @@
     "//apiKey": "From frc.nexus/api. Sent as the Nexus-Api-Key header.",
     "//eventKey": "The Nexus event key, usually the same as event.key. Polling starts when both are set.",
     "//note": "Only useful if the event actually runs its queueing on Nexus. For an event that does not, the timings come back looking authoritative and are not.",
+    "//calgames": "CalGames 2026 queues on Nexus (frc.nexus/cacg), event key 2026cacg. Paste an API key from frc.nexus/api and the queueing banner, live queue times, announcements and parts requests start flowing.",
     "apiKey": "",
-    "eventKey": ""
+    "eventKey": "2026cacg"
   },
 
   "startgg": {

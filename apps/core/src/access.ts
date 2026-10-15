@@ -113,10 +113,12 @@ const OPEN_POST = new Set([
 const OPEN_PREFIXES = ['/theme/', '/shared/', '/media/'];
 
 /**
- * Carved back OUT of an open prefix.
+ * The only parts of /media/ that are open.
  *
- * /media/ is open because every audience surface pulls robot cutouts from it
- * with no cookie. The same mount also serves media/audio, which is the one
+ * /media/ is open because every audience surface pulls pictures from it with
+ * no cookie: robot cutouts (media/teams/) and the sponsor logos the program
+ * overlay draws (media/sponsors/, where the settings page tells the content
+ * lead to put them). The same mount also serves media/audio, which is the one
  * category of file in this project that must never be redistributed: walk-up
  * songs and stingers, somebody else's recordings, licensed for one event.
  * .gitignore says so in as many words.
@@ -126,8 +128,90 @@ const OPEN_PREFIXES = ['/theme/', '/shared/', '/media/'];
  * they are the match schedule. Anyone on the venue Wi-Fi could read the whole
  * music library off the desk by typing team numbers, and the trivia QR code
  * puts the desk's address on a projector in front of the entire gym.
+ *
+ * An ALLOWLIST of the two picture folders rather than a denylist of audio/.
+ * The denylist was matched against the raw URL path while the file sender
+ * decodes and normalises it on a case-insensitive filesystem, so every
+ * spelling the denylist did not think of walked straight past it (see
+ * readableForms). An allowlist also fails in the right direction for the next
+ * folder somebody drops into media/: private until someone decides otherwise.
  */
-const CLOSED_UNDER_OPEN = ['/media/audio/'];
+const OPEN_MEDIA = ['/media/teams/', '/media/sponsors/'];
+
+/** A decoded path may be re-encoded; this many extra decodes are looked at. */
+const MAX_EXTRA_DECODES = 3;
+
+/**
+ * The paths a static request could actually land on, as the filesystem will
+ * read them rather than as the URL spells them. null means "do not trust it".
+ *
+ * The file sender (safeJoin in server.ts) percent-decodes the path once, turns
+ * %5C into a Windows separator, and hands it to a case-insensitive NTFS, which
+ * also drops trailing dots and spaces from every segment it opens. A gate that
+ * compares the RAW path against a prefix is therefore defeated by any spelling
+ * that reaches the same file: /media/Audio/..., /media/%61udio/...,
+ * /media//audio/..., /media/audio%5Cwalkups%5C254.mp3, and
+ * /media/teams/..%2faudio/... all served the licensed audio to anyone on the
+ * Wi-Fi while the gate waved them through as "under /media/".
+ *
+ * So the gate reads what the sender will: decode, backslash to slash, collapse
+ * repeated slashes, resolve dot segments, lowercase, strip trailing dots and
+ * spaces per segment. It also keeps every FURTHER decode as a form of its own:
+ * the sender decodes once, but "..%252faudio" is one extra decode (a proxy, a
+ * future change to the sender) away from being a real separator, and looking
+ * costs nothing. A caller must clear every form, so more forms can only close
+ * more paths, never open one.
+ */
+function readableForms(path: string): string[] | null {
+  const forms: string[] = [];
+  let current = path;
+  for (let pass = 0; pass <= MAX_EXTRA_DECODES; pass++) {
+    let decoded: string;
+    try { decoded = decodeURIComponent(current); }
+    // A malformed escape on the FIRST pass is a file the sender cannot open
+    // either, so there is nothing to serve and nothing to trust. On a later
+    // pass it is just a literal % left over from the decode before: stable.
+    catch { return pass === 0 ? null : forms; }
+    forms.push(resolveSegments(decoded));
+    if (decoded === current) return forms;
+    current = decoded;
+  }
+  // Still changing after several decodes. Nobody legitimate encodes a path
+  // that many times, so refuse to guess what the last layer would be.
+  return null;
+}
+
+function resolveSegments(decoded: string): string {
+  const out: string[] = [];
+  for (const raw of decoded.replace(/\\/g, '/').split('/')) {
+    // Spaces first, so ".. " is still recognised as the parent directory.
+    const seg = raw.toLowerCase().replace(/ +$/, '');
+    if (seg === '' || seg === '.') continue;      // a doubled slash, or "here"
+    if (seg === '..') { out.pop(); continue; }    // cannot climb above the root
+    // Win32 strips trailing dots and spaces at open: "teams./254" is
+    // teams\254. A segment that was ONLY dots ("...") vanishes.
+    const name = seg.replace(/[. ]+$/, '');
+    if (name) out.push(name);
+  }
+  return '/' + out.join('/');
+}
+
+/**
+ * Is this request for one of the static trees that anyone may read?
+ *
+ * Judged on the normalised path (see readableForms), and every form of it
+ * must stay inside the same open tree it was requested under: a /theme/ URL
+ * that resolves into /clips/ is not a theme asset. /media/ is narrower still,
+ * limited to OPEN_MEDIA.
+ */
+function isOpenStatic(path: string): boolean {
+  const prefix = OPEN_PREFIXES.find(p => path.startsWith(p));
+  if (!prefix) return false;
+  const forms = readableForms(path);
+  if (!forms) return false;
+  const allowed = prefix === '/media/' ? OPEN_MEDIA : [prefix];
+  return forms.every(form => allowed.some(p => form.startsWith(p)));
+}
 
 export interface AccessQuery {
   method: string;
@@ -151,8 +235,7 @@ export function needsAuth({ method, path }: AccessQuery): boolean {
   // pre-opened. That is the exact mechanism behind the OPTIONS hole below,
   // and the file's own "a verb is not a permission" test does not hold on
   // this branch.
-  if (reading && OPEN_PREFIXES.some(p => path.startsWith(p))
-      && !CLOSED_UNDER_OPEN.some(p => path.startsWith(p))) return false;
+  if (reading && isOpenStatic(path)) return false;
 
   // The surface pages themselves.
   if (path === '/' ) return false;                       // the index just lists them

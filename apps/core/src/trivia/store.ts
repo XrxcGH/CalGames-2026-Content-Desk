@@ -9,12 +9,13 @@
  */
 
 import type { EventBus } from '../bus.ts';
+import type { DeskEvent } from '../types.ts';
 import {
   award, pickQuestion, publicStandings, resolvePick, standings,
   type PublicStanding, type TriviaAnswer, type TriviaPhase, type TriviaPlayer, type TriviaQuestion,
 } from './model.ts';
 import { DEFAULT_QUESTIONS } from './questions.ts';
-import { screenName } from './names.ts';
+import { screenName, stripInvisible } from './names.ts';
 
 const MAX_PLAYERS = 500;
 const MAX_NAME = 24;
@@ -37,6 +38,11 @@ export interface TriviaSnapshot {
     answers: number;
   } | null;
   standings: PublicStanding[];
+  /**
+   * The sample is still up: its rounds are inside these counts and cannot be
+   * told apart from real ones, so a restart restores no progress from this.
+   */
+  sampleUp?: true;
   asked: number;
   joinUrl: string | null;
   /** Rounds and their progress, so the host can pick one per gap and the
@@ -97,6 +103,21 @@ export class TriviaStore {
   #closeTimer: NodeJS.Timeout | null = null;
   #joinUrl: string | null = null;
   #seq = 0;
+  /**
+   * Set the first time anything happens live, after which observe() refuses
+   * to restore. The boot-time rebuild runs before the first join or Open;
+   * a logged snapshot arriving later would overwrite a room that is playing.
+   */
+  #live = false;
+  /**
+   * The desk's sample data (Test with sample data). While a sample seed runs,
+   * publishes go out tagged 'demo', which the boot-time rebuild skips, so a
+   * restart can never bring the sample's players back as if they had played.
+   * Its players are marked, so clearSample() removes exactly those.
+   */
+  #sample = false;
+  #beforeSample: { index: number; asked: number; askedIds: Set<string> } | null = null;
+  #askedAfterSample = 0;
 
   constructor(bus: EventBus, questions: TriviaQuestion[] = DEFAULT_QUESTIONS) {
     this.#bus = bus;
@@ -115,7 +136,148 @@ export class TriviaStore {
   setJoinUrl(url: string): void { this.#joinUrl = url; }
 
   #publish(): void {
-    this.#bus.emit({ type: 'trivia.updated', source: 'manual', payload: this.snapshot() });
+    this.#live = true;
+    this.#bus.emit({
+      type: 'trivia.updated', source: this.#sample ? 'demo' : 'manual', payload: this.snapshot(),
+    });
+  }
+
+  /** Run a sample seed. Everything it publishes is tagged as sample. */
+  asSample(seed: () => void): void {
+    const players = new Set(this.#players.keys());
+    this.#beforeSample = { index: this.#index, asked: this.#asked, askedIds: new Set(this.#askedIds) };
+    this.#sample = true;
+    try { seed(); } finally {
+      this.#sample = false;
+      this.#askedAfterSample = this.#asked;
+      for (const [id, p] of this.#players) if (!players.has(id)) p.sample = true;
+    }
+  }
+
+  /**
+   * Take the sample back out, and only the sample. Its players always go.
+   * The rounds it counted as asked go too, unless a real question has been
+   * played since, in which case the progress is real and stays.
+   */
+  clearSample(): void {
+    const before = this.#beforeSample;
+    const players = [...this.#players].filter(([, p]) => p.sample).map(([id]) => id);
+    if (!before && !players.length) return;
+    for (const id of players) {
+      this.#players.delete(id);
+      this.#answers.delete(id);
+    }
+    if (before && this.#asked === this.#askedAfterSample && this.#phase === 'idle') {
+      this.#index = before.index;
+      this.#asked = before.asked;
+      this.#askedIds = before.askedIds;
+      this.#phase = 'idle';
+      this.#answers.clear();
+      if (this.#closeTimer) { clearTimeout(this.#closeTimer); this.#closeTimer = null; }
+    }
+    this.#beforeSample = null;
+    this.#publish();
+  }
+
+  // ---- restore ----------------------------------------------------------------
+
+  /**
+   * Rebuild from a logged `trivia.updated` snapshot. Boot-time only, fed by
+   * rebuildFromLog; never subscribed to the bus.
+   *
+   * Scores, played rounds and the cursor lived only in memory, so the
+   * handbook's "scores carry across the day" held right up to the first
+   * restart, when the leaderboard a gym had spent the morning building came
+   * back empty and every round read as unplayed. Each snapshot is the whole
+   * state, so each one overwrites the last and the day's final event wins.
+   *
+   * Nothing here publishes (the first publish is what ends restoring, see
+   * #live) and nothing here starts a timer: a close timer for a window that
+   * shut hours ago would publish a stale snapshot into the live show.
+   *
+   * What comes back, and what cannot:
+   *
+   * - Standings: the top ten rows, by name, with score and correct count. The
+   *   snapshot is public and deliberately carries no player ids (model.ts,
+   *   PublicStanding), so restored players get fresh ids that no phone holds.
+   *   A phone whose id died with the process is shown the join screen again
+   *   (quiz/index.html drops its id when /play has no `me`).
+   * - Progress: `asked`, the cursor, and which questions count as played, the
+   *   last reconstructed per round from the per-round asked counts. Within a
+   *   round questions air in order, so the first N of each round are its
+   *   played ones.
+   * - Phase: always idle. A question that was OPEN when the desk died was
+   *   never scored, so it stays at the cursor to be opened again. One that
+   *   was REVEALED was paid, so the cursor moves past it exactly as Next
+   *   would have: left at the cursor, the next Open would re-air it and the
+   *   next Reveal would pay everyone a second time.
+   */
+  observe(ev: DeskEvent): void {
+    if (ev.type !== 'trivia.updated' || this.#live) return;
+    const snap = ev.payload as Partial<TriviaSnapshot> | null;
+    if (!snap || typeof snap !== 'object') return;
+
+    // Played questions, per round, against the bank as it is NOW. The bank
+    // is persisted on every edit so it is the same bank the snapshot saw,
+    // minus picks (dropped at construction, see the constructor). Runs are
+    // matched by name in order, so a round split in two still lines up.
+    const runs = this.#sessionRuns();
+    const claimed = new Set<number>();
+    const askedIds = new Set<string>();
+    for (const s of Array.isArray(snap.sessions) ? snap.sessions : []) {
+      if (!s || typeof s.name !== 'string' || !Number.isInteger(s.asked)) continue;
+      const i = runs.findIndex((r, idx) => !claimed.has(idx) && r.name === s.name);
+      if (i === -1) continue;
+      claimed.add(i);
+      const run = runs[i]!;
+      const played = this.#questions.slice(run.start, run.start + Math.min(s.asked, run.size));
+      for (const q of played) askedIds.add(q.id);
+    }
+
+    const players = new Map<string, TriviaPlayer>();
+    const restoredAt = Date.now();
+    for (const row of Array.isArray(snap.standings) ? snap.standings : []) {
+      if (!row || typeof row.name !== 'string' || !Number.isFinite(row.score)) continue;
+      if (row.sample) continue;
+      const id = `r${(++this.#seq).toString(36)}`;
+      const correct = Number.isFinite(row.correct) ? row.correct : 0;
+      players.set(id, {
+        id,
+        name: row.name,
+        ...(row.team ? { team: row.team } : {}),
+        score: row.score,
+        correct,
+        // At least this many answers were locked. Eviction spares anyone
+        // with points or a correct answer anyway; this only matters for a
+        // restored row with neither, and under-counting errs towards the
+        // slot being reclaimable, which is the safe direction.
+        answered: correct,
+        // Rank order survives the tie-break: standings() breaks a level score
+        // on correct count, then on who joined first.
+        joinedAt: restoredAt + (Number.isFinite(row.rank) ? row.rank : 0),
+        restored: true,
+      });
+    }
+
+    let index = Number.isInteger(snap.questionIndex) ? snap.questionIndex! : 0;
+    index = Math.max(0, Math.min(index, this.#questions.length));
+    if (snap.phase === 'revealed') index = Math.min(index + 1, this.#questions.length);
+
+    this.#players = players;
+    if (snap.sampleUp === true) {
+      // Taken while the sample was up. Its players were skipped above; its
+      // rounds cannot be separated from real ones, so progress starts clean.
+      askedIds.clear();
+      index = 0;
+    }
+    this.#askedIds = askedIds;
+    this.#asked = snap.sampleUp !== true && Number.isInteger(snap.asked) && snap.asked! >= 0
+      ? snap.asked! : askedIds.size;
+    this.#index = index;
+    this.#phase = 'idle';
+    this.#answers.clear();
+    this.#opensAt = 0;
+    this.#closesAt = 0;
   }
 
   #current(): TriviaQuestion | null { return this.#questions[this.#index] ?? null; }
@@ -222,7 +384,14 @@ export class TriviaStore {
     // must never cost a real player their slot. Evict-then-throw meant one
     // phone posting empty names could knock idle audience members out of a
     // full room without ever joining.
-    const name = String(rawName ?? '').trim().slice(0, MAX_NAME);
+    //
+    // Invisible format characters (zero-width, soft hyphen, bidi overrides) are
+    // stripped HERE, before the screen and before the name is kept. Screening a
+    // clean copy while storing the raw one would put something other than what
+    // was checked on the projector, and a right-to-left override in a stored
+    // name reorders the rest of its leaderboard row. Stripped before the clip
+    // too, so a name padded with them cannot spend its length on nothing.
+    const name = stripInvisible(String(rawName ?? '')).trim().slice(0, MAX_NAME);
     if (!name) throw new Error('A name is required.');
     // This name goes on a projector in front of a room full of children and
     // the school that lent us the building. Screened BEFORE eviction, with
@@ -230,12 +399,24 @@ export class TriviaStore {
     // refused cannot cost real players their slots.
     const verdict = screenName(name);
     if (!verdict.ok) throw new Error(verdict.reason ?? 'Pick a different name.');
+    const t = team && Number.isInteger(team) && team > 0 && team < 100000 ? team : undefined;
+    // After a restart the leaderboard comes back from the log under fresh ids
+    // that no phone holds, so every phone is shown the join screen again. The
+    // first join under a restored row's name and team takes that row back,
+    // score and all, instead of starting a second row at zero beside it.
+    const wanted = name.toLowerCase();
+    for (const p of this.#players.values()) {
+      if (!p.restored || p.team !== t || p.name.toLowerCase() !== wanted) continue;
+      delete p.restored;
+      this.#publish();
+      return { playerId: p.id, name: p.name };
+    }
     if (this.#players.size >= MAX_PLAYERS) this.#evictOneIdle();
     if (this.#players.size >= MAX_PLAYERS) throw new Error('Trivia is full: 500 players.');
     const id = `p${(++this.#seq).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const player: TriviaPlayer = {
       id, name,
-      ...(team && Number.isInteger(team) && team > 0 && team < 100000 ? { team } : {}),
+      ...(t ? { team: t } : {}),
       score: 0, correct: 0, answered: 0, joinedAt: Date.now(),
     };
     this.#players.set(id, player);
@@ -606,6 +787,7 @@ export class TriviaStore {
       joinUrl: this.#joinUrl,
       sessions: this.sessions,
       session: this.#sessionOf(this.#index),
+      ...(this.#beforeSample ? { sampleUp: true as const } : {}),
     };
   }
 

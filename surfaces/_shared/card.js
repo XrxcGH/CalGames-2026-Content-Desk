@@ -13,6 +13,7 @@
 
 import { allianceRoster } from './alliance.js';
 import { rpBadges } from './rp.js';
+import { teamLabel } from './desk-client.js';
 
 export const CARD_SIZE = 1080;
 
@@ -87,8 +88,10 @@ function trackedCenter(ctx, text, x, y, trackPx) {
 /**
  * @param {CanvasRenderingContext2D} ctx
  * @param {object} card
- *   { eventName, matchName, red:{teams:[{number,name}], score, rp}, blue:{...},
+ *   { eventName, matchName, red:{teams:[{number,name,label?}], score, rp}, blue:{...},
  *     footer }
+ *   `label` is what gets PRINTED for a team (100B for a second robot
+ *   registered as 9999); `number` stays the identity and is the fallback.
  */
 export function drawCard(ctx, card) {
   const S = CARD_SIZE;
@@ -235,7 +238,7 @@ export function drawCard(ctx, card) {
       const y = teamsY + i * ROW_PITCH;
       ctx.fillStyle = p.gold;
       ctx.font = num(900)(46);
-      ctx.fillText(String(t.number ?? ''), x + blockW / 2, y);
+      ctx.fillText(String(t.label ?? t.number ?? ''), x + blockW / 2, y);
 
       ctx.fillStyle = p.dim;
       // Fit the exact string that gets drawn. Measuring the raw name at zero
@@ -309,7 +312,9 @@ export function cardFromState(state, opts = {}) {
   // graphic tells a team that won a match they were not part of it. In
   // qualification this is just the three on the field.
   const side = which => ({
-    teams: allianceRoster(state, which).map(t => ({ number: t.number, name: t.name })),
+    teams: allianceRoster(state, which).map(t => ({
+      number: t.number, name: t.name, label: teamLabel(state, t.number),
+    })),
     score: state.score?.[which]?.total ?? 0,
     rp: state.score?.[which]?.rp ?? {},
   });

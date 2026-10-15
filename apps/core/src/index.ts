@@ -9,10 +9,11 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import os from 'node:os';
-import { EventBus, logPathFor } from './bus.ts';
+import { EventBus } from './bus.ts';
 import { MediaLibrary } from './media.ts';
 import { startServer } from './server.ts';
-import { seedSampleState, startDemo } from './demo.ts';
+import { clearSampleState, seedSampleState, startDemo } from './demo.ts';
+import { rosterList, setRoster } from './teams.ts';
 import { attachMarkers } from './markers.ts';
 import { attachPace } from './pace.ts';
 import { CheesyAdapter } from './ingest/cheesy/adapter.ts';
@@ -43,6 +44,7 @@ import { rebuildFromLog } from './rebuild.ts';
 import { Awards } from './awards.ts';
 import { Slides } from './slides.ts';
 import { Vitals } from './vitals.ts';
+import { createLanBase } from './lan.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..', '..');
@@ -136,7 +138,12 @@ try {
   // replayed them. A practice award reveal is the worst of them: it marks
   // that award presented, to a team that did not win it, on the checklist
   // the crew walks during the one segment that cannot be re-run.
-  await bus.openLog(logPathFor(join(ROOT, 'data', 'events'), new Date(), rehearsalTag));
+  //
+  // The bus names the file itself and rotates it at local midnight (see
+  // bus.openLog): the desk runs Friday to Sunday without a restart, and a
+  // file named once for the day the process started put all of Saturday in
+  // a Friday-named file, where a Saturday restart's rebuild never looked.
+  await bus.openLog(join(ROOT, 'data', 'events'), { tag: rehearsalTag });
   if (rehearsalTag) {
     console.log('[bus] rehearsal session: logging to a .rehearsal file the ' +
       'boot-time rebuild will ignore');
@@ -179,7 +186,7 @@ if (!tools) {
     '`winget install Gyan.FFmpeg`, then restart this shell.');
 } else {
   const encoder = await chooseEncoder(tools.ffmpeg, arg('encoder') || undefined);
-  clips = new ClipStore(tools, encoder, REC_ROOT);
+  clips = new ClipStore(tools, encoder, REC_ROOT, { segmentSeconds: Number(arg('segment') || 6) });
 
   // Recording turns itself on when cameras are configured.
   //
@@ -275,6 +282,15 @@ function validRecordingSources(raw: unknown): SourceConfig[] {
   return out;
 }
 
+// The event's teams. Set before the field connects, because the field's name
+// for a second robot is TBA's placeholder ("Off-Season Demo Team 9999") and
+// the adapter corrects it as it maps. Published so every surface can print
+// 9999 as 100B. See teams.ts.
+setRoster(config.teams?.list);
+bus.emit({ type: 'event.teams', source: 'manual', payload: { list: rosterList() } });
+console.log(`[event] ${rosterList().length} teams, `
+  + `${rosterList().filter(t => t.label).length} of them second robots`);
+
 // ---- Cheesy Arena field bridge ---------------------------------------------
 // Deliberately a launch flag rather than a config setting: the bridge needs FTA
 // sign-off, and turning it on should be an explicit act at the point of use,
@@ -307,7 +323,9 @@ const trivia = new TriviaStore(bus, await loadTriviaBank(join(ROOT, 'data', 'tri
 
 const lan = lanAddress();
 if (!lan) {
-  console.warn('[core] no LAN address found: QR codes will say localhost and only work on this machine.');
+  console.warn('[core] no LAN address found yet: the QR codes and posters stay blank (and the quiz ' +
+    'link says localhost) until this machine joins a network. They pick the address up on their ' +
+    'own, no restart needed.');
 } else if (!process.env['LAN_IP']) {
   const others = lanCandidates().filter(a => a !== lan);
   if (others.length) {
@@ -315,8 +333,39 @@ if (!lan) {
       'If phones cannot reach it, set LAN_IP to the right address.');
   }
 }
-const lanBase = `http://${lan ?? 'localhost'}:${port}`;
-trivia.setJoinUrl(`${lanBase}/s/quiz`);
+
+/*
+ * The address phones are told to scan, asked for live rather than fixed here.
+ *
+ * It used to be computed once at this point and handed to /api/urls (every QR
+ * on a projector, side screen and poster) and to trivia. If the laptop's IP
+ * changed afterwards, or the desk was started before it had a LAN address at
+ * all, every one of those carried a dead address for the rest of the event and
+ * nothing on screen looked wrong. See lan.ts.
+ *
+ * The server calls lanBase() per request (cached for 30 seconds). Trivia's
+ * link is pushed to it instead of pulled, and the quiz page never calls
+ * /api/urls, so a slow patrol re-checks even when nobody is asking.
+ */
+const lanLive = createLanBase({
+  port,
+  probe: lanAddress,
+  onChange: (base, was) => {
+    // Last known good, never cleared: a wifi blip that drops the address for a
+    // few seconds must not put a localhost QR on the projector, and the link
+    // that was there is the best one until a new address is found.
+    if (base) trivia.setJoinUrl(`${base}/s/quiz`);
+    if (was !== undefined) {
+      console.log(`[core] LAN address changed from ${was ?? 'none'} to ${base ?? 'none'}. ` +
+        'QR codes follow it on their next load.');
+    }
+  },
+});
+// What the quiz link says until a real address is found, as it always has.
+trivia.setJoinUrl(`http://localhost:${port}/s/quiz`);
+lanLive.refresh();
+setInterval(() => { lanLive.refresh(); }, 30_000).unref();
+const lanBase = lanLive.get;
 
 /**
  * The per-event question bank, checked on the way in.
@@ -506,6 +555,7 @@ if (config.audio.enabled) {
   console.log('[audio] off, set audio.enabled in config.json');
 }
 
+
 // What the event offers and where. On the bus like the thresholds, so a
 // replayed log carries what was on the screens that day.
 bus.emit({
@@ -614,6 +664,11 @@ coverage.attach(bus);
 {
   const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'), [
     cardLedger, coverage, rundown, sponsors, awards,
+    // Trivia scores and played rounds, and the arcade's grand prix standings,
+    // were memory-only too, so the handbook's "scores carry across the day"
+    // held until the first restart. Their events carry whole snapshots; the
+    // stores take the last one and publish nothing while doing it.
+    trivia, arcade,
     // The overlay's card marks read the STATE SNAPSHOT (the program overlay
     // is an open surface; /api/discipline is gated), and the snapshot opens
     // empty: the ledger came back after a restart while every match graphic
@@ -623,9 +678,10 @@ coverage.attach(bus);
     { observe: ev => { if (ev.type === 'card.issued') bus.restore(ev); } },
   ]);
   if (rebuilt.events) {
-    console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log(s) today: ` +
-      'cards, coverage, run of show and sponsor counts carried over'
-      + (rebuilt.skipped ? ` (${rebuilt.skipped} torn line(s) skipped)` : ''));
+    console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log file(s): ` +
+      'cards, coverage, run of show, sponsor counts, trivia and arcade carried over'
+      + (rebuilt.skipped ? ` (${rebuilt.skipped} torn line(s) skipped)` : '')
+      + (rebuilt.otherDay ? ` (${rebuilt.otherDay} from another day left alone)` : ''));
   }
 }
 
@@ -724,15 +780,32 @@ if (config.publish.autoQueueArcade && !rehearsalTag) {
   });
 }
 
+const sampleStores = { arcade, trivia, slides, profiles, media, cards: cardLedger };
+
+/*
+ * The sample clears itself the moment a REAL match loads.
+ *
+ * The handbook says to restart before the first practice match, and that is
+ * an instruction, which is the thing a first-time crew forgets on a Friday.
+ * Left running, the sample's rankings and alliance board stay on the venue
+ * screens whenever no field is connected and its slides rotate all weekend.
+ * A match from the field, or one loaded by hand at the desk, is the signal
+ * that the event has started; a demo-tagged load is the sample itself.
+ */
+bus.subscribe(ev => {
+  if (ev.type === 'match.loaded' && ev.source !== 'demo') {
+    clearSampleState(bus, sampleStores);
+  }
+});
+
 const server = startServer({
   bus, media, root: ROOT, port, host, recorder, clips, publish, config, cheesy, cues, obs,
   arcade, trivia, audio, audioClips, profiles, coverage, vitals, cardLedger,
   rundown, sponsors, awards, slides, lanBase, content,
   // For the Sample data button on the desk. The server refuses to call it
   // while the field bridge is up; see the route.
-  seedSample: () => seedSampleState(bus, {
-    arcade, trivia, slides, profiles, media, cards: cardLedger,
-  }),
+  seedSample: () => seedSampleState(bus, sampleStores),
+  clearSample: () => clearSampleState(bus, sampleStores),
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).

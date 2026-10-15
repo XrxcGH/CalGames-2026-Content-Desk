@@ -89,6 +89,10 @@ export const SURFACES = [
   { id: 'setup', group: 'Before the event', name: 'Event settings', note: 'For the content lead. Unlocks with the settings code, not the desk PIN: the event name, sponsors, run of show, scoring thresholds and accessibility services, edited live. Seeds from config.json; credentials never appear here.' },
   { id: 'testcard', group: 'Before the event', name: 'Screen test card', note: 'Full-screen this on any display being installed: the LED wall, a projector, a pit TV. Crop marks, the broadcast safe areas, a stretch circle, color and gray ramps, and a live clock so a frozen signal shows itself.' },
   { id: 'quiz',    group: 'For the audience', name: 'Trivia play', note: 'The phone page the crowd joins from. The trivia overlay shows this URL.' },
+  // The shout-out form was missing from this list entirely, which made it the
+  // one audience page nobody could find: no row here, no QR anywhere.
+  { id: 'gp',      group: 'For the audience', name: 'Send a shout-out', note: 'Anyone in the building thanks a volunteer, a team, a mentor. Every one is read at the desk before it goes near a screen. The side screens show its QR whenever a slide is up.' },
+  { id: 'poster',  group: 'Before the event', name: 'QR posters', note: 'Printable signs for the doors, stands and pits: send a shout-out, play trivia, when do we play. Print from the desk machine once it is on the event network, so the codes carry the right address.' },
   { id: 'watch',   group: 'On a pit monitor', name: 'Pick a screen', note: 'Every screen below, in one place, with the desk\'s address on this network. Hand this to whoever is setting up a monitor.' },
   // One row per screen a pit TV can show, so the exact URL can be copied
   // rather than assembled. `path` carries the query string the index would
@@ -146,8 +150,13 @@ export interface ServerOpts {
   awards?: Awards | null;
   /** Recognition and info slides, plus the moderated shout-out queue. */
   slides?: Slides | null;
-  /** LAN-reachable base URL, e.g. "http://172.22.0.23:8720", for QR codes. */
-  lanBase?: string | null;
+  /**
+   * LAN-reachable base URL, e.g. "http://172.22.0.23:8720", for QR codes.
+   * Pass a function (see lan.ts) to have it resolved per request: a string is
+   * fixed at boot, and a laptop that gets a new address, or is plugged in
+   * after the desk started, would keep handing out a dead one.
+   */
+  lanBase?: string | null | (() => string | null);
   /** Desk-editable event content, overlaid on config.json. */
   content?: EventContent | null;
   /**
@@ -157,6 +166,8 @@ export interface ServerOpts {
    * the data comes from, and so a desk built without it simply answers 503.
    */
   seedSample?: (() => void) | null;
+  /** Undo seedSample. Returns false when there was no sample to clear. */
+  clearSample?: (() => boolean) | null;
   /**
    * How long the first brute-force lockout lasts, in milliseconds.
    *
@@ -174,7 +185,8 @@ export function startServer(opts: ServerOpts) {
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
-          lanBase = null, content = null, seedSample = null, lockoutBaseMs } = opts;
+          lanBase = null, content = null, seedSample = null, clearSample = null,
+          lockoutBaseMs } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -436,6 +448,28 @@ export function startServer(opts: ServerOpts) {
     if (rec) rec.inflight = Math.max(0, rec.inflight - 1);
   };
 
+  /**
+   * Parse a sign-in body: JSON, and an OBJECT.
+   *
+   * JSON.parse is happy to return null, a number or an array, and the doors
+   * read `body.pin` straight afterwards. On the literal `null` that is a
+   * TypeError thrown AFTER authReserve, out of the try that releases the slot,
+   * into the generic 500 handler. The reservation was never resolved, and five
+   * such requests left `inflight` at the limit forever: the address was locked
+   * out of that door for the life of the process, correct code and all. Under
+   * venue NAT that is every phone in the gym, the Judge Advisor's tablet
+   * included. A non-object body is the same mistake as malformed JSON, so it is
+   * reported the same way (a SyntaxError, which each door already releases for
+   * and answers 400).
+   */
+  const parsePinBody = (raw: Buffer): { pin?: unknown } => {
+    const parsed: unknown = JSON.parse(raw.toString('utf8'));
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new SyntaxError('Body must be a JSON object.');
+    }
+    return parsed as { pin?: unknown };
+  };
+
   /** A correct code: clear THIS door's failures. Never a cross-door reset. */
   const noteAuthPass = (addr: string, door = 'desk'): void => {
     authFails.delete(failKey(door, addr));
@@ -533,7 +567,10 @@ export function startServer(opts: ServerOpts) {
    * An explicitly empty JA_PIN env var also disables it, which is what the
    * preview renderer uses.
    */
-  const JA_PIN = (process.env['JA_PIN'] ?? config?.awards?.pin ?? '1357').trim();
+  // String() because config.json is hand-edited and "pin": 2468 (no quotes) is
+  // the natural way to write a four-digit code. A number has no .trim(), and
+  // this line runs at boot: the desk crashed before it served a single page.
+  const JA_PIN = String(process.env['JA_PIN'] ?? config?.awards?.pin ?? '1357').trim();
   const JA_SESSION = randomUUID();
   const JA_COOKIE = 'ja_auth';
 
@@ -546,7 +583,8 @@ export function startServer(opts: ServerOpts) {
    * content lead and the Judge Advisor are different people with different
    * secrets. Explicitly empty collapses it onto the desk PIN.
    */
-  const SETUP_PIN = (process.env['SETUP_PIN'] ?? config?.setup?.pin ?? '4567').trim();
+  // Coerced for the same reason as JA_PIN above: an unquoted number in config.
+  const SETUP_PIN = String(process.env['SETUP_PIN'] ?? config?.setup?.pin ?? '4567').trim();
   const SETUP_SESSION = randomUUID();
   const SETUP_COOKIE = 'setup_auth';
 
@@ -611,10 +649,9 @@ export function startServer(opts: ServerOpts) {
         authReserve(addr);
         // Malformed JSON is the caller's mistake, not a server error: answer
         // 400 instead of letting the parse throw into the generic 500 handler.
-        let body: { pin?: string };
+        let body: { pin?: unknown };
         try {
-          body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { pin?: string };
+          body = parsePinBody(await readBody(req, 4 * 1024));
         } catch (err) {
           authRelease(addr);
           if (err instanceof SyntaxError) {
@@ -687,8 +724,15 @@ export function startServer(opts: ServerOpts) {
         // (a YouTube live URL, a plain MJPEG) is unchanged, and a credentialed
         // camera should be reached through a credential-free proxy rather
         // than by broadcasting its password.
+        //
+        // `base` is resolved now, not at boot, and is null (never a guessed
+        // localhost) when this machine has no address a phone could reach.
+        // Every reader already treats null as "no QR": the poster refuses to
+        // print, the side screen hides its code, the watch page falls back to
+        // its own origin. A localhost code on a printed sign is the one answer
+        // that looks right and sends the whole gym to a dead page.
         return json(res, 200, {
-          base: lanBase,
+          base: currentLanBase(),
           fieldStream: stripUserinfo(config?.kiosk?.fieldStreamUrl ?? ''),
         });
       }
@@ -999,9 +1043,9 @@ export function startServer(opts: ServerOpts) {
           });
         }
         authReserve(addr, 'ja');
-        let body: { pin?: string };
+        let body: { pin?: unknown };
         try {
-          body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as { pin?: string };
+          body = parsePinBody(await readBody(req, 4 * 1024));
         } catch {
           authRelease(addr, 'ja');
           return json(res, 400, { error: 'Body must be JSON, like {"pin":"1234"}.' });
@@ -1048,9 +1092,9 @@ export function startServer(opts: ServerOpts) {
           });
         }
         authReserve(addr, 'setup');
-        let body: { pin?: string };
+        let body: { pin?: unknown };
         try {
-          body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as { pin?: string };
+          body = parsePinBody(await readBody(req, 4 * 1024));
         } catch {
           authRelease(addr, 'setup');
           return json(res, 400, { error: 'Body must be JSON, like {"pin":"1234"}.' });
@@ -1186,7 +1230,7 @@ export function startServer(opts: ServerOpts) {
         if (!slides) return json(res, 503, { error: 'Shout-outs are not on right now.' });
         try {
           const body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')) as
-            { name?: string; team?: number; message?: string };
+            { name?: string; team?: number; to?: string; message?: string };
           const sub = await slides.submit(body, req.socket.remoteAddress ?? 'unknown');
           return json(res, 200, { ok: true, id: sub.id });
         } catch (err) {
@@ -1596,6 +1640,15 @@ export function startServer(opts: ServerOpts) {
         return;
       }
 
+      if (path === '/api/sample/clear' && req.method === 'POST') {
+        const cleared = clearSample ? clearSample() : false;
+        return json(res, 200, {
+          ok: true, cleared,
+          note: cleared ? 'Sample data cleared from every screen.'
+            : 'There was no sample data to clear.',
+        });
+      }
+
       if (path === '/api/sample' && req.method === 'POST') {
         if (!seedSample) {
           return json(res, 503, { error: 'Sample data is not available on this desk.' });
@@ -1611,9 +1664,9 @@ export function startServer(opts: ServerOpts) {
         seedSample();
         return json(res, 200, {
           ok: true,
-          note: 'Every surface now has sample data. It is tagged as demo, so '
-            + 'scores draw outlined and nothing here can be published. Load a '
-            + 'real match, or restart the desk, to clear it.',
+          note: 'Every screen now has sample data. It is tagged as demo, so '
+            + 'scores draw outlined and nothing here can be published. It clears '
+            + 'itself when a real match loads, or press Clear sample data.',
         });
       }
 
@@ -2231,7 +2284,7 @@ export function startServer(opts: ServerOpts) {
         return;
       }
 
-      if (path === '/') return sendIndex(res);
+      if (path === '/') return sendIndex(res, req);
 
       res.writeHead(404).end('Not found');
     } catch (err) {
@@ -2241,7 +2294,76 @@ export function startServer(opts: ServerOpts) {
     }
   });
 
-  function sendIndex(res: ServerResponse): void {
+  /**
+   * The LAN base URL as of this request, or null with no usable address.
+   * `lanBase` is a function in the running desk (so a new IP, or a cable
+   * plugged in after boot, shows up without a restart) and a plain string in
+   * the tests that predate that.
+   */
+  function currentLanBase(): string | null {
+    return typeof lanBase === 'function' ? lanBase() : lanBase;
+  }
+
+  /*
+   * The first thing a first-time operator sees, so it carries the two facts
+   * the old startup window used to: the address every other screen needs, and
+   * the desk PIN.
+   *
+   * The launcher stopped opening a window (a window somebody closes takes the
+   * broadcast down), and opens the browser on this page instead. But this page
+   * listed screens and nothing else, so the handbook's "write the address and
+   * the PIN on the whiteboard" pointed at a window that no longer exists, and a
+   * volunteer seeing the program for the first time had no way to find either
+   * without opening a log file.
+   *
+   * The ADDRESS is shown to everyone: whoever is reading it already reached
+   * the desk, so it tells them nothing new. The PIN and the default-code
+   * warnings are shown ONLY to a browser on the desk machine itself. This page
+   * is open to the whole venue Wi-Fi, and the trivia QR puts the desk's
+   * address on a projector.
+   */
+  function startPanel(req: IncomingMessage): string {
+    const ip = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+    // And only to a browser that asked for the desk BY a local name. A web
+    // page open on the desk machine could otherwise point its own domain at
+    // 127.0.0.1 (DNS rebinding) and read the PIN off this page: the
+    // connection is local, but the Host it names is the attacker's.
+    const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+    const local = (ip === '127.0.0.1' || ip === '::1')
+      && (host === 'localhost' || host === '127.0.0.1' || host === '[::1]');
+    const esc = (t: string): string => t.replace(/[&<>"]/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    // Asked for on every load, so the address written on the whiteboard is the
+    // one the desk has NOW. No restart: plug in, wait a few seconds, reload.
+    const base = currentLanBase();
+    const addr = base
+      ? `<p class="addr">This desk on the event network: <b>${esc(base)}/</b></p>`
+      : `<p class="addr warn">This desk has no address on a network yet. Plug it into
+         the event network and reload this page; no restart is needed. Until it has
+         one, no other screen can reach it.</p>`;
+    if (!local) return `<div class="start">${addr}</div>`;
+    const defaults = [
+      REMOTE_PIN === DEFAULT_PIN ? 'desk PIN' : '',
+      JA_PIN === '1357' ? 'awards code' : '',
+      SETUP_PIN === '4567' ? 'settings code' : '',
+    ].filter(Boolean);
+    return `<div class="start">
+      <h2 style="margin-top:0">Start here</h2>
+      ${addr}
+      <p>Desk PIN: <b>${REMOTE_PIN ? esc(REMOTE_PIN) : 'none set'}</b>. Write the address
+        and the PIN on the whiteboard: every screen in the building needs the
+        address, and the crew running the consoles need the PIN.</p>
+      ${defaults.length ? `<p class="warn">Still on the shipped default: ${defaults.join(', ')}.
+        Fine for practice. Change before doors (handbook, chapter 2).</p>` : ''}
+      <p>New to this? <a href="/s/desk#sec-sample">Fill the screens with sample data</a>,
+        then open the screens below to see them working.
+        Signs for the doors: <a href="/s/poster">print the QR posters</a>.</p>
+      <p class="hint">Only this computer sees the PIN on this page. Other devices on
+        the network see the address alone.</p>
+    </div>`;
+  }
+
+  function sendIndex(res: ServerResponse, req: IncomingMessage): void {
     const groups = [...new Set(SURFACES.map(s => s.group))];
     const sections = groups.map(g =>
       `<h2>${g}</h2><div class="rows">` + SURFACES.filter(s => s.group === g).map(s =>
@@ -2266,9 +2388,17 @@ h2{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2
 .row b{font-size:19px}
 .row code{font-family:var(--font-mono);color:var(--accent);font-size:13px}
 .row i{grid-column:1/-1;color:var(--text-dim);font-style:normal;font-size:13px}
+.start{padding:18px 22px;margin:0 0 8px;background:var(--surface-raised);
+  clip-path:var(--chamfer);--ch:12px;border-left:6px solid var(--accent)}
+.start p{margin:6px 0}
+.start .addr b{font-family:var(--font-mono);color:var(--accent);font-size:22px}
+.start .warn{color:var(--st-warn-text,var(--st-warn))}
+.start .hint{color:var(--text-dim);font-size:13px}
+.start a{color:var(--accent)}
 </style></head><body>
 <h1>CalGames 2026 Content Desk</h1>
 <p class="sub">Core is running. Open a surface below, or point an OBS Browser Source at it.</p>
+${startPanel(req)}
 ${sections}</body></html>`;
     res.writeHead(200, { 'Content-Type': MIME['.html']!, 'Cache-Control': 'no-store' });
     res.end(html);

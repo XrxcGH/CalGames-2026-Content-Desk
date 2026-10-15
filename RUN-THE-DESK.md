@@ -18,6 +18,8 @@ minutes end to end; your chapter takes ten.
 
 | If you are... | Read chapters |
 | --- | --- |
+| **The AV coordinator** (you run the desk, OBS and the sound) | **Start here**, then 2, 4, 6, 10, 11 |
+| **An emcee** (you announce, host trivia, read shout-outs) | **Start here**, then 8, 10 |
 | **The only volunteer** | 1, 1a, 2, 6 |
 | Setting up on Friday | 1, 2, 3, 4, 5 |
 | **Desk manager / producer** | 1, 2, 6, 7, 11 |
@@ -33,6 +35,170 @@ person who notices should say so out loud. Nobody gets in trouble for calling
 out a wrong graphic. The show is a team sport.
 
 ---
+
+## Start here: the AV coordinator and the emcees
+
+At CalGames 2026 two kinds of people run this: **the AV coordinator**, who
+owns the computer, OBS and the sound, and **the emcees**, who own the
+microphone. Everybody is doing this for the first time. That is fine: almost
+everything here runs by itself once it is set up, and setting it up is a list
+of steps with a check at the end of each one.
+
+**The goal for Friday is one thing: a practice match where every screen does
+the right thing on its own.** Once that works, the rest of the weekend is
+mostly leaving it alone.
+
+### The weekend at a glance
+
+From the event schedule (updated 2026-09-30). The rows in bold are the ones
+the desk crew plans around.
+
+| When | What | For the desk crew |
+| --- | --- | --- |
+| Fri 8:30 AM - 4:00 PM | Field and pit setup | Rack the desk laptop, do the first hour below |
+| Fri 4:30 - 6:00 PM | Field open for calibration | Connect the field (step 7) |
+| **Fri 6:00 - 7:45 PM** | **Practice matches** | **Your test. Run the practice checklist below** |
+| Sat 8:00 AM | Pits and arena open | Desk on, doors check green |
+| Sat 9:45 AM | Opening ceremonies | |
+| Sat 10:00 AM - 12:00 PM | Qualification matches | |
+| Sat 12:00 - 1:00 PM | Lunch | Shout-outs and thank-you slides rotate |
+| Sat 1:00 - 5:30 PM | Qualification matches | |
+| **Sat 5:30 - 5:45 PM** | **Awards ceremony** | **JA hands over the awards code** |
+| Sun 8:40 AM | Opening ceremony | |
+| Sun 9:00 AM - 12:30 PM | Qualification matches | |
+| **Sun ~12:30 - 1:00 PM** | **Alliance selection** | **The selection board goes up by itself** |
+| **Sun 2:00 - 5:00 PM** | **Playoffs and awards** | **Second awards ceremony** |
+
+### Three things that are true at CalGames 2026
+
+- **There are 38 teams, and three of them are second robots.** The field calls
+  them 9999, 9998 and 9997. Every screen prints them as **100B** (The
+  Wildhats), **6036B** (Peninsula Robotics) and **4159B** (CardinalBotics).
+  If you type a team into the "when do we play" page, 100B works.
+- **Queuing runs on FRC Nexus** (frc.nexus/cacg). The desk can show who is
+  being called to queue on every side screen, but only with an API key: get
+  one at frc.nexus/api and put it in `config.json` under `"nexus"` as
+  `"apiKey"` (chapter 2 shows how to make that file). Without a key everything
+  still works; the desk works out the queue from the field instead.
+- **Every team's pit is known** (Aisle 1 is pits A and B, Aisle 2 is C and D,
+  Aisle 3 is E and F). The "when do we play" page shows a followed team's
+  pit.
+
+### The AV coordinator's first hour
+
+Do these in order. Each step ends with **You should see**; do not move on
+until you do.
+
+1. **Start the desk.** Copy `CalGamesContentDesk.exe` to the desk laptop and
+   double-click it. Nothing appears for up to a minute the first time (it is
+   unpacking). Then your web browser opens by itself.
+   **You should see** a page headed *CalGames 2026 Content Desk* with a
+   **Start here** box at the top. If a red error box pops up instead, read it:
+   it says what is wrong and that nothing is running.
+2. **Write the address and the PIN on the whiteboard.** Both are in the
+   **Start here** box. Every other screen in the building needs the address;
+   the people at the consoles need the PIN.
+   **You should see** an address like `http://172.22.0.23:8720/`. If the box
+   says the desk has no address, the laptop is not on the event network yet:
+   plug in the network cable, wait a few seconds, and reload the page. No
+   restart is needed.
+3. **Prove the screens work before anything else is connected.** In the
+   **Start here** box, click **Fill the screens with sample data**, sign in
+   with the PIN, and press the button. Then open **Program overlay** from the
+   list in another tab.
+   **You should see** a score bar with two outlined numbers at the bottom of a
+   black page, and **100B** among the red teams. Outlined means "a guess",
+   which is right: this is sample data. Everything sample says SAMPLE on it,
+   nothing is saved, and it **clears itself the moment a real match loads**.
+4. **Set up OBS.** Chapter 4, steps 1 to 4. About fifteen minutes the first
+   time. This is the only part with a lot of clicking.
+   **You should see** the score bar from step 3 inside OBS's preview.
+5. **Put the venue screens up.** On each TV or pit monitor, open a browser,
+   type the address from the whiteboard, and pick **Side screen** (TVs facing
+   the stands) or a pit-monitor screen. Press F11 for full screen.
+   **You should see** the on-deck list and rankings, changing by themselves
+   every fifteen seconds or so. Leave them alone from here on.
+6. **Put the music on the music machine, not the stream machine.** On the
+   laptop wired to the hall's speakers, open the address and pick **House
+   audio player**. Chapter 10 explains why it must be a different computer.
+   **You should see** the player page. Play a song from the desk console and
+   hear it in the hall but **not** on the stream (listen to the stream on a
+   phone with headphones).
+7. **Connect the field.** Ask the field tech (FTA) for the Cheesy Arena
+   address, then chapter 9. If you cannot get it on Friday, skip this: the
+   desk runs without the field and you can type scores by hand.
+   **You should see** the dot next to *linked* at the top of the desk
+   console turn green.
+8. **Print the QR posters.** From the list, open **QR posters** and print.
+   Tape them at the doors, the stands and the pits. They send people to the
+   shout-out form, the trivia game and the "when do we play" page.
+9. **Change the three codes** before doors (chapter 2). Practice works on the
+   shipped ones; the event must not.
+
+### Testing during practice matches
+
+Practice matches are your rehearsal. You do not need to clear the sample
+data first: it disappears from every screen by itself when the first real
+match loads. (The **Clear sample data** button on the desk console does the
+same by hand.) With the field connected, watch one match and tick these off:
+
+- [ ] When the match loads, the program shows both alliances (the overview).
+- [ ] When the match starts, it switches to the score bar by itself, and the
+      clock counts down.
+- [ ] The numbers are **solid** (not outlined) when the field is connected.
+- [ ] When the score posts, the program shows the final score by itself.
+- [ ] The side screens show the next matches, without anyone touching them.
+- [ ] The music ducks when the emcee talks, if you armed that cue
+      (chapter 6, *Show automation*).
+- [ ] OBS is recording, and the stream (watched on a phone) has no music.
+- [ ] The **Doors check** on the desk console is green (chapter 3).
+- [ ] When 100B, 6036B or 4159B plays, the screens say so, not 9999.
+
+If all nine pass, you are ready. If one fails, chapter 11 lists the usual
+cause.
+
+### The emcee's card
+
+You need one thing: a tablet or phone open on **Talent view** (the address,
+then *Talent view*, then the PIN). It shows the teams on the field, their
+ranks, how close each alliance is to its bonus points, and how to say team
+names. Chapter 8 explains every line of it.
+
+Things the emcees usually do, and where each one lives:
+
+| You want to... | Do this |
+| --- | --- |
+| Know who is playing next | Talent view, or look at any side screen |
+| Run crowd trivia between matches | **Trivia host** page: one button, press it when its label says what you want next. Chapter 10 |
+| Read out shout-outs | The approved ones rotate on the side screens. The AV coordinator approves them on the desk console |
+| Give out an award | The AV coordinator presses Show, you read, they press Reveal when you say the name. Chapter 6, *Awards* |
+| Explain a delay | Ask the AV coordinator for the delay card, then talk. An explained pause reads as process |
+
+A number with an outline around it means the desk is guessing. Do not read an
+outlined score as final; wait for it to go solid.
+
+### What runs by itself, and what to leave alone
+
+**By itself, all weekend, with nobody touching it:** the program switching
+screens to follow the match, the score bar, the side screens' rotation, the
+on-deck list, the "when do we play" page, the thank-you slides for the WRRF
+Board, the WRRF Interns, the CalGames Planning Committee, the volunteers and
+Woodside High School, and the shout-out QR code on the side screens.
+
+**Needs a person:** approving shout-outs (they wait in a queue until somebody
+reads them), the awards ceremony, and trivia if you want to run it.
+
+**Leave alone:** the desk laptop's lid and power cable, the OBS settings once
+they work, and any screen that is already showing the right thing. Nothing
+gets better for being clicked, and every page reconnects on its own if the
+network blips. Set the laptop to never sleep (Windows Settings, Power) and
+keep it plugged in.
+
+**If anything goes wrong mid-event**, double-click the exe again. If the desk
+is still running it just reopens it in the browser; if it stopped, it starts
+again and the day comes back exactly as it was: scores, cards, the run of
+show. Every screen in the building reconnects by itself. Chapter 11 has the
+rest.
 
 ## Checking it works before the event
 
@@ -201,8 +367,13 @@ nothing goes into Program Files.
 
 ### Step 2: Double-click it
 
-A black window opens and prints what it is doing. It takes about a minute the
-first time and a few seconds after that.
+Nothing appears straight away. The first time, the desk spends up to a minute
+unpacking itself; after that it starts in a few seconds. Then **your web
+browser opens on its own**, on the desk's front page. That is the whole
+interface: there is no other window, on purpose (step 4).
+
+If something is wrong, a red error box pops up and says what. It also says
+nothing is running, so it is always safe to double-click again.
 
 Windows may show a blue **"Windows protected your PC"** box. This is normal for
 any program that has not paid for a code-signing certificate. Click **More
@@ -212,7 +383,7 @@ alone, including this document's.
 
 ### Step 3: Read the address
 
-When it is ready the window prints something like:
+The front page has a **Start here** box at the top. It shows something like:
 
 ```
 READY
@@ -243,7 +414,7 @@ not, and come from a file instead:
 
 | Code | How the lead changes it |
 | --- | --- |
-| Desk PIN | Add `/pin:4726` when starting: `START-DESK.cmd /pin:4726`, or `CalGamesContentDesk.exe /pin:4726` on the very first run |
+| Desk PIN | Add `/pin:4726` once when starting: `START-DESK.cmd /pin:4726` or `CalGamesContentDesk.exe /pin:4726`. The desk remembers it (in `desk-pin.txt`, in the desk folder) across restarts and double-clicks. Run with `/pin:` again to change it; `/pin:0864` goes back to the default |
 | Awards code | `awards.pin` in `config.json` |
 | Settings code | `setup.pin` in `config.json` |
 
@@ -260,6 +431,13 @@ means the whole building can read the winners before the ceremony.
 
 The numbers will be different at your event. Use what your browser shows, not
 what is printed here.
+
+The PIN only appears on the desk laptop itself. The same page opened on any
+other device on the network shows the address alone, because that page is
+open to everyone on the venue Wi-Fi.
+
+**Lost the browser tab?** Double-click the exe again. If the desk is already
+running it just opens it again; it never stops a running show.
 
 ### Step 4: There is no window, and that is deliberate
 
@@ -752,11 +930,26 @@ To add one during the event: pick a kind, type a title and lines (separate
 lines with `|`), press **Add**. It is saved immediately and survives a desk
 restart.
 
+**The thank-you slides are already loaded.** The WRRF Board of Directors,
+the WRRF Interns, the CalGames Planning Committee, the volunteers and
+Woodside High School each have one, plus a slide inviting the crowd to send
+shout-outs. They rotate on the side screens from the first start. To name
+people (a setup crew, the planning committee by name), add a slide of your
+own.
+
 The **shout-out queue** below it fills from `/s/gp`, a phone page where
-anyone in the stands can submit a Gracious Professionalism moment they saw.
+anyone in the building can thank a volunteer, a team, a mentor, the ref crew.
+They say **who it is for** and **what they did**; approved, it airs as
+*Shout-out to (who)* with the message and *From (name)* underneath.
+
+People find the form three ways: the QR code in the corner of every side
+screen switches to it whenever a slide is up, the QR posters you printed
+(Start here, step 8), and the "Send a shout-out" slide in the rotation.
+
 **Nothing from that queue reaches any screen until you press Approve.** Read
 each one; approve the good ones into the deck; reject the rest. Nobody is
-notified of a rejection.
+notified of a rejection. Check the queue between matches: it is the one part
+of the desk that waits for you.
 
 ### The event timer
 
@@ -1041,9 +1234,15 @@ Ordered by how often it happens.
 
 ### The universal fix
 
-Close the black window. Double-click the desk again. It comes back in a few
-seconds and remembers the day: cards, coverage, the run of show, sponsor
-counts. Every screen in the building reconnects on its own.
+Double-click the exe again. If the desk is still running, that simply reopens
+it in the browser. If it really has stopped (the laptop restarted, or it
+crashed), that starts it, and it comes back in a few seconds remembering the
+day: cards, coverage, the run of show, sponsor counts. Every screen in the
+building reconnects on its own.
+
+If the desk is running but misbehaving and you want a genuinely fresh start,
+end it first: Task Manager (Ctrl+Shift+Esc), find **CalGames 2026 Content
+Desk**, End task, then double-click the exe.
 
 You do not lose the day by restarting. That is deliberate, and it was built
 because laptops get their power cables kicked out.

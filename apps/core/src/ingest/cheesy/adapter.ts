@@ -15,6 +15,7 @@ import type {
   Alliance, AllianceSelection, MatchInfo, RankingRow, Team, UpcomingMatch,
 } from '../../types.ts';
 import { CheesyClient, type CheesyClientOpts } from './client.ts';
+import { teamName } from '../../teams.ts';
 import {
   MatchState, MatchStatus, MatchType,
   type AllianceSelectionMessage,
@@ -40,7 +41,7 @@ export function mapRankings(res: RankingsResponse): {
       rank: r.Rank ?? 0,
       previousRank: r.PreviousRank ?? 0,
       team: r.TeamId ?? 0,
-      name: r.Nickname ?? '',
+      name: teamName(r.TeamId ?? 0, r.Nickname),
       rankingPoints: r.RankingPoints ?? 0,
       // What the ORDERING is on. Cheesy sorts by RP per match played, so a
       // table printing the raw total puts a rank-4 team above a rank-3 team
@@ -760,7 +761,9 @@ export class CheesyAdapter {
       if (!number) return null;
       return {
         number,
-        name: t?.Nickname ?? t?.Name ?? '',
+        // TBA's placeholder for a second robot is replaced with the team's
+        // own name; everyone else keeps what the field says. See teams.ts.
+        name: teamName(number, t?.Nickname ?? t?.Name),
         ...(msg.Rankings?.[String(number)] ? { rank: msg.Rankings[String(number)] } : {}),
       };
     };

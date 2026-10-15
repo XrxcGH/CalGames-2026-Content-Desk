@@ -29,6 +29,8 @@
  * theirs, and the rankings poll covers the rest.
  */
 
+import { teamLabel } from './desk-client.js';
+
 /** @returns the full alliance in pick order, or the on-field three if unknown. */
 export function allianceRoster(state, side) {
   const onField = state?.match?.[side] ?? [];
@@ -66,4 +68,75 @@ export function allianceRoster(state, side) {
 /** True when this team is on the alliance but not on the field this match. */
 export function isReserve(state, side, number) {
   return !(state?.match?.[side] ?? []).some(t => t.number === number);
+}
+
+/*
+ * ---- helpers the program overlay and the talent view share ----------------
+ * Pure functions of a state frame, kept here (not in the surfaces) so the
+ * rules can be exercised from Node without a DOM.
+ */
+
+/**
+ * Who is on the field, as one string that changes when any of them does.
+ *
+ * The match id alone is not an identity for the lineup. A playoff team
+ * substitution re-sends matchLoad with the SAME id and different teams, and a
+ * repaint keyed on the id left the overview, the scorebug and the talent cards
+ * naming the swapped-out team for the whole match. The printed label rides
+ * along so a label that lands after the first paint (a second robot's 100B)
+ * repaints as well.
+ */
+export function lineupKey(state) {
+  const side = list => (list ?? [])
+    .map(t => `${t.number}/${teamLabel(state, t.number)}`).join(',');
+  return `${state?.match?.id ?? ''}|${side(state?.match?.red)}|${side(state?.match?.blue)}`;
+}
+
+/**
+ * The teams still to be called, in rank order, capped for room-scale reading.
+ *
+ * Taken from the UNPICKED teams, not from the top of the whole ranking. Slicing
+ * the first 24 ranks and striking the taken ones is fine in round one and
+ * wrong from round two, when the top 24 are all gone: every visible row was
+ * struck through and the teams actually left to call (rank 25 and below) never
+ * appeared under a plate headed "Still available".
+ */
+export function availablePool(selection, limit = 24) {
+  return (selection?.ranked ?? []).filter(r => !r.picked).slice(0, limit);
+}
+
+/**
+ * What the final screen says about the result.
+ *
+ * WHO IS AHEAD and WHETHER THAT IS A RESULT are two questions. They used to be
+ * one flag ('!estimated && r > b'), so while the desk shadow-scored neither
+ * alliance was ever ahead and the 'Leading, unofficial' wording could never
+ * appear: a clearly decided match showed two outlined totals and no words.
+ *
+ * The leader is worked out regardless. `won` (the gold cap) is the claim that
+ * it is a RESULT, so it needs the field's total behind it; the words say which
+ * kind of claim it is. The field's own verdict wins over our arithmetic when
+ * the total is official, because a playoff tie is resolved on tiebreaks and a
+ * disqualification never touches the score.
+ *
+ * @returns {{ estimated: boolean, leader: 'red'|'blue'|'tie',
+ *   won: {red: boolean, blue: boolean}, verdict: {red: string, blue: string} }}
+ */
+export function finalVerdict(state) {
+  const estimated = state?.totalConfidence === 'estimated';
+  const r = state?.score?.red?.total ?? 0;
+  const b = state?.score?.blue?.total ?? 0;
+  const official = !estimated ? state?.officialWinner : null;
+  const leader = official ?? (r > b ? 'red' : b > r ? 'blue' : 'tie');
+  const words = side => {
+    if (leader === side) return estimated ? 'Leading, unofficial' : 'Winner';
+    if (leader === 'tie') return estimated ? 'Level, unofficial' : 'Tie';
+    return '';
+  };
+  return {
+    estimated,
+    leader,
+    won: { red: !estimated && leader === 'red', blue: !estimated && leader === 'blue' },
+    verdict: { red: words('red'), blue: words('blue') },
+  };
 }

@@ -622,7 +622,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <label for="analyst">Analyst name (shown on the ANALYSIS chip)</label>
         <input id="analyst" placeholder="Priya Raman">
         <label for="frame">Frozen frame URL</label>
-        <input id="frame" placeholder="/media/... or any image URL">
+        <input id="frame" placeholder="/media/teams/... or any image URL">
         <p class="hint">The analyst draws on the frame the audience is seeing, not a
           blank sheet. The replay console's <b>Send frame to analyst</b> pushes one
           automatically; this field is the manual fallback. <b>Hide</b> kills the
@@ -899,11 +899,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <b>outlined</b>, nothing can be published, and the event log names the source.
           Every word of it says <b>SAMPLE</b>, so if any of it reaches a projector by
           accident the room can tell at a glance.</p>
-        <p class="hint"><b>Nothing is written to disk.</b> The sample slides, people and
-          robot photos live in memory only and never reach the real event files, so a
-          restart clears the lot and leaves no residue behind. Load a real match to
-          clear the match half. The button refuses entirely while the field bridge is
-          up.</p>
+        <p class="hint"><b>Nothing is written to disk, and it clears itself.</b> The
+          sample disappears from every screen the moment a real match loads, from the
+          field or from this console, so a forgotten sample never reaches the event.
+          <b>Clear sample data</b> does the same by hand. The button refuses entirely
+          while the field bridge is up.</p>
         <p class="hint">Three things it deliberately leaves alone, because each one
           would hide the screens you are trying to look at: the <b>status card</b> and
           the <b>safety message</b> paint over everything, and the <b>timer</b> takes
@@ -911,6 +911,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           console. And no award winner, ever.</p>
         <div class="row">
           <button class="btn" id="sampleGo">Fill the screens with sample data</button>
+          <button class="btn" id="sampleClear">Clear sample data</button>
         </div>
         <p class="hint" id="sampleNote" role="status"></p>
       </section>

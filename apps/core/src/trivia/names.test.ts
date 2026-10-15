@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../bus.ts';
 import { TriviaStore } from './store.ts';
-import { normalizeName, screenName } from './names.ts';
+import { normalizeName, screenName, screenText } from './names.ts';
 
 test('ordinary names are left alone', () => {
   // The expensive failure mode is not letting something through, it is
@@ -181,6 +181,76 @@ test('a lookalike letter cannot split a word in half', () => {
   // A lookalike that folds to a DIFFERENT letter is not an evasion: Cyrillic
   // u renders as a y, so this reads "fyck" on the screen and is left alone.
   assert.equal(screenName('f\u0443ck').ok, true);
+});
+
+test('invisible format characters cannot split a word the screen shows whole', () => {
+  // Zero-width space, soft hyphen and the bidi override draw nothing on the
+  // projector, but each one was a separator to the folder. A split that leaves
+  // a trailing single letter also dodges the joined-word pass, which skips a
+  // name ending in an initial: these two walked straight through.
+  const zwsp = '\u200B';
+  const shy = '\u00AD';
+  const rlo = '\u202E';
+  for (const name of [
+    `ni${zwsp}gge${zwsp}r`,       // ZWSP splits, trailing single letter
+    `fuc${shy}k`,                 // soft hyphen, trailing single letter
+    `f${zwsp}u${zwsp}c${zwsp}k`,  // every letter separated
+    `${rlo}fuck`,                 // bidi override in front
+    `sh${shy}it`,
+    `fu\u2060ck`,                 // word joiner
+    `fu\uFEFFck`,                 // byte-order mark
+    `bi${zwsp}${zwsp}tch`,        // a run of them
+  ]) {
+    assert.equal(screenName(name).ok, false, `U+${[...name].map(c => c.codePointAt(0)!.toString(16)).join(' ')} reached the projector`);
+  }
+
+  // The reserved list reads the same string, so staff cannot be impersonated
+  // with a joiner either.
+  assert.equal(screenName(`Ref${zwsp}eree`).ok, false);
+  assert.equal(screenName(`Head${zwsp}Ref`).ok, false);
+  assert.equal(screenName(`ad${shy}min`).ok, false);
+});
+
+test('invisible characters do not make a real name look like a problem', () => {
+  // Stripping must not turn the guard into a name-rejection machine. A name
+  // that is fine without them stays fine with them, and a name made only of
+  // them is blank, which is refused for the usual reason.
+  assert.equal(screenName('Ana\u200B').ok, true);
+  assert.equal(screenName('\u202EAna').ok, true);
+  assert.equal(screenName('Scun\u00ADthorpe').ok, true);
+  assert.equal(screenName('\u200B\u200B').ok, false);
+  assert.equal(screenName('\u200B\u200B').reason, 'A name is required.');
+});
+
+test('free text is screened with the invisible characters out too', () => {
+  // screenText feeds shout-outs and typed slide lines, and shares the folder.
+  assert.equal(screenText('you are a fuc\u00ADk'), false);
+  assert.equal(screenText('great match, ni\u200Bgge\u200Br'), false);
+  assert.equal(screenText('great match \u200Bteam'), true);
+});
+
+test('a name is stored without the invisible characters it was screened without', () => {
+  // Screening a clean copy and keeping the raw one would put something other
+  // than what was checked on the projector, and a right-to-left override in a
+  // stored name reorders the rest of its leaderboard row.
+  const store = new TriviaStore(new EventBus(), []);
+  const joined = store.join('\u202EAna\u200B Ruiz\u00AD', 846);
+  assert.equal(joined.name, 'Ana Ruiz');
+  assert.deepEqual(store.snapshot().standings.map(r => r.name), ['Ana Ruiz']);
+  assert.ok(store.playView(joined.playerId).me, 'and the player is in');
+
+  // The slur is refused at the door, and costs nobody their slot.
+  assert.throws(() => store.join('ni\u200Bgge\u200Br'), /different name/i);
+  assert.throws(() => store.join('\u200B\u202E'), /name is required/i);
+  assert.equal(store.snapshot().players, 1);
+});
+
+test('padding a name with invisible characters does not spend its length', () => {
+  // The clip is applied after the strip, so a name made mostly of them keeps
+  // every visible letter instead of being cut to 24 characters of nothing.
+  const store = new TriviaStore(new EventBus(), []);
+  const padded = `${'\u200B'.repeat(30)}Priya`;
+  assert.equal(store.join(padded).name, 'Priya');
 });
 
 test('containment is confined to letter runs, where it is safe', () => {

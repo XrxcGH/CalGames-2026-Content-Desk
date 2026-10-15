@@ -313,6 +313,35 @@ export const SCREENS = [
   { id: 'auto', label: 'Auto' },
 ];
 export const SCREEN_LABEL = Object.fromEntries(SCREENS.map(s => [s.id, s.label]));
+
+/**
+ * What to PRINT for a team number. Almost always the number itself; for a
+ * second robot, its label: CalGames registers The Wildhats' B robot as 9999,
+ * and nobody in the stands knows 9999, they know 100B. The number stays the
+ * identity for every lookup; this is for display only.
+ */
+export function teamLabel(state, n) {
+  return state?.teams?.[n]?.label ?? String(n);
+}
+
+/** A team's pit code, if the event published one. */
+export function teamPit(state, n) {
+  return state?.teams?.[n]?.pit ?? null;
+}
+
+/**
+ * Turn what somebody typed into a team number: "100B" or "100b" finds 9999.
+ * A plain number comes straight back. Null when it matches nothing usable.
+ */
+export function teamFromInput(state, text) {
+  const t = String(text ?? '').trim().toUpperCase();
+  if (!t) return null;
+  for (const [n, e] of Object.entries(state?.teams ?? {})) {
+    if (e?.label && e.label.toUpperCase() === t) return Number(n);
+  }
+  const n = Number(t);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 // Screens that exist at runtime but earn no button (a slide or an award is
 // taken from its own panel, never cold from a screen row).
 SCREEN_LABEL['slide'] = 'Slide';

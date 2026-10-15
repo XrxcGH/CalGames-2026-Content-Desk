@@ -18,7 +18,8 @@ test('the surfaces an audience sees never ask for a credential', () => {
     assert.equal(get(p), false, `${p} must stay open`);
   }
   // Plus their assets.
-  for (const p of ['/theme/tokens.css', '/shared/desk-client.js', '/media/846.webp']) {
+  for (const p of ['/theme/tokens.css', '/shared/desk-client.js',
+    '/media/teams/846/robot.v1.png', '/media/sponsors/acme.png']) {
     assert.equal(get(p), false, `${p} must stay open`);
   }
 });
@@ -161,4 +162,89 @@ test('the static asset trees are open to READS, not to every verb', () => {
   assert.equal(needsAuth({ method: 'GET', path: '/media/teams/846/robot.v1.png' }), false);
   assert.equal(needsAuth({ method: 'POST', path: '/media/teams/846/robot.v1.png' }), true);
   assert.equal(needsAuth({ method: 'DELETE', path: '/theme/tokens.css' }), true);
+});
+
+test('the licensed audio is closed however its path is spelled', () => {
+  /*
+   * The gate compared the RAW url path against '/media/audio/', while the file
+   * sender decodes it, flips %5C into a Windows separator, and opens it on a
+   * case-insensitive NTFS. Each of these reached the same walk-up mp3 and went
+   * straight past the gate, so anyone on the venue Wi-Fi could read the whole
+   * licensed library by typing team numbers.
+   */
+  const spellings = [
+    '/media/Audio/walkups/254.mp3',               // case: NTFS does not care
+    '/media/%61udio/walkups/254.mp3',             // a percent-encoded letter
+    '/media//audio/walkups/254.mp3',              // a doubled slash
+    '/media/audio%5Cwalkups%5C254.mp3',           // %5C is a separator to win32
+    '/media/teams/..%2faudio/walkups/254.mp3',    // an encoded slash hides the climb
+    // And the cousins of those five.
+    '/media/AUDIO/stingers/goal.mp3',
+    '/media/audio./walkups/254.mp3',              // win32 drops the trailing dot
+    '/media/audio%20/walkups/254.mp3',            // and a trailing space
+    '/media/%41%55%44%49%4f/walkups/254.mp3',     // every letter encoded
+    '/media/%2561udio/walkups/254.mp3',           // encoded twice
+    '/media/teams/..%252faudio/walkups/254.mp3',  // the climb, encoded twice
+    '/media/teams/%2e%2e/audio/walkups/254.mp3',  // encoded dots
+    '/media/teams/../audio/walkups/254.mp3',      // plain dots
+    '/media/sponsors/..\\audio\\walkups\\254.mp3', // a literal backslash
+    '/media/teams/846/../../audio/walkups/254.mp3',
+    '/media/audio::$INDEX_ALLOCATION/walkups/254.mp3', // an NTFS stream name
+  ];
+  for (const p of spellings) {
+    for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+      assert.equal(needsAuth({ method, path: p }), true,
+        `${method} ${p} would serve licensed audio to anyone`);
+    }
+  }
+});
+
+test('media is private by default: only the picture folders are open', () => {
+  // An allowlist, so the next folder somebody drops into media/ is private
+  // until someone decides otherwise.
+  for (const p of ['/media/846.webp', '/media/frames/x.jpg', '/media/audio/walkups/254.mp3',
+    '/media/notes.txt', '/media/', '/media']) {
+    assert.equal(get(p), true, `${p} must require the PIN`);
+  }
+});
+
+test('the open picture folders stay open under every spelling the sender accepts', () => {
+  // The other half: normalising must not start refusing the audience surfaces
+  // their robot cutouts and sponsor logos, which carry no cookie.
+  for (const p of [
+    '/media/teams/846/robot.v1.png',
+    '/media/Teams/846/robot.v1.png',
+    '/media//teams/846/robot.v1.png',
+    '/media/teams/%38%34%36/robot.v1.png',
+    '/media/teams%5C846%5Crobot.v1.png',
+    '/media/teams/845/../846/robot.v1.png',
+    '/media/teams/846/robot%20two.png',
+    '/media/teams/846/100%25.png',
+    '/media/sponsors/acme.png',
+    '/media/Sponsors/Acme%20Corp.png',
+  ]) {
+    assert.equal(get(p), false, `${p} must stay open`);
+  }
+});
+
+test('a malformed or endlessly re-encoded path is not trusted', () => {
+  // The sender answers 404 for a bad escape, so there is nothing to serve, and
+  // nothing worth reasoning about. Refusing is the safe direction.
+  assert.equal(get('/media/teams/%zz/robot.png'), true);
+  assert.equal(get('/media/teams/%/robot.png'), true);
+  assert.equal(get('/media/teams/%25252525252e/robot.png'), true,
+    'still changing after several decodes');
+});
+
+test('an open static tree cannot be used to climb into a closed one', () => {
+  // The URL parser flattens plain dot segments before this ever runs; an
+  // encoded slash is how a climb survives it. The sender returns 404 for
+  // these today, and the gate should not be the thing that depends on that.
+  for (const p of ['/theme/a%2f..%2f..%2fclips%2fmatch42.mp4',
+    '/shared/..%2f..%2frec%2fclips%2fmatch42.mp4',
+    '/theme/..%2fshared%2fdesk-client.js']) {
+    assert.equal(get(p), true, `${p} leaves the tree it was requested under`);
+  }
+  assert.equal(get('/theme/fonts/inter.woff2'), false);
+  assert.equal(get('/shared/%64esk-client.js'), false);
 });

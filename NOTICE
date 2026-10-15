@@ -58,6 +58,12 @@ It also includes and redistributes, as source rather than as a dependency:
     This travels in the exe as well as in the repository: tools/launcher
     stages the payload from `git ls-files`, and icons.js is tracked.
 
+  Archivo, Chivo, Saira Condensed and JetBrains Mono - SIL Open Font License
+    1.1. surfaces/_shared/fonts/ holds the Latin subsets Google Fonts serves,
+    unmodified, so the screens render the same with no internet connection.
+    The copyright notices and the full license text are in
+    surfaces/_shared/fonts/OFL.txt, which travels in the exe with them.
+
 At run time it can talk to, but does not include or redistribute:
 
   Cheesy Arena (https://github.com/Team254/cheesy-arena), Team 254

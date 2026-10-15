@@ -107,3 +107,6 @@ data/spotify-token.json.tmp
 # temp file are not.
 RUN-THE-DESK.html
 .handbook.tmp.html
+
+# The launcher remembers the desk PIN here, in the desk folder. Never commit it.
+desk-pin.txt

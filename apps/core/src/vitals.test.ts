@@ -167,6 +167,34 @@ test('a stream that drops mid-match turns the health page red', async () => {
   assert.equal(r.worst, 'fail');
 });
 
+test('an unquoted numeric pin in config.json does not take the health report down', async () => {
+  // "pin": 2468 is the natural way to write a four-digit code, and JSON hands
+  // it over as a number. (2468).trim() threw while the list of checks was
+  // still being built, so the whole report rejected, not just the codes row.
+  const saved = { desk: process.env['REMOTE_PIN'], ja: process.env['JA_PIN'], setup: process.env['SETUP_PIN'] };
+  delete process.env['JA_PIN'];
+  delete process.env['SETUP_PIN'];
+  process.env['REMOTE_PIN'] = '7391';
+  try {
+    const config = cfg();
+    config.awards = { ...config.awards, pin: 2468 as unknown as string };
+    config.setup = { pin: 8642 as unknown as string };
+    const codes = find(await new Vitals(base({ config })).report(), 'codes');
+    assert.equal(codes.level, 'ok', 'both numbers are real, changed codes');
+
+    // And a numeric pin that happens to BE the shipped default is still seen
+    // as the default: coercing must not hide it.
+    config.awards = { ...config.awards, pin: 1357 as unknown as string };
+    const stale = find(await new Vitals(base({ config })).report(), 'codes');
+    assert.equal(stale.level, 'warn');
+    assert.match(stale.detail, /awards code/);
+  } finally {
+    for (const [key, val] of [['REMOTE_PIN', saved.desk], ['JA_PIN', saved.ja], ['SETUP_PIN', saved.setup]] as const) {
+      if (val === undefined) delete process.env[key]; else process.env[key] = val;
+    }
+  }
+});
+
 test('"not streaming" is fine on Friday and an emergency during a match', async () => {
   // The same reading means opposite things, and the desk could not tell them
   // apart: OBS idle between days looks identical to OBS idle during a final.

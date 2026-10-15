@@ -516,6 +516,18 @@ $('sampleGo').onclick = async () => {
   }
 };
 
+// Takes the sample back off without a restart. The first real match does
+// the same by itself.
+$('sampleClear').onclick = async () => {
+  try {
+    const res = await fetch('/api/sample/clear', { method: 'POST' });
+    const body = await res.json();
+    setText($('sampleNote'), body.note ?? (res.ok ? 'Cleared.' : `HTTP ${res.status}`));
+  } catch (err) {
+    setText($('sampleNote'), err.message);
+  }
+};
+
 // ---- telestrator -----------------------------------------------------------
 // The placeholder is a sample, not a default. It used to be the fallback, so
 // sending a frame before typing anything put "Analysis - Priya Raman" on
@@ -2161,11 +2173,15 @@ function paintGpQueue(queue) {
     row.className = 'pline';
     const who = document.createElement('span');
     who.className = 'who';
+    // The recipient leads, because it becomes the slide's headline: the
+    // moderator is approving "Shout-out to X" as much as the message.
+    const to = document.createElement('b');
+    to.textContent = q.to ? `To ${q.to}: ` : '';
     const msg = document.createElement('span');
     msg.textContent = `"${q.message}" `;
     const from = document.createElement('b');
-    from.textContent = `- ${q.name}${q.team ? `, ${q.team}` : ''}`;
-    who.append(msg, from);
+    from.textContent = `from ${q.name}${q.team ? `, ${q.team}` : ''}`;
+    who.append(to, msg, from);
     const ok = document.createElement('button');
     ok.className = 'btn';
     ok.textContent = 'Approve';

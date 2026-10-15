@@ -11,6 +11,7 @@
  */
 
 import type { EventBus } from './bus.ts';
+import type { DeskState, UpcomingMatch } from './types.ts';
 
 /** Cycles longer than this are breaks, not pace, so exclude from the median. */
 const MAX_CYCLE_MS = 20 * 60_000;
@@ -21,7 +22,13 @@ const KEEP = 8;
 export interface Pace {
   /** Median of recent real cycle times, seconds. Null until two starts. */
   cycleSec: number | null;
-  /** Wall-clock estimate for the next match start. Null until one start. */
+  /**
+   * Wall-clock estimate for the start of the first match that has NOT started
+   * yet: one median cycle after the last start. While a match is on the field
+   * that is the match after it, so it belongs to on-deck row 1 when the queue
+   * still lists the playing match as row 0 (see startedRows). Null until two
+   * starts, because the projection needs a measured cycle.
+   */
   nextStartAt: number | null;
   /**
    * Minutes behind the published schedule (negative = ahead). Null when the
@@ -76,6 +83,65 @@ export function behindMinutes(
   return Math.abs(min) > MAX_CREDIBLE_BEHIND_MIN ? null : min;
 }
 
+const norm = (x: string | null | undefined): string => (x ?? '').trim().toLowerCase();
+
+/**
+ * Is on-deck row 0 the match that is on the field right now?
+ *
+ * The two queue sources disagree about this, and a figure built on the wrong
+ * answer is a whole cycle out. The field's queue (Cheesy, and the sample loop)
+ * keeps a match listed until its score commits, so while it plays it IS row 0.
+ * Nexus drops a match from its list the moment it is "On field" (see
+ * pendingMatches), so there row 0 is already the next match to play. Asking
+ * the queue's source is not enough, because Nexus can lag the field and a test
+ * match was never in any queue; the one witness that is right every time is
+ * the loaded match's own name.
+ *
+ * With no loaded match to compare against, fall back to the source's
+ * convention: believe the field's queue, not Nexus's.
+ */
+export function headIsPlaying(
+  head: Pick<UpcomingMatch, 'name' | 'shortName'> | undefined,
+  match: { displayName: string } | null | undefined,
+  queueFrom: DeskState['queueFrom'],
+): boolean {
+  if (!head) return false;
+  const playing = norm(match?.displayName);
+  if (!playing) return queueFrom !== 'nexus';
+  return norm(head.name) === playing || (norm(head.shortName) !== '' && norm(head.shortName) === playing);
+}
+
+/**
+ * How many rows at the head of the on-deck queue have already started: 1 from
+ * match.start until that match's score commits (it is still listed, as row 0),
+ * otherwise 0.
+ *
+ * `nextStartAt` projects the first match that has not started, so every
+ * per-row estimate has to skip this many rows first. Counting from row 0
+ * regardless put the next match's start time on the match already playing and
+ * every later row one full cycle late, from match start until the score
+ * committed, then snapped back. The surfaces carry a copy of this rule inline
+ * (they are plain browser JS); this is the one that is tested.
+ */
+export function startedRows(
+  s: Pick<DeskState, 'lastMatchStartedAt' | 'scorePostedAt' | 'match' | 'upcoming' | 'queueFrom'>,
+): 0 | 1 {
+  if (s.lastMatchStartedAt === null || s.scorePostedAt !== null) return 0;
+  return headIsPlaying(s.upcoming[0], s.match, s.queueFrom) ? 1 : 0;
+}
+
+/**
+ * Projected start for on-deck row `row`, or null when there is none to give:
+ * the row is a match that already started, or the pace model has no signal.
+ */
+export function etaForRow(
+  pace: Pick<Pace, 'nextStartAt' | 'cycleSec'>, started: number, row: number,
+): number | null {
+  if (row < started) return null;
+  if (!pace.nextStartAt || !pace.cycleSec) return null;
+  return pace.nextStartAt + (row - started) * pace.cycleSec * 1000;
+}
+
 /**
  * Watch match starts and the schedule; publish `pace.updated` whenever the
  * picture changes. Re-emits on a slow tick too. "est. start" keeps walking
@@ -126,7 +192,14 @@ export function attachPace(bus: EventBus): () => void {
       const latched = Number.isFinite(schedAt)
         ? Math.round((ev.ts - schedAt) / 60_000)
         : null;
+      // Only when the head really is the match starting. A Nexus queue has
+      // already dropped it (and a test match was never in any queue), so there
+      // the head is the NEXT match and latching this start against its time
+      // read a full cycle AHEAD for the whole match. Unlatched, compute()
+      // compares the next match's projection against the next match's time,
+      // which is the right pair.
       held = head && latched !== null && Math.abs(latched) <= MAX_CREDIBLE_BEHIND_MIN
+        && headIsPlaying(head, bus.state.match, bus.state.queueFrom)
         ? { behindMin: latched, head: head.shortName }
         : null;
       starts.push(ev.ts);

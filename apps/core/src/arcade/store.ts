@@ -9,6 +9,7 @@
  */
 
 import type { EventBus } from '../bus.ts';
+import type { DeskEvent } from '../types.ts';
 import {
   standings, setWinner,
   type ArcadeGame, type ArcadePlayer, type ArcadeSet, type BracketSet,
@@ -48,6 +49,8 @@ export interface ArcadeSnapshot {
   standings: Standing[];
   /** Drives the "up next" line during a break. */
   upNext: string;
+  /** The up-next line is the sample's, so a restart does not restore it. */
+  upNextSample?: true;
   /** Bracket metadata from start.gg: round labels and entrants, never scores. */
   bracket: BracketSet[];
   boxes: ArcadeBoxes;
@@ -60,8 +63,91 @@ export class ArcadeStore {
   #upNext = '';
   #bracket: BracketSet[] = [];
   #boxes: ArcadeBoxes = ALL_ON();
+  /**
+   * Set by the first OPERATOR publish, after which observe() refuses to
+   * restore: a logged snapshot arriving once a set is being scored would
+   * overwrite it. Not set by a start.gg publish, because the adapter's first
+   * poll is in flight while the boot-time rebuild runs and can land in the
+   * middle of it; bracket metadata says nothing about what the operator has
+   * done, so it must not end the restore.
+   */
+  #live = false;
+  /**
+   * The desk's sample data. While a sample seed runs, publishes go out tagged
+   * 'demo', which the boot-time rebuild skips, so a restart never restores
+   * the sample's set or grand prix. What it put up is marked, so
+   * clearSample() takes down exactly that and leaves anything real alone.
+   */
+  #sample = false;
+  #sampleUpNext = '';
 
   constructor(bus: EventBus) { this.#bus = bus; }
+
+  /** Run a sample seed. Everything it publishes is tagged as sample. */
+  asSample(seed: () => void): void {
+    this.#sample = true;
+    try { seed(); } finally {
+      this.#sample = false;
+      if (this.#set) this.#set.sample = true;
+      if (this.#gp) this.#gp.sample = true;
+      this.#sampleUpNext = this.#upNext;
+    }
+  }
+
+  /** Take down whatever the sample put up and is still showing. */
+  clearSample(): void {
+    let changed = false;
+    if (this.#set?.sample) { this.#set = null; changed = true; }
+    if (this.#gp?.sample) { this.#gp = null; changed = true; }
+    if (this.#upNext && this.#upNext === this.#sampleUpNext) { this.#upNext = ''; changed = true; }
+    this.#sampleUpNext = '';
+    if (changed) this.#publish('arcade.bracket_updated');
+  }
+
+  /**
+   * Rebuild from a logged `arcade.*` event. Boot-time only, fed by
+   * rebuildFromLog; never subscribed to the bus.
+   *
+   * The grand prix lived only in memory: three races into a four-race Pit
+   * Crew Cup, a restart put an empty standings panel on the projector and
+   * the operator re-typing finishing orders from memory. Every arcade event
+   * carries the whole snapshot, so each one overwrites the last and the day's
+   * final event wins. Nothing here publishes: the overlay reads the restored
+   * state on its next snapshot, and re-emitting set_end would re-queue the
+   * set's video.
+   *
+   * The bracket is NOT restored. It is start.gg's data, re-fetched within a
+   * minute of boot, and a poll that landed before the rebuild would be
+   * overwritten with an older copy from the log.
+   */
+  observe(ev: DeskEvent): void {
+    if (this.#live || !ev.type.startsWith('arcade.')) return;
+    const snap = ev.payload as Partial<ArcadeSnapshot> | null;
+    if (!snap || typeof snap !== 'object') return;
+
+    // Checked the way startGrandPrix and recordRace check their inputs:
+    // standings() runs on every snapshot, so a malformed grand prix out of a
+    // hand-edited log would take the whole /api/arcade surface down at boot.
+    const gp = snap.gp;
+    const gpOk = !!gp && typeof gp === 'object'
+      && Array.isArray(gp.racers)
+      && gp.racers.every(r => !!r && typeof r.id === 'string' && typeof r.name === 'string')
+      && Array.isArray(gp.races)
+      && gp.races.every(race => Array.isArray(race) && race.every(id => typeof id === 'string'));
+    this.#gp = gpOk && !gp.sample ? gp : null;
+
+    const set = snap.set;
+    this.#set = !!set && typeof set === 'object'
+      && Array.isArray(set.players) && Array.isArray(set.scores) && !set.sample
+      ? set : null;
+
+    this.#upNext = typeof snap.upNext === 'string' && !snap.upNextSample ? snap.upNext : '';
+
+    const boxes = snap.boxes;
+    const boxesOk = !!boxes && typeof boxes === 'object'
+      && (Object.keys(ALL_ON()) as ArcadeBox[]).every(k => typeof boxes[k] === 'boolean');
+    this.#boxes = boxesOk ? { ...boxes } : ALL_ON();
+  }
 
   get snapshot(): ArcadeSnapshot {
     return {
@@ -69,6 +155,7 @@ export class ArcadeStore {
       gp: this.#gp,
       standings: this.#gp ? standings(this.#gp) : [],
       upNext: this.#upNext,
+      ...(this.#upNext && this.#upNext === this.#sampleUpNext ? { upNextSample: true as const } : {}),
       bracket: this.#bracket,
       boxes: { ...this.#boxes },
     };
@@ -110,7 +197,8 @@ export class ArcadeStore {
     type: 'arcade.set_start' | 'arcade.score' | 'arcade.set_end' | 'arcade.bracket_updated',
     source: 'manual' | 'startgg' = 'manual',
   ): void {
-    this.#bus.emit({ type, source, payload: this.snapshot });
+    if (source === 'manual') this.#live = true;
+    this.#bus.emit({ type, source: this.#sample ? 'demo' : source, payload: this.snapshot });
   }
 
   startSet(init: {

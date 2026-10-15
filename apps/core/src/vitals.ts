@@ -222,8 +222,12 @@ export class Vitals {
   #codes(): Vital[] {
     const cfg = this.#d.config;
     const desk = process.env['REMOTE_PIN'] ?? '0864';
-    const ja = (process.env['JA_PIN'] ?? cfg.awards?.pin ?? '1357').trim();
-    const setup = (process.env['SETUP_PIN'] ?? cfg.setup?.pin ?? '4567').trim();
+    // String() for the same reason the server does it: "pin": 2468 unquoted in
+    // config.json is a number, and a thrown .trim() here is raised while the
+    // list of checks is still being built, so it would take the whole health
+    // report down rather than just this row.
+    const ja = String(process.env['JA_PIN'] ?? cfg.awards?.pin ?? '1357').trim();
+    const setup = String(process.env['SETUP_PIN'] ?? cfg.setup?.pin ?? '4567').trim();
     const onDefault: string[] = [];
     if (desk === '0864') onDefault.push('desk PIN');
     if (ja === '1357') onDefault.push('awards code');

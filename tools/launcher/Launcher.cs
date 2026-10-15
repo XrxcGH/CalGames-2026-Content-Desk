@@ -55,6 +55,10 @@ internal static class Launcher
     private const int NodeMinMinor = 6;
 
     private const string DefaultPin = "0864";
+    // Where /pin:1234 is remembered, in the install folder next to the desk.
+    // Not in the zip payload, so an unpack never overwrites it, and never in
+    // the repo. See ResolvePin.
+    private const string PinFileName = "desk-pin.txt";
     private const int DefaultPort = 8720;
 
     // Cheesy Arena's own default. Worth probing first because at an FRC event it
@@ -683,6 +687,75 @@ internal static class Launcher
 
     // ---- step 4: run -------------------------------------------------------
 
+    /*
+     * The event PIN has to outlive the command line it was typed on.
+     *
+     * /pin:4726 used to exist only in this process's argv. START-DESK.cmd
+     * forwards just %*, so the lead typed the flag once, and every later start
+     * (a reboot, a crash, somebody double-clicking the .cmd to "fix it") came
+     * up on the published default 0864. Nothing said so: the desk started
+     * fine, the control screens just stopped accepting the PIN the crew had
+     * been told, and everyone who knew the default could suddenly operate it.
+     *
+     * So a PIN that was given is written to desk-pin.txt, and when none is
+     * given the saved one is read back. An explicit /pin always wins and
+     * replaces the file, which is also how to go back to the default (/pin:0864).
+     *
+     * This runs only once we know a desk is really going to start. Saving it
+     * earlier let a second double-click that merely opened the desk already
+     * running (ResolveBusyPort) rewrite the file with a PIN that desk was never
+     * started with, and the next restart would then flip to it.
+     */
+    private static void ResolvePin(string installDir)
+    {
+        string file = Path.Combine(installDir, PinFileName);
+        if (_opt.PinGiven)
+        {
+            try
+            {
+                // No BOM and no clever format: it is meant to be readable in Notepad.
+                File.WriteAllText(file, _opt.Pin + "\r\n", new UTF8Encoding(false));
+                Detail("PIN saved to " + PinFileName + ", so a restart keeps it");
+            }
+            catch (Exception ex)
+            {
+                // The desk can still run on the PIN just given. What is lost is
+                // the next restart, and that is exactly the quiet failure this
+                // exists to prevent, so say it where the log keeps it.
+                string msg = "Could not save the PIN (" + ex.Message + "). "
+                    + "A restart of the desk will go back to the default PIN.";
+                Warn(msg);
+                WriteLog("WARN: " + msg);
+            }
+            return;
+        }
+
+        string saved = ReadSavedPin(file);
+        if (saved != null)
+        {
+            _opt.Pin = saved;
+            Detail("using the PIN saved by an earlier start (" + PinFileName + ")");
+        }
+    }
+
+    /// The saved PIN, or null when there is none worth using. An unreadable or
+    /// empty file falls back to the default rather than stopping the desk from
+    /// starting: the host is standing in front of a gym.
+    private static string ReadSavedPin(string file)
+    {
+        try
+        {
+            if (!File.Exists(file)) return null;
+            string text = File.ReadAllText(file).Trim();
+            // First line only, so a stray second line from a hand edit is not
+            // glued onto the PIN.
+            int eol = text.IndexOfAny(new char[] { '\r', '\n' });
+            if (eol >= 0) text = text.Substring(0, eol).Trim();
+            return text.Length > 0 ? text : null;
+        }
+        catch { return null; }
+    }
+
     private static int Step4Run(string installDir, string nodeExe, string fieldHost)
     {
         Step(4, "Starting the content desk");
@@ -727,6 +800,7 @@ internal static class Launcher
         psi.StandardErrorEncoding = Encoding.UTF8;
         // The PIN travels in the environment, never on the command line: argv is
         // readable by every other process on the machine.
+        ResolvePin(installDir);
         psi.EnvironmentVariables["REMOTE_PIN"] = _opt.Pin;
 
         _desk = new Process();
@@ -930,10 +1004,28 @@ internal static class Launcher
                 ? "held by " + who + " (process " + pid + "), which is not a content desk"
                 : "held by something that is not a content desk");
             Detail("start on a different port instead:  START-DESK.cmd /port:" + (port + 1));
+            // Said out loud on the double-click path, which has no window to
+            // print the lines above in. Without this the launcher just exited.
+            ShowFatal("Another program on this computer is using port " + port
+              + (who != null ? " (" + who + ")" : "") + ", so the desk cannot start. "
+              + "Close that program, or start the desk with START-DESK.cmd /port:" + (port + 1) + ".");
             Hold();
             return 1;
         }
 
+        // A double-click has no console to ask the question in. Console.ReadKey
+        // threw below, the catch left the running desk alone, and Hold() is a
+        // no-op without a console: so double-clicking the exe a second time,
+        // which is exactly what a first-time operator does when they lose the
+        // browser tab, did NOTHING visible at all. Open the desk that is
+        // already running instead. It is the safe answer (it never stops a
+        // show) and it is what they were trying to get back to.
+        if (_silent)
+        {
+            try { Process.Start("http://localhost:" + port + "/"); } catch { }
+            Ok("a desk is already running here; opened it in the browser");
+            return 0;
+        }
         // Only ever offer to kill something that answered as our own desk.
         if (pid <= 0 || _opt.NoWait)
         {
@@ -1303,7 +1395,8 @@ internal static class Launcher
         Console.WriteLine("  Double-click to set up and start the desk. No options needed.");
         Console.WriteLine();
         Console.WriteLine("  For the content desk lead:");
-        Console.WriteLine("    /pin:1234              set the event PIN (default " + DefaultPin + ")");
+        Console.WriteLine("    /pin:1234              set the event PIN (default " + DefaultPin + ");");
+        Console.WriteLine("                           remembered in " + PinFileName + " for every later start");
         Console.WriteLine("    /port:8720             serve on a different port");
         Console.WriteLine("    /dir:D:\\desk           install somewhere other than Downloads");
         Console.WriteLine("    /cheesy-host:ip:8080   skip the scan, use this field address");
@@ -1321,6 +1414,9 @@ internal static class Launcher
     {
         public string InstallDir;
         public string Pin = DefaultPin;
+        /// True only when a non-empty /pin: was typed this time, which is what
+        /// separates "the lead chose the default" from "nobody said". See ResolvePin.
+        public bool PinGiven;
         public int Port = DefaultPort;
         public string CheesyHost;
         public bool NoCheesy;
@@ -1364,7 +1460,11 @@ internal static class Launcher
                 else if (lower == "/rehearsal" || lower == "/practice") o.Rehearsal = true;
                 else if (lower == "/no-browser") o.NoBrowser = true;
                 else if (lower == "/no-wait") o.NoWait = true;
-                else if (lower.StartsWith("/pin:", StringComparison.Ordinal)) o.Pin = a.Substring(5);
+                else if (lower.StartsWith("/pin:", StringComparison.Ordinal))
+                {
+                    o.Pin = a.Substring(5).Trim();
+                    o.PinGiven = o.Pin.Length > 0;
+                }
                 else if (lower.StartsWith("/dir:", StringComparison.Ordinal)) o.InstallDir = a.Substring(5);
                 else if (lower.StartsWith("/cheesy-host:", StringComparison.Ordinal)) o.CheesyHost = a.Substring(13);
                 else if (lower.StartsWith("/display-id:", StringComparison.Ordinal)) o.DisplayId = a.Substring(12);

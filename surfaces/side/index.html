@@ -233,9 +233,15 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
   font-family: var(--font-cond); font-weight: 600; font-size: 34px; line-height: 1;
   letter-spacing: .06em; color: var(--cg-gold);
 }
+/* The match already playing: a fact, not an estimate, so it sits in the quiet
+   colour and leaves gold for the times that are guesses. */
+.deck-eta--field { color: var(--cg-white-dim); }
 /* Next-up highlight as a real filled edge: this surface runs under a luma
-   key, which strips box-shadows, so a shadow edge would never be seen. */
-.deck-row:first-child::before {
+   key, which strips box-shadows, so a shadow edge would never be seen.
+   Carried by data-next rather than :first-child. While a match plays it is
+   still row 0 of the queue, and the gold cap belongs on the match that is
+   actually next, one row down. */
+.deck-row[data-next]::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 8px;
   background: var(--cg-gold);
 }
@@ -394,7 +400,7 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
 </div></div>
 
 <script type="module">
-import { connect, applyDisplayMode, fitStage, restart } from '/shared/desk-client.js';
+import { connect, applyDisplayMode, fitStage, restart, teamLabel } from '/shared/desk-client.js';
 import { qrSvg } from '/shared/qr.js';
 
 applyDisplayMode();
@@ -418,6 +424,15 @@ let lastState = null;
     record of what is on screen: advance() reads it to hand the next slot
     back to the deck. */
 let panel = 'deck';
+// Declared up here beside `panel`, not next to setQr: show() can switch panes
+// before the module reaches setQr's neighbourhood, and a let read in its
+// temporal dead zone throws rather than returning undefined.
+let qrBase = null;
+let qrShowing = null;
+const QR_TARGETS = {
+  next: { path: '/s/next', label: "Your team's<br>schedule" },
+  gp: { path: '/s/gp', label: 'Send a<br>shout-out' },
+};
 
 function show(deck) {
   panel = deck ? 'deck' : 'rank';
@@ -425,6 +440,7 @@ function show(deck) {
   $('scr-rank').toggleAttribute('data-active', !deck);
   $('scr-note').removeAttribute('data-active');
   $('scr-slide').removeAttribute('data-active');
+  setQr('next');
   // The fit passes need layout: inside display:none both scrollWidth and
   // clientWidth read 0, every overflow check passes vacuously, and a panel
   // painted during the other panel's dwell came up unfitted (worse, the
@@ -455,6 +471,7 @@ function showNote() {
   $('scr-rank').removeAttribute('data-active');
   $('scr-slide').removeAttribute('data-active');
   $('scr-note').setAttribute('data-active', '');
+  setQr('next');
   fitNote();
 }
 
@@ -483,6 +500,7 @@ function showSlide() {
   panel = 'slide';
   for (const id of ['scr-deck', 'scr-rank', 'scr-note']) $(id).removeAttribute('data-active');
   $('scr-slide').setAttribute('data-active', '');
+  setQr('gp');
   $('slideKick').textContent = SLIDE_KICKER[slide.kind] ?? 'Event info';
   $('slideTitle').textContent = slide.title;
   const body = $('slideBody');
@@ -618,6 +636,28 @@ function restartRotation() {
   rotateTimer = setInterval(advance, DWELL_MS);
 }
 
+/**
+ * How many rows at the head of the on-deck queue have already started: 1 from
+ * match.start until that match's score commits, otherwise 0.
+ *
+ * A copy of startedRows() in apps/core/src/pace.ts, which holds the reasoning
+ * and the tests (surfaces are plain browser JS and cannot import it). Keep the
+ * two in step. The short version: the field's queue keeps the playing match as
+ * row 0 until it commits, but Nexus drops it the moment it is "On field", so
+ * the loaded match's own name is what settles it.
+ */
+const norm = x => String(x ?? '').trim().toLowerCase();
+function startedRows(s) {
+  if (s.lastMatchStartedAt == null || s.scorePostedAt != null) return 0;
+  const head = s.upcoming?.[0];
+  if (!head) return 0;
+  const playing = norm(s.match?.displayName);
+  if (!playing) return s.queueFrom === 'nexus' ? 0 : 1;
+  const named = norm(head.name) === playing
+    || (norm(head.shortName) !== '' && norm(head.shortName) === playing);
+  return named ? 1 : 0;
+}
+
 function paint(s) {
   if (!s) return;
   lastState = s;
@@ -676,15 +716,25 @@ function paint(s) {
             ? `${s.match.displayName} · ${behindText}`
             : `Now playing · ${s.match.displayName}`)
         : 'Waiting for the field');
-  const teamSpans = list => list.map(n => `<span>${n}</span>`).join('');
+  // teamLabel, not the raw number: a second robot is registered under a
+  // made-up number (9999) that nobody in the room knows, and prints as 100B.
+  const teamSpans = list => list.map(n => `<span>${escapeHtml(teamLabel(s, n))}</span>`).join('');
+  // Rows already out: the match on the field is still row 0 of the queue until
+  // its score commits. The projected next start (pace.nextStartAt) is the first
+  // match that has NOT started, so counting from row 0 put the next match's
+  // time on the match already playing and every row after it a full cycle late.
+  const started = startedRows(s);
   // Estimated start per row: the projected next start plus one median cycle
-  // per queue position. Only shown once the pace model has real signal.
-  const eta = i => s.pace?.nextStartAt && s.pace?.cycleSec
-    ? `<div class="deck-eta">~${clock(s.pace.nextStartAt + i * s.pace.cycleSec * 1000)}</div>`
-    : '';
+  // per row after the ones already out. Only shown once the pace model has
+  // real signal. A match that is playing gets the plain fact instead.
+  const eta = i => i < started
+    ? '<div class="deck-eta deck-eta--field">On field</div>'
+    : s.pace?.nextStartAt && s.pace?.cycleSec
+      ? `<div class="deck-eta">~${clock(s.pace.nextStartAt + (i - started) * s.pace.cycleSec * 1000)}</div>`
+      : '';
   $('deck').innerHTML = up.length
     ? up.map((m, i) => `
-        <div class="deck-row">
+        <div class="deck-row"${i === started ? ' data-next' : ''}>
           <div><div class="deck-name num">${escapeHtml(m.shortName || m.name)}</div>${eta(i)}</div>
           <div class="deck-teams deck-teams--red num" style="--n:${Math.max(1, m.red.length)}">${teamSpans(m.red)}</div>
           <div class="deck-teams deck-teams--blue num" style="--n:${Math.max(1, m.blue.length)}">${teamSpans(m.blue)}</div>
@@ -738,7 +788,7 @@ function renderRank() {
     ? rows.map(r => `
         <div class="rank-row">
           <span class="rank-n num">${r.rank}</span>
-          <span class="rank-num num">${r.team}</span>
+          <span class="rank-num num">${escapeHtml(teamLabel(lastState, r.team))}</span>
           <span class="rank-team">${escapeHtml(r.name)}</span>
           <!-- The AVERAGE, because that is what the arena orders on. Printing
                the raw total put a rank-4 team above a rank-3 team on the
@@ -787,13 +837,34 @@ function fitRank() {
 desk.on('state', paint);
 desk.on('ready', () => paint(desk.state));
 
-// Corner QR to the phone-facing schedule page, using the LAN base the server
-// computed, since this page's own host may be localhost on the desk box.
-fetch('/api/urls').then(r => r.json()).then(({ base }) => {
-  if (!base) return;
-  $('qrImg').innerHTML = qrSvg(`${base}/s/next`);
-  $('qrBox').hidden = false;
+// Corner QR, using the LAN base the server computed, since this page's own
+// host may be localhost on the desk box.
+//
+// It points at whatever the pane on screen is about. On the schedule and the
+// rankings that is the phone schedule. On a slide it is the shout-out form:
+// a shout-out on the big screen is the best possible advert for sending one,
+// and the form had no QR anywhere, so the only way in was knowing the URL.
+function setQr(which) {
+  if (!qrBase || which === qrShowing) return;
+  const t = QR_TARGETS[which];
+  try {
+    $('qrImg').innerHTML = qrSvg(`${qrBase}${t.path}`);
+    $('qrLabel').innerHTML = t.label;
+    qrShowing = which;
+    $('qrBox').hidden = false;
+  } catch { /* QR is a bonus, never a blocker */ }
+}
+// Asked again every minute, so a desk whose address changed (a cable moved,
+// a lease renewed) is followed without anyone reloading this screen. A miss
+// keeps the last good address rather than taking the code down.
+const loadQrBase = () => fetch('/api/urls').then(r => r.json()).then(({ base }) => {
+  if (!base || base === qrBase) return;
+  qrBase = base;
+  qrShowing = null;
+  setQr(panel === 'slide' ? 'gp' : 'next');
 }).catch(() => { /* QR is a bonus, never a blocker */ });
+loadQrBase();
+setInterval(loadQrBase, 60_000);
 
 // A new match loading is the one thing worth interrupting the rotation for.
 // restart() removes and re-adds data-active to re-trigger the entrance. Until

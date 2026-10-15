@@ -136,6 +136,13 @@ export class ProfileBook {
     for (const p of list) this.#profiles.set(p.id, p);
   }
 
+  /** Take the sample people back out. Memory only, like seedSample(). */
+  clearSample(): void {
+    for (const [id] of this.#profiles) {
+      if (id.startsWith('sample-')) this.#profiles.delete(id);
+    }
+  }
+
   async load(): Promise<void> {
     try {
       const raw = JSON.parse(await readFile(this.#file, 'utf8')) as Profile[];

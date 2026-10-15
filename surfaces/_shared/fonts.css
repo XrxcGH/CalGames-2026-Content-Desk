@@ -6,55 +6,74 @@
      Saira Condensed 600/700: labels, team names
      JetBrains Mono  operator surfaces only
 
-   BEFORE THE EVENT: replace this @import with self-hosted WOFF2s in
-   surfaces/_shared/fonts/. An OBS Browser Source that fetches Google Fonts
-   renders fallback type the one time venue internet drops, which will be
-   during finals. The @import is a development convenience, not the plan.
+   Self-hosted. Every face below is a WOFF2 in surfaces/_shared/fonts/, served
+   from /shared/fonts/, so the surfaces never fetch type from the network. Venue
+   internet can drop with no warning, and an OBS Browser Source that loads Google
+   Fonts would then render system type, with the condensed layouts overflowing.
+
+   License: Archivo, Chivo, Saira Condensed and JetBrains Mono are all SIL Open
+   Font License 1.1 (OFL) families. The WOFF2 files are the Latin subsets that
+   Google Fonts serves, not modified by us. Keep the OFL notice with any copy of
+   these files that leaves this repo.
+
+   Latin only: the files cover the Latin character set, and any other glyph falls
+   back to the next family in the stack.
+
+   Keep every family and weight the surfaces use in this list. A missing weight is
+   either faux-bolded by the browser (Saira Condensed 700 once was, on every
+   tracked heading) or falls back silently to system type (JetBrains Mono once
+   did, so every operator readout rendered in Courier). Chivo 700/900 and
+   JetBrains Mono 400/600 are variable fonts that Google serves as one file per
+   family, so each pair shares a file and declares its own weight.
    ========================================================================== */
-
-@import url("https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..900&family=Chivo:wght@700;900&family=Saira+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap");
-
-/* Self-hosted drop-in. Uncomment once the WOFF2s are in place, and delete the
-   @import above. This block must cover EVERY face and weight the @import
-   serves: it once omitted Saira Condensed 700 (every .18em-tracked heading,
-   faux-bolded by the browser, visibly wrong on air) and JetBrains Mono
-   entirely (all operator-console readouts falling back to Courier).
 
 @font-face {
   font-family: "Archivo";
-  src: url("/shared/fonts/Archivo-VariableFont_wdth,wght.woff2") format("woff2-variations");
+  font-style: normal;
   font-weight: 500 900;
   font-stretch: 100% 125%;
   font-display: block;
+  src: url("/shared/fonts/archivo-latin-wdth-wght.woff2") format("woff2");
 }
 @font-face {
   font-family: "Chivo";
-  src: url("/shared/fonts/Chivo-VariableFont_wght.woff2") format("woff2-variations");
-  font-weight: 700 900;
-  font-display: block;
-}
-@font-face {
-  font-family: "Saira Condensed";
-  src: url("/shared/fonts/SairaCondensed-SemiBold.woff2") format("woff2");
-  font-weight: 600;
-  font-display: block;
-}
-@font-face {
-  font-family: "Saira Condensed";
-  src: url("/shared/fonts/SairaCondensed-Bold.woff2") format("woff2");
+  font-style: normal;
   font-weight: 700;
   font-display: block;
+  src: url("/shared/fonts/chivo-latin-wght.woff2") format("woff2");
 }
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/shared/fonts/JetBrainsMono-Regular.woff2") format("woff2");
-  font-weight: 400;
+  font-family: "Chivo";
+  font-style: normal;
+  font-weight: 900;
   font-display: block;
+  src: url("/shared/fonts/chivo-latin-wght.woff2") format("woff2");
 }
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/shared/fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+  font-family: "Saira Condensed";
+  font-style: normal;
   font-weight: 600;
   font-display: block;
+  src: url("/shared/fonts/saira-condensed-latin-600.woff2") format("woff2");
 }
-*/
+@font-face {
+  font-family: "Saira Condensed";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("/shared/fonts/saira-condensed-latin-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("/shared/fonts/jetbrains-mono-latin-wght.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("/shared/fonts/jetbrains-mono-latin-wght.woff2") format("woff2");
+}

@@ -7,10 +7,10 @@
 
 import {
   connect, applyDisplayMode, fitStage, roll, restart, startTicker,
-  clockDisplayFor, hubActiveAt, phaseFor, PHASE_LABEL, REBUILT,
+  clockDisplayFor, hubActiveAt, phaseFor, PHASE_LABEL, REBUILT, teamLabel,
 } from '/shared/desk-client.js';
 import { rpStrip } from '/shared/rp.js';
-import { allianceRoster } from '/shared/alliance.js';
+import { allianceRoster, lineupKey, availablePool, finalVerdict } from '/shared/alliance.js';
 
 const params = applyDisplayMode();
 // ?mode=clean is the second-stream variant: minimal score bar and clock over a
@@ -166,7 +166,7 @@ function runExplainer(on) {
  *
  * Empty slots stay visible as gold rules. Watching them fill is the segment.
  */
-function paintSelection(sel) {
+function paintSelection(sel, state) {
   if (!sel) return;
 
   // CalGames picks four per alliance and never calls a backup, so a complete
@@ -186,7 +186,9 @@ function paintSelection(sel) {
           // as an empty slot keeps every later pick in its own column: this
           // used to compact, so blanking a mis-entered first-round pick slid
           // the second-round pick left, on the projector, mid-selection.
-          ? `<span class="sel-al-team num"${i === 0 ? ' data-captain' : ''}>${t}</span>`
+          // Printed through teamLabel: a second robot is registered under a
+          // placeholder number (9999) that nobody in the hall recognizes.
+          ? `<span class="sel-al-team num"${i === 0 ? ' data-captain' : ''}>${escapeHtml(teamLabel(state, t))}</span>`
           : '<span class="sel-al-slot"></span>')).join('')}
         ${'<span class="sel-al-slot"></span>'.repeat(slots)}
       </div>
@@ -195,12 +197,13 @@ function paintSelection(sel) {
 
   // Room-scale legibility beats completeness: the teams near the top of the
   // pool are the ones about to be called, and the rest are a scroll nobody
-  // can read from the back of the gym anyway.
-  const pool = sel.ranked.slice(0, 24);
+  // can read from the back of the gym anyway. The cut is taken from the teams
+  // still AVAILABLE (see availablePool): taken teams are on the board.
+  const pool = availablePool(sel, 24);
   $('selPool').innerHTML = pool.map(r =>
     `<div class="sel-pool-team"${r.picked ? ' data-picked' : ''}>
       <span class="sel-pool-rank">${r.rank}</span>
-      <span class="sel-pool-num num">${r.team}</span>
+      <span class="sel-pool-num num">${escapeHtml(teamLabel(state, r.team))}</span>
     </div>`).join('');
 
   $('selClock').hidden = !sel.showTimer;
@@ -253,23 +256,29 @@ function paintSelectionClock(sel) {
  * Either way the number appears exactly once and every name starts at the
  * same x, so a mixed alliance still reads as one list.
  */
-function robotCard(team, i) {
+function robotCard(team, i, state) {
+  // The photo lookup stays on the number (that is the identity); only what is
+  // PRINTED follows the label, so a second robot reads 100B, not 9999. The
+  // plate is sized off the printed length, since "6036B" is as wide as a
+  // five-digit number.
   const media = desk.mediaFor(team.number);
-  const len = String(team.number).length;
+  const text = teamLabel(state, team.number);
+  const label = escapeHtml(text);
+  const len = text.length;
   const art = media
     ? `<div class="robot-art"><img src="${media.src}" alt=""></div>`
     // Fallback must look deliberate, since most teams won't have a photo.
-    : `<div class="robot-art"><div class="robot-art--fallback"><span class="num" data-len="${len}">${team.number}</span></div></div>`;
+    : `<div class="robot-art"><div class="robot-art--fallback"><span class="num" data-len="${len}">${label}</span></div></div>`;
   return `<div class="robot reveal reveal--up" data-photo="${!!media}" style="--i:${i}">
     ${art}
     <div class="robot-id">
-      <div class="robot-num num" data-len="${len}">${team.number}</div>
+      <div class="robot-num num" data-len="${len}">${label}</div>
       <div class="robot-name">${escapeHtml(team.name ?? '')}</div>
     </div>
   </div>`;
 }
 
-function buildOverview(match) {
+function buildOverview(match, state) {
   if (!match) return;
   $('ovLabel').textContent = match.displayName ?? '';
   // Row count follows the alliance. Rows share the side's height, so a fourth
@@ -291,8 +300,8 @@ function buildOverview(match) {
     $(id).style.setProperty('--name-size', nameSize);
     $(id).style.setProperty('--num-size', numSize);
   }
-  $('redRobots').innerHTML = (match.red ?? []).map(robotCard).join('');
-  $('blueRobots').innerHTML = (match.blue ?? []).map(robotCard).join('');
+  $('redRobots').innerHTML = (match.red ?? []).map((t, i) => robotCard(t, i, state)).join('');
+  $('blueRobots').innerHTML = (match.blue ?? []).map((t, i) => robotCard(t, i, state)).join('');
 }
 
 // ---- score bar ------------------------------------------------------------
@@ -381,7 +390,8 @@ function paintTeams(match, state) {
   // tightens rather than growing past it. Three lines keep the full size.
   const n = Math.max((match.red ?? []).length, (match.blue ?? []).length);
   for (const id of ['redTeams', 'blueTeams']) $(id).dataset.rows = String(n);
-  const line = t => `<span class="bar-team">${t.number}${teamMark(t.number, state)}</span>`;
+  // Marks and card lookups stay keyed on the number; only the print is the label.
+  const line = t => `<span class="bar-team">${escapeHtml(teamLabel(state, t.number))}${teamMark(t.number, state)}</span>`;
   $('redTeams').innerHTML = (match.red ?? []).map(line).join('<br>');
   $('blueTeams').innerHTML = (match.blue ?? []).map(line).join('<br>');
 }
@@ -421,8 +431,8 @@ function paintFinal(state) {
   // The whole alliance, not just the three on the field: in a playoff the
   // fourth pick won this match too, and the social card already names them.
   // The on-air final screen and the card must agree.
-  $('finalRedTeams').textContent = allianceRoster(state, 'red').map(t => t.number).join(' · ');
-  $('finalBlueTeams').textContent = allianceRoster(state, 'blue').map(t => t.number).join(' · ');
+  $('finalRedTeams').textContent = allianceRoster(state, 'red').map(t => teamLabel(state, t.number)).join(' · ');
+  $('finalBlueTeams').textContent = allianceRoster(state, 'blue').map(t => teamLabel(state, t.number)).join(' · ');
   const estimated = state.totalConfidence === 'estimated';
   paintRp($('finalRedRp'), state.score.red.rp, estimated);
   paintRp($('finalBlueRp'), state.score.blue.rp, estimated);
@@ -457,20 +467,20 @@ function paintFinal(state) {
    * The fallback stays for a desk with no field attached, where it is already
    * labelled unofficial and nobody is being told it is official.
    */
-  const official = !estimated ? state.officialWinner : null;
-  const redWon = official ? official === 'red' : (!estimated && r > b);
-  const blueWon = official ? official === 'blue' : (!estimated && b > r);
-  const level = official ? official === 'tie' : r === b;
-
-  $('finalRedSide').toggleAttribute('data-won', redWon);
-  $('finalBlueSide').toggleAttribute('data-won', blueWon);
-  const verdict = (won) => {
-    if (won) return estimated ? 'Leading, unofficial' : 'Winner';
-    if (level) return estimated ? 'Level, unofficial' : 'Tie';
-    return '';
-  };
-  $('finalRedVerdict').textContent = verdict(redWon);
-  $('finalBlueVerdict').textContent = verdict(blueWon);
+  /*
+   * Who is ahead and whether that is a RESULT are two questions, answered in
+   * finalVerdict (alliance.js, where it is tested). The gold cap is the claim
+   * that it is a result, so it needs the field's total behind it; the words
+   * say which kind of claim it is. A shadow-scored match that is clearly
+   * decided now reads "Leading, unofficial" instead of showing two outlined
+   * totals and no words, as it did while this was one '!estimated && r > b'
+   * flag that made the unofficial branch unreachable.
+   */
+  const result = finalVerdict(state);
+  $('finalRedSide').toggleAttribute('data-won', result.won.red);
+  $('finalBlueSide').toggleAttribute('data-won', result.won.blue);
+  $('finalRedVerdict').textContent = result.verdict.red;
+  $('finalBlueVerdict').textContent = result.verdict.blue;
 
   // Why a level score still has a winner. Only ever the field's wording, and
   // only when the field gave one: inventing a reason would be worse than the
@@ -629,14 +639,20 @@ let lastMatchLoaded = null;
 
 desk.on('state', state => {
   // Cards land mid-match and change what the team lines say, so the key is
-  // the match AND what everyone on it is carrying.
-  const teamKey = (state.match?.id ?? null) + JSON.stringify(state.cards?.byTeam ?? {})
+  // the lineup AND what everyone on it is carrying. The lineup is the match id
+  // PLUS the teams: a playoff substitution re-sends matchLoad with the same id
+  // and different teams, and keyed on the id the overview and the scorebug
+  // went on naming the swapped-out team for the whole match.
+  const lineup = lineupKey(state);
+  const teamKey = lineup + JSON.stringify(state.cards?.byTeam ?? {})
     + JSON.stringify(state.surrogates ?? []);
   if (teamKey !== lastMatchId) {
-    const freshMatch = (state.match?.id ?? null) !== lastMatchLoaded;
+    // Rebuilt for a different lineup, not just a different match id: the
+    // overview animates in, so it must not rebuild for a card alone.
+    const freshMatch = lineup !== lastMatchLoaded;
     lastMatchId = teamKey;
-    lastMatchLoaded = state.match?.id ?? null;
-    if (freshMatch) buildOverview(state.match);
+    lastMatchLoaded = lineup;
+    if (freshMatch) buildOverview(state.match, state);
     paintTeams(state.match, state);
   }
   paintRpStrips(state.thresholds);
@@ -646,7 +662,7 @@ desk.on('state', state => {
     selStamp = state.selection.updatedAt;
     selSeenAt = Date.now();
   }
-  if (state.selection) paintSelection(state.selection);
+  if (state.selection) paintSelection(state.selection, state);
   paintThird(CLEAN ? null : state.lowerThird);
   paintPanel(CLEAN ? null : state.panel);
   paintStatus(CLEAN ? null : state.status);
@@ -691,7 +707,10 @@ function paintPanel(panel) {
 
   // The CARDS are keyed, because rebuilding them on every state frame would
   // restart the entrance animation ten times a second.
-  const key = JSON.stringify(people);
+  // The printed team label is part of the key: a label that lands after the
+  // first panel paint would otherwise leave a placeholder number up all show.
+  const key = JSON.stringify(people)
+    + people.map(p => (p.team ? teamLabel(desk.state, p.team) : '')).join('|');
   if (key === panelKey) return;
   panelKey = key;
   strap.hidden = people.length > 0;
@@ -746,7 +765,7 @@ function paintPanel(panel) {
       role.textContent = p.role ?? '';
       if (p.team) {
         const team = document.createElement('b');
-        team.textContent = String(p.team);
+        team.textContent = teamLabel(desk.state, p.team);
         role.append(team);
       }
       card.append(role);
@@ -823,7 +842,7 @@ function paintFinalCards(state) {
   el.replaceChildren(...list.map(c => {
     const chip = document.createElement('span');
     chip.className = `fc-chip fc-chip--${c.color}`;
-    chip.textContent = `${c.color === 'red' ? 'Red card' : 'Yellow card'} · ${c.team}`;
+    chip.textContent = `${c.color === 'red' ? 'Red card' : 'Yellow card'} · ${teamLabel(state, c.team)}`;
     return chip;
   }));
 }
@@ -889,7 +908,7 @@ function paintAward(award) {
     $('awWinner').textContent = award.winner ?? '';
     const team = $('awTeam');
     team.hidden = !award.team;
-    if (award.team) team.textContent = `Team ${award.team}`;
+    if (award.team) team.textContent = `Team ${teamLabel(desk.state, award.team)}`;
   }
 }
 
@@ -939,7 +958,8 @@ function paintCardCall(call) {
   const plate = $('ccPlate');
   plate.dataset.color = call.color;
   $('ccChip').textContent = call.color === 'red' ? 'Red card' : 'Yellow card';
-  $('ccTeam').textContent = String(call.team);
+  // Printed as the label (100B, not 9999); the name lookup below stays on the number.
+  $('ccTeam').textContent = teamLabel(desk.state, call.team);
   // The team NAME comes off the loaded match rather than a lookup: the card is
   // always for somebody on the field right now, and a second source of team
   // names is a second thing that can disagree with the score bar.
@@ -974,7 +994,7 @@ function paintCardCall(call) {
 
 // Media can land after the overview was built. Rebuild so a photo uploaded
 // on Sunday morning appears without anyone reloading the Browser Source.
-desk.on('ready', () => { buildOverview(desk.state?.match); });
+desk.on('ready', () => { buildOverview(desk.state?.match, desk.state); });
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>

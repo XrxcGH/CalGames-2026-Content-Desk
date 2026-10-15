@@ -104,6 +104,18 @@ export interface TriviaPlayer {
    * walked-away squatter who answered nothing.
    */
   answered: number;
+  /**
+   * Put there by the desk's sample data. Published, so a real snapshot taken
+   * while the sample is still up does not hand the sample to the restart
+   * restore as if it had been played.
+   */
+  sample?: true;
+  /**
+   * Came back from the log after a restart, under an id no phone holds. The
+   * first join with the same name and team takes the row back. Never
+   * published.
+   */
+  restored?: true;
   joinedAt: number;
 }
 
@@ -149,6 +161,7 @@ export interface PublicStanding {
   team?: number;
   score: number;
   correct: number;
+  sample?: true;
 }
 
 export function publicStandings(players: Iterable<TriviaPlayer>): PublicStanding[] {
@@ -158,5 +171,6 @@ export function publicStandings(players: Iterable<TriviaPlayer>): PublicStanding
     ...(player.team ? { team: player.team } : {}),
     score: player.score,
     correct: player.correct,
+    ...(player.sample ? { sample: true as const } : {}),
   }));
 }

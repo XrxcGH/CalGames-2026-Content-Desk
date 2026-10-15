@@ -12,6 +12,7 @@
  */
 
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import { join } from 'node:path';
 import { duration, run, type EncoderChoice, type FfmpegTools } from './ffmpeg.ts';
 
@@ -114,19 +115,50 @@ export function parseSegmentName(name: string): number | null {
   return new Date(y!, mo! - 1, d!, h!, mi!, s!).getTime();
 }
 
+/**
+ * How far before the next segment's name a finished segment's file may have
+ * last been written and still count as having run up to it. The segment
+ * muxer closes one file and opens the next in the same instant, so a normal
+ * segment's mtime is within milliseconds of the next name. An encoder that
+ * died mid-segment stopped writing at least the restart backoff (a second)
+ * plus ffmpeg and camera startup before the next file appeared.
+ */
+const CLOSE_SLACK_MS = 250;
+
+export interface ClipStoreOptions {
+  /**
+   * The recorder's segment length (its -segment_time). Bounds how far before
+   * a range the index looks for the segment in progress at its start, and
+   * how far apart two names can be and still be read as one unbroken
+   * segment. Defaults to the recorder's own default of 6.
+   */
+  segmentSeconds?: number;
+  /**
+   * Measures one segment when its name cannot say. ffprobe by default; tests
+   * substitute it to count exactly which files get probed.
+   */
+  probe?: (file: string) => Promise<number | null>;
+}
+
 export class ClipStore {
   #tools: FfmpegTools;
   #encoder: EncoderChoice;
   #recRoot: string;
   #outDir: string;
-  /** file -> {size, seconds}. Probing every segment on every request is slow. */
+  #periodMs: number;
+  #probe: (file: string) => Promise<number | null>;
+  /** file -> {size, seconds} for segments that had to be probed. */
   #durations = new Map<string, { size: number; seconds: number }>();
 
-  constructor(tools: FfmpegTools, encoder: EncoderChoice, recRoot: string) {
+  constructor(tools: FfmpegTools, encoder: EncoderChoice, recRoot: string, opts: ClipStoreOptions = {}) {
     this.#tools = tools;
     this.#encoder = encoder;
     this.#recRoot = recRoot;
     this.#outDir = join(recRoot, 'clips');
+    // NaN from a mistyped --segment would otherwise empty every window.
+    const s = opts.segmentSeconds;
+    this.#periodMs = (s && s > 0 ? s : 6) * 1000;
+    this.#probe = opts.probe ?? (file => duration(tools.ffprobe, file));
   }
 
   get outDir(): string { return this.#outDir; }
@@ -143,42 +175,108 @@ export class ClipStore {
     }
   }
 
-  async index(sourceId: string): Promise<Segment[]> {
+  /**
+   * The segments on disk for one source, oldest first. With `within`, only
+   * the ones that can overlap [fromMs, toMs).
+   *
+   * Nothing prunes rec/<source>, so by Saturday afternoon each camera has
+   * thousands of six-second segments. This used to stat every one of them
+   * and ffprobe, serially, each one not already cached, at about a tenth of
+   * a second per spawn on Windows: the first replay after a desk restart
+   * probed the whole day, and replay, the telestrator frame and match-video
+   * cuts all hung for minutes. Filenames carry start times, so the window is
+   * picked from names alone and only the few files inside it touch the disk.
+   */
+  async index(sourceId: string, within?: Range): Promise<Segment[]> {
     this.#checkSourceId(sourceId);
     const dir = join(this.#recRoot, sourceId);
     let names: string[];
     try { names = await readdir(dir); } catch { return []; }
 
-    const segments: Segment[] = [];
+    // Pure string work, no I/O: a weekend of names parses in about a
+    // millisecond. They sort chronologically because the format is.
+    const all: { name: string; startMs: number }[] = [];
     for (const name of names.sort()) {
       const startMs = parseSegmentName(name);
-      if (startMs === null) continue;
-      const file = join(dir, name);
+      if (startMs !== null) all.push({ name, startMs });
+    }
 
-      const s = await stat(file).catch(() => null);
+    let first = 0;
+    let end = all.length;
+    if (within) {
+      // Segments run one period, so one in progress at fromMs began at most
+      // a period before it; two periods leave room for whole-second names
+      // and a late keyframe stretching a cut.
+      const lo = within.fromMs - 2 * this.#periodMs;
+      while (first < all.length && all[first]!.startMs < lo) first++;
+      // And whatever segment was in progress at fromMs, however far back it
+      // started. index.ts does not pass the recorder's --segment here, so a
+      // longer one than the default must cost one extra stat, not turn every
+      // replay into "the head of this range was never recorded".
+      if (first > 0 && (first === all.length || all[first]!.startMs > within.fromMs)) first--;
+      end = first;
+      while (end < all.length && all[end]!.startMs < within.toMs) end++;
+    }
+
+    const picked = all.slice(first, end);
+    const stats = await Promise.all(picked.map(e => stat(join(dir, e.name)).catch(() => null)));
+
+    const segments: Segment[] = [];
+    for (const [i, { name, startMs }] of picked.entries()) {
+      const s = stats[i];
       if (!s || s.size === 0) continue;
-
-      const cached = this.#durations.get(file);
-      let seconds: number;
-      if (cached && cached.size === s.size) {
-        seconds = cached.seconds;
-      } else {
-        const probed = await duration(this.#tools.ffprobe, file);
-        // A segment still being written probes as null. Skip it rather than
-        // guessing, and pick it up on the next index.
-        if (probed === null) continue;
-        seconds = probed;
-        this.#durations.set(file, { size: s.size, seconds });
-      }
+      const file = join(dir, name);
+      // The next name may lie past the window; only its name is needed.
+      const seconds = await this.#seconds(file, s, startMs, all[first + i + 1]?.startMs ?? null);
+      // A segment still being written probes as null. Skip it rather than
+      // guessing, and pick it up on the next index.
+      if (seconds === null) continue;
       segments.push({ file, startMs, seconds });
     }
     return segments;
   }
 
+  /**
+   * How long one segment runs, without spawning ffprobe when the names
+   * already say.
+   *
+   * A segment that another one followed, and whose file was last written as
+   * that next one opened, ran from its own name to the next one's: the
+   * muxer closes one file and opens the next in the same instant. Measuring
+   * between names also tiles the timeline exactly, where a probed length
+   * against a whole-second name can leave a seam the gap check trips on.
+   *
+   * Everything else is probed, because it is exactly where an assumption
+   * ships a wrong clip: the newest segment, still being written, and one cut
+   * short when its encoder died, whose file stopped growing well before the
+   * restarted encoder opened the next. Calling that a full segment would
+   * splice straight over the hole #extractRange exists to refuse.
+   */
+  async #seconds(
+    file: string, s: Stats, startMs: number, nextStartMs: number | null,
+  ): Promise<number | null> {
+    const cached = this.#durations.get(file);
+    if (cached && cached.size === s.size) return cached.seconds;
+
+    if (nextStartMs !== null) {
+      const span = nextStartMs - startMs;
+      // The span cap guards a directory copied without its timestamps, where
+      // every mtime is "just now" and an overnight gap would pass as footage.
+      if (span > 0 && span <= 2 * this.#periodMs && s.mtimeMs >= nextStartMs - CLOSE_SLACK_MS) {
+        return span / 1000;
+      }
+    }
+
+    const probed = await this.#probe(file);
+    if (probed === null) return null;
+    this.#durations.set(file, { size: s.size, seconds: probed });
+    return probed;
+  }
+
   /** Segments overlapping [fromMs, toMs), in order. */
   async covering(sourceId: string, fromMs: number, toMs: number): Promise<Segment[]> {
-    const all = await this.index(sourceId);
-    return all.filter(seg => seg.startMs < toMs && seg.startMs + seg.seconds * 1000 > fromMs);
+    const near = await this.index(sourceId, { fromMs, toMs });
+    return near.filter(seg => seg.startMs < toMs && seg.startMs + seg.seconds * 1000 > fromMs);
   }
 
   /** Extract one range from the rolling record into `outFile`. */

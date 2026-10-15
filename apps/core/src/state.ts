@@ -693,6 +693,23 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'timer.cleared':
         return { ...state, timer: null };
 
+      case 'event.teams': {
+        const list = (ev.payload as { list?: unknown })?.list;
+        if (!Array.isArray(list)) return state;
+        const teams: DeskState['teams'] = {};
+        for (const raw of list) {
+          const t = raw as { number?: unknown; name?: unknown; label?: unknown; pit?: unknown };
+          const n = Number(t?.number);
+          if (!Number.isInteger(n) || n <= 0) continue;
+          teams[String(n)] = {
+            name: String(t.name ?? '').trim(),
+            ...(t.label ? { label: String(t.label).trim() } : {}),
+            ...(t.pit ? { pit: String(t.pit).trim() } : {}),
+          };
+        }
+        return { ...state, teams };
+      }
+
       case 'event.accessibility': {
         const p = ev.payload as {
           services?: { label?: string; detail?: string }[]; ask?: string;

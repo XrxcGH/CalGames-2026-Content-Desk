@@ -1,13 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventBus } from './bus.ts';
-import { seedSampleState } from './demo.ts';
+import { clearSampleState, seedSampleState } from './demo.ts';
+import { rebuildFromLog } from './rebuild.ts';
+import { rosterList, teamName } from './teams.ts';
 import { Slides } from './slides.ts';
 import { ProfileBook } from './profiles.ts';
 import { MediaLibrary } from './media.ts';
+import { TriviaStore } from './trivia/store.ts';
+import { ArcadeStore } from './arcade/store.ts';
 
 /**
  * The sample-data seed exists because a volunteer who double-clicks the
@@ -169,4 +173,149 @@ test('re-seeding does not stack a second copy of the sample', async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('clearing the sample takes every trace of it back off the desk', async () => {
+  /*
+   * The handbook used to say "restart before the first practice match", which
+   * is an instruction, and an instruction is the thing a first-time crew
+   * forgets. Left in place the sample is not harmless: its rankings and its
+   * alliance board stay on the venue screens whenever no field is connected,
+   * its slides rotate all weekend, and its full alliance board makes the
+   * bridge refuse the arena's real, still-empty one as "the arena forgot".
+   */
+  const root = await mkdtemp(join(tmpdir(), 'cg-sample-'));
+  try {
+    const bus = new EventBus();
+    const st = stores(root, bus);
+    seedSampleState(bus, st);
+    assert.ok(bus.state.rankings.length && bus.state.selection?.alliances.length);
+
+    assert.equal(clearSampleState(bus, st), true);
+    const s = bus.state;
+    assert.equal(st.slides.deck.some(x => x.id.startsWith('sample-')), false, 'slides');
+    assert.equal(st.profiles.list.some(p => p.id.startsWith('sample-')), false, 'people');
+    assert.deepEqual(Object.keys(st.media.airable), [], 'drawn photos');
+    assert.equal(s.slide, null, 'the slide on air');
+    assert.equal(s.sponsor, null, 'the sample sponsor');
+    assert.equal(s.panel, null);
+    assert.equal(s.lowerThird, null);
+    assert.equal(s.award, null);
+    assert.equal(s.cardCall, null);
+    assert.deepEqual(s.rankings, [], 'sample standings');
+    assert.deepEqual(s.upcoming, [], 'sample schedule');
+    assert.equal(s.nowQueuing, null);
+    assert.deepEqual(s.selection?.alliances, [], 'and the sample alliance board');
+
+    assert.equal(clearSampleState(bus, st), false, 'twice is a no-op');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a sample is never folded back in by the restart rebuild', async () => {
+  // The Sample data button logs into the real day's log. The rebuild used to
+  // replay it on every restart, so a sample on event morning came back as a
+  // real team's yellow card, a sponsor-report airing and a coverage row.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-rebuild-'));
+  try {
+    const { localStamp } = await import('./bus.ts');
+    const name = `${localStamp(new Date())}.ndjson`;
+    const line = (source: string, team: number) => JSON.stringify({
+      id: 'x', ts: Date.now(), matchClock: null, source, confidence: 'estimated',
+      type: 'card.issued', payload: { team, color: 'yellow', match: 'Qualification 42' },
+    });
+    await writeFile(join(dir, name), `${line('demo', 253)}\n${line('cheesy', 846)}\n`);
+    const seen: number[] = [];
+    await rebuildFromLog(dir, [{ observe: ev => seen.push((ev.payload as { team: number }).team) }]);
+    assert.deepEqual(seen, [846], 'the field\'s card survives, the sample\'s does not');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the sample quiz and arcade never survive a restart, and a clear keeps the real room', async () => {
+  // Trivia and the arcade publish through their own stores, which stamped the
+  // sample 'manual'. The restart restore then brought back eight sample
+  // players, two rounds marked asked and the Pit Crew Cup, with nothing left
+  // that knew they were sample. And the clear used to wipe the whole quiz,
+  // real players included.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-sample-quiz-'));
+  try {
+    const bus = new EventBus();
+    await bus.openLog(dir);
+    const trivia = new TriviaStore(bus);
+    const arcade = new ArcadeStore(bus);
+    trivia.join('Rosa', 846);
+    seedSampleState(bus, { trivia, arcade });
+    assert.ok(trivia.snapshot().standings.some(r => r.name === 'Ana'), 'the sample is up');
+    assert.ok(arcade.snapshot.gp && arcade.snapshot.set);
+    // A real player joins while the sample is still up: this publish is real
+    // and its snapshot still lists the sample's players.
+    trivia.join('Theo', 1700);
+    await bus.closeLog();
+
+    const trivia2 = new TriviaStore(new EventBus());
+    const arcade2 = new ArcadeStore(new EventBus());
+    await rebuildFromLog(dir, [trivia2, arcade2]);
+    assert.deepEqual(trivia2.snapshot().standings.map(r => r.name).sort(), ['Rosa', 'Theo']);
+    assert.equal(trivia2.snapshot().asked, 0, 'the sample rounds do not count');
+    assert.equal(arcade2.snapshot.gp, null);
+    assert.equal(arcade2.snapshot.set, null);
+    assert.equal(arcade2.snapshot.upNext, '');
+
+    assert.equal(clearSampleState(bus, { trivia, arcade }), true);
+    assert.deepEqual(trivia.snapshot().standings.map(r => r.name).sort(), ['Rosa', 'Theo'], 'the clear keeps real players');
+    assert.equal(trivia.snapshot().asked, 0, 'joining is not playing: the sample rounds come off');
+    assert.equal(arcade.snapshot.gp, null);
+    assert.equal(arcade.snapshot.set, null);
+    assert.equal(arcade.snapshot.upNext, '');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a clear with no real play since the seed puts the quiz back exactly as it was', () => {
+  const bus = new EventBus();
+  const trivia = new TriviaStore(bus);
+  trivia.join('Rosa', 846);
+  seedSampleState(bus, { trivia });
+  assert.equal(trivia.snapshot().asked, 2);
+  clearSampleState(bus, { trivia });
+  assert.equal(trivia.snapshot().asked, 0, 'the two sample rounds are unasked again');
+  assert.deepEqual(trivia.snapshot().standings.map(r => r.name), ['Rosa']);
+
+  // But once a real question has been played, the progress is real.
+  seedSampleState(bus, { trivia });
+  trivia.open(20); trivia.reveal(); trivia.next();
+  clearSampleState(bus, { trivia });
+  assert.equal(trivia.snapshot().asked, 3);
+  assert.deepEqual(trivia.snapshot().standings.map(r => r.name), ['Rosa']);
+});
+
+test('a second robot prints as its label and keeps its team\'s name', () => {
+  /*
+   * CalGames registers The Wildhats' second robot as 9999. TBA names every
+   * such number "Off-Season Demo Team 9999, Manchester NH", and Cheesy Arena
+   * takes its nicknames from TBA, so without an override that is what the
+   * field would hand the desk to put on air.
+   */
+  assert.equal(teamName(9999, 'Off-Season Demo Team 9999'), 'The Wildhats');
+  assert.equal(teamName(9998, 'Off-Season Demo Team 9998'), 'Peninsula Robotics');
+  assert.equal(teamName(9997, 'Off-Season Demo Team 9997'), 'CardinalBotics');
+  // Everyone else keeps what the field says: that is what the scorekeeper
+  // corrects on the day. The table is only the fallback.
+  assert.equal(teamName(846, 'Funky Monkeys (fixed)'), 'Funky Monkeys (fixed)');
+  assert.equal(teamName(846, ''), 'The Funky Monkeys');
+
+  const bus = new EventBus();
+  bus.emit({ type: 'event.teams', source: 'manual', payload: { list: rosterList() } });
+  assert.equal(bus.state.teams['9999']?.label, '100B');
+  assert.equal(bus.state.teams['10252']?.name, 'Mecha Lions');
+  assert.equal(bus.state.teams['10615'], undefined, '10615 withdrew');
+  assert.equal(Object.keys(bus.state.teams).length, 38, 'every CalGames 2026 team');
+
+  // And the sample puts 100B on the field, so a beta test shows the label.
+  seedSampleState(bus);
+  assert.ok(bus.state.match?.red.some(t => t.number === 9999 && t.name === 'The Wildhats'));
 });

@@ -38,6 +38,8 @@ export interface ArcadePlayer {
 
 export interface ArcadeSet {
   id: string;
+  /** Put up by the desk's sample data; never restored after a restart. */
+  sample?: true;
   game: ArcadeGame;
   /** "Winners Semifinal", "Grand Final", "Race 3 of 4". */
   round: string;
@@ -88,6 +90,8 @@ export const MK_POINTS = [15, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 
 export interface GrandPrix {
   game: 'mariokart';
+  /** Put up by the desk's sample data; never restored after a restart. */
+  sample?: true;
   name: string;
   racers: ArcadePlayer[];
   /** One entry per race: racer ids in finishing order. */

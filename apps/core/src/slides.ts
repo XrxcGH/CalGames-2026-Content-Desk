@@ -33,6 +33,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EventBus } from './bus.ts';
 import { screenName, screenText } from './trivia/names.ts';
+import { teamEntry } from './teams.ts';
 
 export type SlideKind = 'recognition' | 'info' | 'shoutout';
 
@@ -48,6 +49,14 @@ export interface GpSubmission {
   id: string;
   name: string;
   team: number | null;
+  /**
+   * Who the shout-out is FOR: a volunteer, a team, a mentor, the ref crew.
+   * The form was framed only as team-to-team Gracious Professionalism, so the
+   * people a crowd most wants to thank (the queuer who found their pit, the
+   * inspector who stayed late) had nowhere to go but the message body.
+   * Optional so a submission saved before this field existed still loads.
+   */
+  to?: string;
   message: string;
   at: number;
 }
@@ -124,6 +133,11 @@ export class Slides {
   seedSample(list: Slide[]): void {
     this.#config = this.#config.filter(s => !s.id.startsWith('sample-'));
     this.#config.push(...list);
+  }
+
+  /** Take the sample slides back out. Memory only, like seedSample(). */
+  clearSample(): void {
+    this.#config = this.#config.filter(s => !s.id.startsWith('sample-'));
   }
 
   async load(): Promise<void> {
@@ -250,7 +264,7 @@ export class Slides {
    * A shout-out from a phone in the stands. Screened, rate-limited, queued.
    * And NOT on any screen until a human approves it.
    */
-  async submit(opts: { name?: unknown; team?: unknown; message?: unknown },
+  async submit(opts: { name?: unknown; team?: unknown; to?: unknown; message?: unknown },
     addr = 'unknown'): Promise<GpSubmission> {
     const now = Date.now();
     const recent = (this.#recent.get(addr) ?? []).filter(t => now - t < SUBMIT_WINDOW_MS);
@@ -262,9 +276,14 @@ export class Slides {
     const verdict = screenName(name);
     if (!verdict.ok) throw new Error(verdict.reason ?? 'Pick a different name.');
 
+    // Same screen as the message: it goes on the same big screen.
+    const to = clean(opts.to, 60);
+    if (to.length < 2) throw new Error('Who is the shout-out for?');
+    if (!screenText(to)) throw new Error('Keep it big-screen friendly and try again.');
+
     const message = clean(opts.message, 200);
     if (message.length < 10) {
-      throw new Error('Say a little more: who did the gracious thing, and what was it?');
+      throw new Error('Say a little more: what did they do?');
     }
     if (!screenText(message)) {
       throw new Error('Keep it big-screen friendly and try again.');
@@ -279,6 +298,7 @@ export class Slides {
       id: this.#id('g'),
       name,
       team: Number.isInteger(team) && team > 0 && team < 100_000 ? team : null,
+      to,
       message,
       at: now,
     };
@@ -297,10 +317,14 @@ export class Slides {
     const slide: Slide = {
       id: this.#id('s'),
       kind: 'shoutout',
-      title: 'Gracious Professionalism',
+      // The recipient IS the headline: it is the line somebody across the gym
+      // reads to find out whether the screen is about them.
+      title: sub.to ? `Shout-out to ${sub.to}` : 'Gracious Professionalism',
       lines: [
         sub.message,
-        `- ${sub.name}${sub.team ? `, Team ${sub.team}` : ''}`,
+        // "From", not a leading dash: the attribution used to be built with a
+        // typographic dash, which is banned from this project's output too.
+        `From ${sub.name}${sub.team ? `, Team ${teamEntry(sub.team)?.label ?? sub.team}` : ''}`,
       ],
     };
     this.#added.push(slide);

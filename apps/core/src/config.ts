@@ -6,6 +6,7 @@
  * `redacted()`.
  */
 
+import { CALGAMES_2026_TEAMS } from './teams.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SourceConfig } from './recorder.ts';
@@ -134,6 +135,14 @@ export interface Config {
     list: { id: string; kind?: 'recognition' | 'info'; title: string; lines?: string[] }[];
   };
   /**
+   * The teams at the event: names, pit codes, and the label printed in place
+   * of a second robot's placeholder number (9999 prints as 100B). Ships with
+   * CalGames 2026; another event replaces the list. See teams.ts.
+   */
+  teams: {
+    list: { number: number; name: string; label?: string; pit?: string }[];
+  };
+  /**
    * The day as a list. Empty is fine and means the desk shows no rundown.
    *
    * A matches block gives a COUNT rather than a duration: the length comes
@@ -259,10 +268,40 @@ export const DEFAULTS: Config = {
   sponsors: { list: [] },
   awards: { pin: '1357', list: [] },
   setup: { pin: '4567' },
-  slides: { list: [] },
+  /*
+   * The people who make the event happen and never get a match of their own:
+   * the WRRF Board, the interns, the planning committee, the volunteers, the
+   * host school. They rotate on the side screens from the first boot, so the
+   * thank-yous do not depend on somebody remembering to type them on Friday.
+   * Generic on purpose: no individual is named here, because a name invented
+   * in code is a name that can be wrong on a screen.
+   *
+   * The last one advertises the shout-out form. It lands on the slide pane,
+   * which is exactly where the side screen's corner QR switches to that form.
+   */
+  slides: {
+    list: [
+      { id: "thanks-wrrf-board", kind: "recognition", title: "Thank you, WRRF Board of Directors",
+        lines: ["For making CalGames possible", "Western Region Robotics Forum"] },
+      { id: "thanks-wrrf-interns", kind: "recognition", title: "Thank you, WRRF Interns",
+        lines: ["For the hours behind the scenes", "that made this weekend run"] },
+      { id: "thanks-planning-committee", kind: "recognition", title: "Thank you, CalGames Planning Committee",
+        lines: ["Months of planning", "for three days of robots"] },
+      { id: "thanks-volunteers", kind: "recognition", title: "Thank you, volunteers",
+        lines: ["Referees, scorekeepers, queuers,", "inspectors, judges, field reset,", "safety, and everyone in a lanyard"] },
+      { id: "thanks-host", kind: "recognition", title: "Thank you, Woodside High School",
+        lines: ["For hosting CalGames 2026"] },
+      { id: "how-to-shout-out", kind: "info", title: "Send a shout-out",
+        lines: ["Scan the code on this screen", "to thank a volunteer, a team or a mentor"] },
+    ],
+  },
+  teams: { list: CALGAMES_2026_TEAMS },
   rundown: { segments: [] },
   accessibility: { services: [], ask: '' },
-  nexus: { apiKey: '', eventKey: '' },
+  // CalGames queues on Nexus (frc.nexus/cacg). Nexus keys events the way TBA
+  // does, so only the API key is left to fill in; with no key the adapter
+  // never starts, so this default cannot reach out on its own.
+  nexus: { apiKey: '', eventKey: '2026cacg' },
   startgg: { token: '', eventSlug: '' },
   youtube: { clientId: '', clientSecret: '', refreshToken: '' },
   tba: { authId: '', authSecret: '', readKey: '' },

@@ -236,6 +236,13 @@ export class MediaLibrary {
     }
   }
 
+  /** Take the drawn placeholders back out. Never touches a real upload. */
+  clearSample(): void {
+    for (const [team, m] of Object.entries(this.#manifest)) {
+      if (m.src.startsWith('/sample/')) delete this.#manifest[Number(team)];
+    }
+  }
+
   get airable(): Manifest {
     const out: Manifest = {};
     for (const [team, m] of Object.entries(this.#manifest)) {

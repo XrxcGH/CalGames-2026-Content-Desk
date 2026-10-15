@@ -138,6 +138,8 @@ export type DeskEventType =
   | 'game.thresholds'
   // What the event offers and where, pushed from config at boot.
   | 'event.accessibility'
+  // The event's team table: labels for second robots, names, pits.
+  | 'event.teams'
   // The day as a list: which segment is live and when the next one starts.
   | 'rundown.updated'
   // Sponsor recognition, and the count behind the post-event report.
@@ -735,6 +737,12 @@ export interface DeskState {
   surrogates: number[];
   /** Accessibility services this event actually offers. Empty means none listed. */
   accessibility: { services: { label: string; detail: string }[]; ask: string };
+  /**
+   * Team number -> what to print for it. Keyed by number as a string because
+   * it rides JSON. Surfaces read it through teamLabel() in desk-client.js, so
+   * The Wildhats' second robot prints as 100B rather than 9999.
+   */
+  teams: Record<string, { name: string; label?: string; pit?: string }>;
   /** Alliance selection, mirrored from the field. Null until it starts. */
   selection: AllianceSelection | null;
   /** What each bonus RP costs. From config, not a constant. */
@@ -791,6 +799,7 @@ export const initialState = (): DeskState => ({
   sponsor: null,
   surrogates: [],
   accessibility: { services: [], ask: '' },
+  teams: {},
   selection: null,
   thresholds: defaultThresholds(),
   lockdown: false,

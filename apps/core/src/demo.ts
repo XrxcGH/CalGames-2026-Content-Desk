@@ -14,6 +14,7 @@ import type { Slides, Slide } from './slides.ts';
 import type { ProfileBook, Profile } from './profiles.ts';
 import type { MediaLibrary } from './media.ts';
 import type { CardLedger } from './cards.ts';
+import { teamName } from './teams.ts';
 import { REBUILT, type Alliance, type RankingRow, type UpcomingMatch } from './types.ts';
 
 // Every demo emission carries this one tag, so a simulated match can never
@@ -71,58 +72,53 @@ const SAMPLE_PROFILES: Profile[] = [
   },
 ];
 
-const RED = [
-  { number: 846, name: 'The Funky Monkeys' },
-  { number: 1868, name: 'Space Cookies' },
-  { number: 253, name: 'Boba Bots' },
-];
-const BLUE = [
-  { number: 100, name: 'The Wildhats' },
-  { number: 115, name: 'MVRT' },
-  { number: 670, name: 'Homestead Robotics' },
-];
+/*
+ * Every team in the sample is a real CalGames 2026 team, from teams.ts, which
+ * is The Blue Alliance's list for 2026cacg plus the event's own pit map.
+ *
+ * It used to be a made-up regional field (254, 1678, 1868, a five-digit
+ * "Rookie Rhinos"), which meant a beta test showed graphics for teams that
+ * are not coming, and the long-name and five-digit layouts were exercised by
+ * names nobody would ever see. The real field has its own stress cases and
+ * they are better ones: 10252 is five digits, "Deep Space
+ * Robotics" and "Highlander Robotics" are long, and 9999 is The Wildhats'
+ * SECOND robot, which must print as 100B. It is on the sample match on
+ * purpose, so a beta test proves the label works on every screen.
+ */
+const team = (n: number): { number: number; name: string } =>
+  ({ number: n, name: teamName(n) });
+
+const RED = [team(846), team(9999), team(253)];
+const BLUE = [team(100), team(115), team(670)];
 
 /**
- * Dummy standings and schedule, so every surface that renders event data can
- * be judged aesthetically without a field, the side screens especially,
- * whose empty states ("schedule not published yet") hide the real layout.
+ * Dummy standings, so every surface that renders event data can be judged
+ * without a field. The order is invented and deterministic; the teams, names
+ * and field size (38, so the rankings rotation pages exactly as it will) are
+ * the event's.
  */
-const DEMO_RANKINGS: RankingRow[] = [
-  { rank: 1, previousRank: 1, team: 254, name: 'The Cheesy Poofs', rankingPoints: 38, avgRp: 3.5, record: '10-1-0', played: 11 },
-  { rank: 2, previousRank: 3, team: 846, name: 'The Funky Monkeys', rankingPoints: 34, avgRp: 3.1, record: '8-2-1', played: 11 },
-  { rank: 3, previousRank: 2, team: 1678, name: 'Citrus Circuits', rankingPoints: 33, avgRp: 3.0, record: '8-3-0', played: 11 },
-  { rank: 4, previousRank: 5, team: 1868, name: 'Space Cookies', rankingPoints: 31, avgRp: 2.8, record: '7-3-1', played: 11 },
-  { rank: 5, previousRank: 4, team: 100, name: 'The Wildhats', rankingPoints: 29, avgRp: 2.6, record: '7-4-0', played: 11 },
-  { rank: 6, previousRank: 6, team: 115, name: 'MVRT', rankingPoints: 27, avgRp: 2.5, record: '6-5-0', played: 11 },
-  { rank: 7, previousRank: 8, team: 670, name: 'Homestead Robotics', rankingPoints: 25, avgRp: 2.3, record: '6-5-0', played: 11 },
-  { rank: 8, previousRank: 7, team: 253, name: 'Boba Bots', rankingPoints: 24, avgRp: 2.2, record: '5-6-0', played: 11 },
-  { rank: 9, previousRank: 9, team: 5940, name: 'BREAD', rankingPoints: 22, avgRp: 2.0, record: '5-6-0', played: 11 },
-  { rank: 10, previousRank: 11, team: 649, name: 'M-SET Fish', rankingPoints: 20, avgRp: 1.8, record: '4-7-0', played: 11 },
-  { rank: 11, previousRank: 10, team: 8033, name: 'Highlander Robotics', rankingPoints: 19, avgRp: 1.7, record: '4-7-0', played: 11 },
-  // A 5-digit rookie, on purpose: it exercises the widest-number layouts.
-  { rank: 12, previousRank: 12, team: 25801, name: 'Rookie Rhinos', rankingPoints: 17, avgRp: 1.5, record: '3-8-0', played: 11 },
-  // A realistically sized field (~36 teams), so the rankings rotation pages
-  // through several screens exactly as it will at the event.
-  ...([
-    [192, 'Gunn Robotics'], [604, 'Quixilver'], [668, 'Apes of Wrath'],
-    [751, 'Barn 2 Robotics'], [841, 'BERT'], [852, 'The Athenians'],
-    [972, 'Iron Claw'], [1072, 'Harker Robotics'], [1280, 'Ragin\' C-Biscuits'],
-    [1351, 'TKO'], [1458, 'Red Tie Robotics'], [1662, 'Raptor Force'],
-    [2035, 'Rockin\' Bots'], [2135, 'Presentation Invasion'], [2367, 'Lancer Robotics'],
-    [2473, 'Goldstrikers'], [2489, 'The Insomniacs'], [3045, 'Gear Gremlins'],
-    [3256, 'WarriorBorgs'], [4990, 'Gryphon Robotics'], [5026, 'Iron Panthers'],
-    [5924, 'Golden Gears'], [6418, 'The Missfits'], [7419, 'Tech Support'],
-  ] as [number, string][]).map(([team, name], i) => ({
-    rank: 13 + i,
-    previousRank: 13 + i,
-    team,
-    name,
-    rankingPoints: Math.max(0, 16 - i),
-    avgRp: Math.round((Math.max(0, 16 - i) / 11) * 10) / 10,
-    record: `${Math.max(0, 3 - (i >> 3))}-${8 + (i >> 3)}-0`,
-    played: 11,
-  })),
+const RANK_ORDER = [
+  846, 5940, 1700, 2473, 115, 4159, 8033, 840, 100,
+  6884, 4904, 670, 253, 1351, 841, 9999, 766, 852, 751,
+  6036, 3045, 1854, 1967, 2643, 4765, 4990, 5430, 5499, 6418,
+  6619, 6962, 7419, 8404, 9038, 10252, 9998, 9997, 8,
 ];
+
+const DEMO_RANKINGS: RankingRow[] = RANK_ORDER.map((n, i) => {
+  const rp = Math.max(4, 40 - i);
+  const wins = Math.max(1, 10 - Math.floor(i / 4));
+  return {
+    rank: i + 1,
+    // A little movement, so the up/down arrows have something to show.
+    previousRank: i % 5 === 1 ? i + 2 : i % 5 === 2 ? i : i + 1,
+    team: n,
+    name: teamName(n),
+    rankingPoints: rp,
+    avgRp: Math.round((rp / 11) * 10) / 10,
+    record: `${wins}-${11 - wins}-0`,
+    played: 11,
+  };
+});
 
 // The published schedule is FIXED at boot (real schedules don't reflow), and
 // its 170s pitch is slightly faster than the demo's real ~190s cycle, so the
@@ -136,16 +132,18 @@ const upcomingFrom = (n: number): UpcomingMatch[] => {
   // Every roster team must exist in DEMO_RANKINGS: surfaces join rosters
   // against the standings, and an unknown number renders nameless.
   const rosters: [number[], number[]][] = [
-    // 25801 in the worst slot on purpose: the on-deck fit has to survive it.
-    [[254, 25801, 1072], [1678, 649, 8033]],
-    [[846, 100, 649], [253, 115, 5940]],
-    [[1868, 8033, 254], [670, 1072, 1678]],
-    [[115, 253, 846], [25801, 670, 1868]],
+    // 10252 is the event's one five-digit team, and the B robots print as
+    // five characters too ("6036B"), so this row is the on-deck fit's worst
+    // case at this event.
+    [[10252, 1700, 6036], [9997, 5940, 9998]],
+    [[846, 100, 6884], [253, 115, 4159]],
+    [[2473, 8033, 6962], [670, 840, 4904]],
+    [[115, 253, 846], [9999, 670, 1351]],
     // Beyond the side screens' four: the phone schedule view sees these.
-    [[604, 668, 972], [841, 852, 192]],
-    [[1072, 1280, 1351], [1458, 1662, 2035]],
-    [[846, 254, 670], [1868, 100, 115]],
-    [[2473, 2489, 3045], [5026, 5924, 6418]],
+    [[751, 766, 841], [852, 1854, 1967]],
+    [[2643, 3045, 4765], [4990, 5430, 5499]],
+    [[6418, 6619, 6962], [7419, 8404, 9038]],
+    [[8, 100, 846], [5940, 1700, 2473]],
   ];
   return rosters.map(([red, blue], i) => ({
     name: `Qualification ${n + i}`,
@@ -161,28 +159,28 @@ function seedArcade(arcade: ArcadeStore): void {
     game: 'pacman', round: 'Party Round 2',
     players: [
       { id: 'p1', name: 'Ana', team: 846 },
-      { id: 'p2', name: 'Ben', team: 1868 },
-      { id: 'p3', name: 'Cy', team: 254 },
+      { id: 'p2', name: 'Ben', team: 1700 },
+      { id: 'p3', name: 'Cy', team: 5940 },
       { id: 'p4', name: 'Dee' },
     ],
   });
   arcade.score(0, 3); arcade.score(2, 2); arcade.score(1, 1);
   arcade.startGrandPrix('Pit Crew Cup', [
     { id: 'r1', name: 'Ana', team: 846 },
-    { id: 'r2', name: 'Ben', team: 1868 },
-    { id: 'r3', name: 'Cy', team: 254 },
+    { id: 'r2', name: 'Ben', team: 1700 },
+    { id: 'r3', name: 'Cy', team: 5940 },
     { id: 'r4', name: 'Dee' },
   ], 4);
   arcade.recordRace(['r2', 'r1', 'r4', 'r3']);
   arcade.recordRace(['r1', 'r4', 'r2', 'r3']);
-  arcade.setUpNext('Winners Final · 846 Ana vs 254 Cy');
+  arcade.setUpNext('Winners Final · 846 Ana vs 5940 Cy');
 }
 
 /** Two instant trivia rounds so the leaderboard and host console render lived-in. */
 function seedTrivia(trivia: TriviaStore): void {
   const roster: [string, number?][] = [
-    ['Ana', 846], ['Ben', 1868], ['Cy', 254], ['Dee'],
-    ['Evan', 100], ['Fay', 670], ['Gus', 115], ['Hana', 649],
+    ['Ana', 846], ['Ben', 1700], ['Cy', 5940], ['Dee'],
+    ['Evan', 100], ['Fay', 670], ['Gus', 115], ['Hana', 4159],
   ];
   const ids = roster.map(([name, team]) => trivia.join(name, team).playerId);
   for (let round = 0; round < 2; round++) {
@@ -202,26 +200,27 @@ function seedTrivia(trivia: TriviaStore): void {
  * and the pool still has takeable teams near the top.
  */
 function seedSelection(bus: EventBus): void {
-  const picked = new Set([
-    254, 846, 1678, 25801, 100, 1868, 649, 8033,
-    115, 253, 1072, 5940, 670, 604, 668, 751, 841, 852, 972,
-  ]);
+  // Captains are the top of the sample standings, picks come from the next
+  // ones down, so the board and the pool agree with each other.
+  const order = DEMO_RANKINGS.map(r => r.team);
+  const alliances = [
+    { id: 1, teams: [order[0]!, order[9]!, order[17]!, order[25]!] },
+    { id: 2, teams: [order[1]!, order[10]!, order[18]!, order[26]!] },
+    { id: 3, teams: [order[2]!, order[11]!, order[19]!, order[27]!] },
+    { id: 4, teams: [order[3]!, order[12]!, order[20]!, order[28]!] },
+    { id: 5, teams: [order[4]!, order[13]!] },
+    { id: 6, teams: [order[5]!] },
+    { id: 7, teams: [] as number[] },
+    { id: 8, teams: [] as number[] },
+  ];
+  const picked = new Set(alliances.flatMap(a => a.teams));
   bus.emit({
     type: 'alliance_selection.update',
     source: DEMO_SOURCE,
     payload: {
       // Four per alliance, captain first: CalGames picks a fourth rather than
       // calling a backup later, the way Championship divisions do.
-      alliances: [
-        { id: 1, teams: [254, 846, 1678, 25801] },
-        { id: 2, teams: [100, 1868, 649, 8033] },
-        { id: 3, teams: [115, 253, 1072, 5940] },
-        { id: 4, teams: [670, 604, 668, 751] },
-        { id: 5, teams: [841, 852] },
-        { id: 6, teams: [972] },
-        { id: 7, teams: [] },
-        { id: 8, teams: [] },
-      ],
+      alliances,
       ranked: DEMO_RANKINGS.slice(0, 24).map(r => ({
         rank: r.rank,
         team: r.team,
@@ -342,10 +341,11 @@ function seedScreens(bus: EventBus, matchNumber: number): void {
   // A slide, so the deck and the slide screen both have something.
   emit('slide.show', SAMPLE_SLIDES[0]);
 
-  // Discipline: a card on a team, and the card-call screen that explains it.
-  emit('card.issued', {
-    team: 253, alliance: 'red', color: 'yellow', match: `Qualification ${matchNumber}`,
-  });
+  // The card-call screen, and only that. NOT card.issued: a card folds into
+  // the per-team discipline ledger, which carries across matches for the rest
+  // of the phase, and every team number in this sample is a real team. A
+  // sample yellow on 253 would have marked Boba Bots as carrying a card on the
+  // real event's graphics. card.call is per match and the next load clears it.
   emit('card.call', {
     team: 253, alliance: 'red', color: 'yellow',
     reason: 'Sample card call, not a real penalty',
@@ -384,7 +384,61 @@ function seedScreens(bus: EventBus, matchNumber: number): void {
   });
 }
 
+/** True from a sample seed until the sample is cleared. */
+let sampleActive = false;
+export const sampleIsActive = (): boolean => sampleActive;
+
+/**
+ * Take every trace of the sample back off the desk, without a restart.
+ *
+ * Runs on the button, and AUTOMATICALLY the first time a real match loads,
+ * because "restart before the first practice match" is an instruction, and
+ * an instruction is the thing a first-time crew forgets. Left in place, the
+ * sample is not harmless: its rankings and its alliance board stay on the
+ * venue screens for as long as no field is connected, its slides rotate all
+ * weekend, two of its trivia rounds count as already asked, and its full
+ * alliance board makes the bridge treat the arena's real, still-empty board
+ * as "the arena forgot" and refuse it.
+ *
+ * Only ever removes what the sample put there: sample-prefixed slides,
+ * people and drawn photos, and on-air items carrying the sample's own ids or
+ * names. Anything real that has replaced them is left alone.
+ */
+export function clearSampleState(bus: EventBus, extras: DemoExtras = {}): boolean {
+  if (!sampleActive) return false;
+  sampleActive = false;
+
+  extras.slides?.clearSample();
+  extras.profiles?.clearSample();
+  extras.media?.clearSample();
+  try { extras.trivia?.clearSample(); } catch { /* best effort */ }
+  try { extras.arcade?.clearSample(); } catch { /* best effort */ }
+
+  const s = bus.state;
+  const emit = (type: string, payload: unknown = {}): void => {
+    bus.emit({ type: type as never, source: DEMO_SOURCE, payload: payload as never });
+  };
+  if (s.slide?.id?.startsWith('sample-')) emit('slide.hide');
+  if (s.sponsor?.id === 'sample-sponsor') emit('sponsor.hide');
+  if (s.lowerThird && (s.lowerThird as { name?: string }).name === 'Sample Analyst') {
+    emit('lower_third.hide');
+  }
+  if (s.panel?.title === 'Sample analysis desk') emit('panel.hide');
+  if (s.award?.id === 'sample-award') emit('award.clear');
+  if (s.cardCall?.reason?.startsWith('Sample')) emit('card.call_clear');
+  // Lists the sample filled wholesale. A live field or Nexus re-asserts its
+  // own within a minute; with nothing connected, empty is the honest answer.
+  emit('rankings.updated', { rankings: [], highestPlayedMatch: '' });
+  emit('queue.updated', { upcoming: [], nowQueuing: null });
+  emit('alliance_selection.update', {
+    alliances: [], ranked: [], showTimer: false, timeRemainingSec: 0,
+  });
+  console.log('[sample] sample data cleared');
+  return true;
+}
+
 export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
+  sampleActive = true;
   const matchNumber = 42;
   seedStatic(bus, extras, matchNumber);
   seedContent(extras);
@@ -429,8 +483,8 @@ export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
   bus.emit({ type: 'screen.change', source: DEMO_SOURCE, payload: { screen: 'auto' } });
 
   console.log('[sample] sample data seeded on every surface, tagged '
-    + `"${DEMO_SOURCE}" so it cannot pass for the field. Nothing was written `
-    + 'to disk: a restart clears it.');
+    + `"${DEMO_SOURCE}" so it cannot pass for the field. The log keeps it marked `
+    + 'as sample and never replays it, so a restart clears it too.');
 }
 
 /** The parts that are the same whether this is a one-shot seed or the loop. */
@@ -448,10 +502,10 @@ function seedStatic(bus: EventBus, extras: DemoExtras, matchNumber: number): voi
     type: 'queue.updated', source: DEMO_SOURCE,
     payload: { upcoming: upcomingFrom(matchNumber + 1) },
   });
-  try { if (extras.arcade) seedArcade(extras.arcade); } catch (err) {
+  try { if (extras.arcade) extras.arcade.asSample(() => seedArcade(extras.arcade!)); } catch (err) {
     console.warn('[demo] arcade seed failed:', (err as Error).message);
   }
-  try { if (extras.trivia) seedTrivia(extras.trivia); } catch (err) {
+  try { if (extras.trivia) extras.trivia.asSample(() => seedTrivia(extras.trivia!)); } catch (err) {
     console.warn('[demo] trivia seed failed:', (err as Error).message);
   }
   seedSelection(bus);

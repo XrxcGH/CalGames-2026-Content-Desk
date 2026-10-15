@@ -22,6 +22,7 @@
  * doesn't take an afternoon. Timing scales; the message sequence never does.
  */
 
+import { teamName } from '../../teams.ts';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -48,31 +49,41 @@ const ROUTES: Record<string, readonly string[]> = {
   arenaStatus: ['/displays/field_monitor/websocket'],
 };
 
+/*
+ * The real CalGames 2026 field, with the real field's one quirk reproduced on
+ * purpose: Cheesy Arena takes its nicknames from TBA, and TBA names every
+ * offseason second-robot number "Off-Season Demo Team 9999". So that is what
+ * this fake sends for 9999, 9998 and 9997, exactly as the arena will, and a
+ * rehearsal against it proves the desk prints The Wildhats / 100B instead.
+ */
+const nick = (n: number): string =>
+  n >= 9997 && n <= 9999 ? `Off-Season Demo Team ${n}` : teamName(n);
+
 const TEAMS = {
-  R1: { Id: 846, Nickname: 'The Funky Monkeys' },
-  R2: { Id: 1868, Nickname: 'Space Cookies' },
-  R3: { Id: 253, Nickname: 'Boba Bots' },
-  B1: { Id: 100, Nickname: 'The Wildhats' },
-  B2: { Id: 115, Nickname: 'MVRT' },
-  B3: { Id: 670, Nickname: 'Homestead Robotics' },
+  R1: { Id: 846, Nickname: nick(846) },
+  R2: { Id: 9999, Nickname: nick(9999) },
+  R3: { Id: 253, Nickname: nick(253) },
+  B1: { Id: 100, Nickname: nick(100) },
+  B2: { Id: 115, Nickname: nick(115) },
+  B3: { Id: 670, Nickname: nick(670) },
 } as const;
+
+const RANK_ORDER = [
+  846, 5940, 1700, 2473, 115, 4159, 8033, 840, 100, 6884, 4904, 670, 253,
+  1351, 841, 9999, 766, 852, 751, 6036, 3045, 1854, 1967, 2643, 4765, 4990,
+  5430, 5499, 6418, 6619, 6962, 7419, 8404, 9038, 10252, 9998, 9997, 8,
+];
 
 const RANKINGS = {
   HighestPlayedMatch: 'Q41',
-  Rankings: [
-    { Rank: 1, PreviousRank: 1, TeamId: 254, Nickname: 'The Cheesy Poofs', RankingPoints: 38, Wins: 10, Losses: 1, Ties: 0, Played: 11 },
-    { Rank: 2, PreviousRank: 3, TeamId: 846, Nickname: 'The Funky Monkeys', RankingPoints: 34, Wins: 8, Losses: 2, Ties: 1, Played: 11 },
-    { Rank: 3, PreviousRank: 2, TeamId: 1678, Nickname: 'Citrus Circuits', RankingPoints: 33, Wins: 8, Losses: 3, Ties: 0, Played: 11 },
-    { Rank: 4, PreviousRank: 5, TeamId: 1868, Nickname: 'Space Cookies', RankingPoints: 31, Wins: 7, Losses: 3, Ties: 1, Played: 11 },
-    { Rank: 5, PreviousRank: 4, TeamId: 100, Nickname: 'The Wildhats', RankingPoints: 29, Wins: 7, Losses: 4, Ties: 0, Played: 11 },
-    { Rank: 6, PreviousRank: 6, TeamId: 115, Nickname: 'MVRT', RankingPoints: 27, Wins: 6, Losses: 5, Ties: 0, Played: 11 },
-    { Rank: 7, PreviousRank: 8, TeamId: 670, Nickname: 'Homestead Robotics', RankingPoints: 25, Wins: 6, Losses: 5, Ties: 0, Played: 11 },
-    { Rank: 8, PreviousRank: 7, TeamId: 253, Nickname: 'Boba Bots', RankingPoints: 24, Wins: 5, Losses: 6, Ties: 0, Played: 11 },
-    { Rank: 9, PreviousRank: 9, TeamId: 5940, Nickname: 'BREAD', RankingPoints: 22, Wins: 5, Losses: 6, Ties: 0, Played: 11 },
-    { Rank: 10, PreviousRank: 11, TeamId: 649, Nickname: 'M-SET Fish', RankingPoints: 20, Wins: 4, Losses: 7, Ties: 0, Played: 11 },
-    { Rank: 11, PreviousRank: 10, TeamId: 8033, Nickname: 'Highlander Robotics', RankingPoints: 19, Wins: 4, Losses: 7, Ties: 0, Played: 11 },
-    { Rank: 12, PreviousRank: 12, TeamId: 199, Nickname: 'Deep Blue', RankingPoints: 17, Wins: 3, Losses: 8, Ties: 0, Played: 11 },
-  ],
+  Rankings: RANK_ORDER.map((n, i) => {
+    const wins = Math.max(1, 10 - Math.floor(i / 4));
+    return {
+      Rank: i + 1, PreviousRank: i % 4 === 1 ? i + 2 : i + 1, TeamId: n,
+      Nickname: nick(n), RankingPoints: Math.max(4, 40 - i),
+      Wins: wins, Losses: 11 - wins, Ties: 0, Played: 11,
+    };
+  }),
 };
 
 // FLAT, because that is what the arena sends. web/api.go embeds model.Match
@@ -83,11 +94,11 @@ const RANKINGS = {
 // parser were wrong in the same direction, and only a real field disagreed.
 // Q42 has just been played, so Q43 is next.
 const SCHEDULE = [
-  { Id: 42, Type: 2, TypeOrder: 42, ShortName: 'Q42', LongName: 'Qualification 42', Status: 2, Time: '2026-10-17T13:00:00-07:00', Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670 },
-  { Id: 43, Type: 2, TypeOrder: 43, ShortName: 'Q43', LongName: 'Qualification 43', Status: 0, Time: '2026-10-17T13:07:00-07:00', Red1: 254, Red2: 5940, Red3: 199, Blue1: 1678, Blue2: 649, Blue3: 8033 },
-  { Id: 44, Type: 2, TypeOrder: 44, ShortName: 'Q44', LongName: 'Qualification 44', Status: 0, Time: '2026-10-17T13:14:00-07:00', Red1: 846, Red2: 100, Red3: 649, Blue1: 253, Blue2: 115, Blue3: 5940 },
-  { Id: 45, Type: 2, TypeOrder: 45, ShortName: 'Q45', LongName: 'Qualification 45', Status: 0, Time: '2026-10-17T13:21:00-07:00', Red1: 1868, Red2: 8033, Red3: 254, Blue1: 670, Blue2: 199, Blue3: 1678 },
-  { Id: 46, Type: 2, TypeOrder: 46, ShortName: 'Q46', LongName: 'Qualification 46', Status: 0, Time: '2026-10-17T13:28:00-07:00', Red1: 115, Red2: 253, Red3: 846, Blue1: 100, Blue2: 670, Blue3: 1868 },
+  { Id: 42, Type: 2, TypeOrder: 42, ShortName: 'Q42', LongName: 'Qualification 42', Status: 2, Time: '2026-10-17T13:00:00-07:00', Red1: 846, Red2: 9999, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670 },
+  { Id: 43, Type: 2, TypeOrder: 43, ShortName: 'Q43', LongName: 'Qualification 43', Status: 0, Time: '2026-10-17T13:07:00-07:00', Red1: 10252, Red2: 1700, Red3: 6036, Blue1: 6962, Blue2: 5940, Blue3: 9998 },
+  { Id: 44, Type: 2, TypeOrder: 44, ShortName: 'Q44', LongName: 'Qualification 44', Status: 0, Time: '2026-10-17T13:14:00-07:00', Red1: 2473, Red2: 8033, Red3: 9997, Blue1: 840, Blue2: 4904, Blue3: 6884 },
+  { Id: 45, Type: 2, TypeOrder: 45, ShortName: 'Q45', LongName: 'Qualification 45', Status: 0, Time: '2026-10-17T13:21:00-07:00', Red1: 751, Red2: 766, Red3: 841, Blue1: 852, Blue2: 1854, Blue3: 1967 },
+  { Id: 46, Type: 2, TypeOrder: 46, ShortName: 'Q46', LongName: 'Qualification 46', Status: 0, Time: '2026-10-17T13:28:00-07:00', Red1: 2643, Red2: 3045, Red3: 4765, Blue1: 4990, Blue2: 5430, Blue3: 5499 },
 ];
 
 export interface FakeArenaOpts {

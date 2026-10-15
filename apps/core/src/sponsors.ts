@@ -172,7 +172,7 @@ export class Sponsors {
       const live = this.#live;
       if (live) {
         const seconds = Math.max(0, Math.round((ev.ts - live.since) / 1000));
-        if (seconds >= 1) this.#airings.push({ id: live.id, at: live.since, seconds });
+        if (seconds >= 1 && !live.id.startsWith('sample-')) this.#airings.push({ id: live.id, at: live.since, seconds });
         this.#live = null;
       }
       return;
@@ -190,7 +190,7 @@ export class Sponsors {
       // Same one-second floor the live path uses: a card up for under a
       // second was a mis-tap, and the report is only worth having if a
       // sponsor could audit it.
-      if (seconds >= 1) this.#airings.push({ id: live.id, at: live.since, seconds });
+      if (seconds >= 1 && !live.id.startsWith('sample-')) this.#airings.push({ id: live.id, at: live.since, seconds });
       this.#live = null;
     }
   }
@@ -249,7 +249,7 @@ export class Sponsors {
       // A card up for under a second was a mis-tap, not an airing. Counting it
       // would inflate the report, and the report is only worth anything if it
       // is one a sponsor could audit.
-      if (seconds >= 1) this.#airings.push({ id: live.id, at: live.since, seconds });
+      if (seconds >= 1 && !live.id.startsWith('sample-')) this.#airings.push({ id: live.id, at: live.since, seconds });
       this.#live = null;
       this.#bus.emit({ type: 'sponsor.hide', source: 'manual', payload: {} });
     }

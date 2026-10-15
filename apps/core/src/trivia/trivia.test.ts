@@ -5,6 +5,7 @@ import { TriviaStore } from './store.ts';
 import { award, standings, BASE_POINTS, PICK_BLUE, PICK_TIE, SPEED_POINTS } from './model.ts';
 import type { TriviaQuestion } from './model.ts';
 import { DEFAULT_QUESTIONS, SESSIONS } from './questions.ts';
+import type { DeskEvent } from '../types.ts';
 
 const BANK: TriviaQuestion[] = [
   { id: 'q1', text: '2 + 2?', options: ['3', '4', '5', '22'], answer: 1 },
@@ -651,4 +652,161 @@ test('fixing a typo does not split the round the question was in', () => {
   assert.deepEqual(store.sessions.map(r => `${r.name}:${r.size}`),
     before.map(r => `${r.name}:${r.size}`),
     'and the round list is unchanged: no split, no phantom round');
+});
+
+// ---------------------------------------------------------------------------
+// Restore: the boot-time rebuild feeds the day's trivia.updated events back in
+// ---------------------------------------------------------------------------
+
+const ROUNDS: TriviaQuestion[] = [
+  { id: 'a1', session: 'Round 1', text: 'Q1?', options: ['w', 'x', 'y', 'z'], answer: 0 },
+  { id: 'a2', session: 'Round 1', text: 'Q2?', options: ['w', 'x', 'y', 'z'], answer: 1 },
+  { id: 'b1', session: 'Round 2', text: 'Q3?', options: ['w', 'x', 'y', 'z'], answer: 2 },
+  { id: 'b2', session: 'Round 2', text: 'Q4?', options: ['w', 'x', 'y', 'z'], answer: 3 },
+];
+
+/** The day's trivia.updated events, as the event log would hold them. */
+const recording = (bus: EventBus): DeskEvent[] => {
+  const log: DeskEvent[] = [];
+  bus.subscribe(ev => { if (ev.type === 'trivia.updated') log.push(ev); });
+  return log;
+};
+
+/** A fresh desk after a restart: the same bank, a new bus, the log fed to observe(). */
+const restart = (log: DeskEvent[]) => {
+  const bus = new EventBus();
+  const emitted: DeskEvent[] = [];
+  bus.subscribe(ev => emitted.push(ev));
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  for (const ev of log) store.observe(ev);
+  return { store, emitted };
+};
+
+test('a restart carries the scores and the played rounds back, and publishes nothing doing it', () => {
+  // The handbook promises that scores carry across the day. They lived only in
+  // memory, so the promise held right up to the first restart, when the
+  // leaderboard the gym spent the morning building came back empty and every
+  // round read as unplayed.
+  const bus = new EventBus();
+  const log = recording(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  const ana = store.join('Ana', 846).playerId;
+  store.join('Ben');
+  store.startSession('Round 1');
+  store.open(20); store.answer(ana, 0); store.reveal(); store.next();
+  store.open(20); store.answer(ana, 1); store.reveal(); store.next();
+  const before = store.snapshot();
+  assert.equal(before.sessions[0]?.done, true, 'Round 1 was played through');
+
+  const { store: after, emitted } = restart(log);
+  assert.equal(emitted.length, 0, 'restoring reaches no surface and re-enters no log');
+  const snap = after.snapshot();
+  assert.equal(snap.phase, 'idle');
+  assert.deepEqual(snap.standings.map(r => [r.name, r.score, r.correct]),
+    before.standings.map(r => [r.name, r.score, r.correct]), 'the leaderboard is the day so far');
+  assert.equal(snap.standings[0]?.team, 846, 'the team pride survives too');
+  assert.equal(snap.asked, 2);
+  assert.deepEqual(snap.sessions, before.sessions, 'Round 1 reads as played, Round 2 as waiting');
+  assert.throws(() => after.startSession('Round 1'), /already been played/);
+  after.startSession('Round 2');
+  assert.equal(after.open(20).question?.text, 'Q3?', 'and the day goes on from where it was');
+  after.reveal();
+});
+
+test('a player who joins again after a restart gets their own row back', () => {
+  // Restored rows carry fresh ids no phone holds, so every phone sees the join
+  // screen again. Rejoining used to start a second row at zero beside the
+  // restored score.
+  const bus = new EventBus();
+  const log = recording(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  const ana = store.join('Ana', 846).playerId;
+  store.open(20); store.answer(ana, 0); store.reveal(); store.next();
+  const { store: after } = restart(log);
+
+  const back = after.join('ana', 846);
+  assert.equal(back.name, 'Ana');
+  assert.deepEqual(after.snapshot().standings.map(r => [r.name, r.score]),
+    [['Ana', store.snapshot().standings[0]!.score]], 'one row, with the score');
+  assert.notEqual(after.join('Ana', 846).playerId, back.playerId,
+    'claimed once: a second phone with the name gets a row of its own');
+  assert.notEqual(after.join('Ana', 100).playerId, back.playerId);
+});
+
+test('a question that was revealed when the desk died is not aired again', () => {
+  // reveal() pays and does not advance; the host was about to press Next.
+  // Restored at the cursor, the next Open would re-air the paid question and
+  // the next Reveal would pay everyone a second time.
+  const bus = new EventBus();
+  const log = recording(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  const ana = store.join('Ana').playerId;
+  store.open(20); store.answer(ana, 0); store.reveal();
+  const paid = store.snapshot().standings[0]!.score;
+  assert.ok(paid > 0);
+
+  const { store: after } = restart(log);
+  const snap = after.snapshot();
+  assert.equal(snap.phase, 'idle');
+  assert.equal(snap.questionIndex, 1, 'past the paid question, as Next would have left it');
+  assert.equal(snap.standings[0]?.score, paid, 'paid once');
+  assert.equal(snap.sessions[0]?.asked, 1);
+  assert.equal(after.open(20).question?.text, 'Q2?');
+  after.reveal();
+});
+
+test('a question that was open when the desk died is left to be opened again', () => {
+  // Nobody was paid, so nothing is lost by running it again. And no close
+  // timer is re-armed for a window that shut while the desk was down: that
+  // timer publishes, and a stale snapshot would land in the live show.
+  const bus = new EventBus();
+  const log = recording(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  const ana = store.join('Ana').playerId;
+  store.open(20); store.answer(ana, 0);
+
+  const { store: after, emitted } = restart(log);
+  const snap = after.snapshot();
+  assert.equal(snap.phase, 'idle');
+  assert.equal(snap.question, null, 'nothing is on the screen');
+  assert.equal(snap.questionIndex, 0);
+  assert.equal(snap.sessions[0]?.asked, 0, 'never revealed, so not played');
+  assert.equal(after.open(20).question?.text, 'Q1?');
+  assert.equal(emitted.length, 1, 'the only publish is the live Open');
+  after.reveal();
+});
+
+test('a logged snapshot arriving once the room is playing is ignored', () => {
+  // observe() is a boot-time path. Wired to the live bus by mistake, or fed a
+  // file after the first join, it would overwrite a room in the middle of a
+  // game with the morning.
+  const bus = new EventBus();
+  const log = recording(bus);
+  const store = new TriviaStore(bus, [...ROUNDS]);
+  store.join('Ana'); store.open(20); store.reveal(); store.next();
+
+  const live = new TriviaStore(new EventBus(), [...ROUNDS]);
+  live.join('Ben');
+  for (const ev of log) live.observe(ev);
+  const snap = live.snapshot();
+  assert.deepEqual(snap.standings.map(r => r.name), ['Ben']);
+  assert.equal(snap.asked, 0);
+});
+
+test('observe() ignores other events and a malformed snapshot', () => {
+  // A hand-edited log must not be able to crash the boot or seed nonsense.
+  const store = new TriviaStore(new EventBus(), [...ROUNDS]);
+  const envelope = {
+    id: 'x', seq: 1, ts: 0, matchClock: null,
+    source: 'manual' as const, confidence: 'authoritative' as const,
+  };
+  store.observe({ ...envelope, type: 'match.loaded', payload: { displayName: 'Q1' } });
+  store.observe({ ...envelope, type: 'trivia.updated', payload: null });
+  store.observe({ ...envelope, type: 'trivia.updated',
+    payload: { standings: 'nope', sessions: 7, questionIndex: 'two', asked: -3 } });
+  const snap = store.snapshot();
+  assert.equal(snap.players, 0);
+  assert.equal(snap.questionIndex, 0);
+  assert.equal(snap.asked, 0);
+  assert.equal(snap.phase, 'idle');
 });

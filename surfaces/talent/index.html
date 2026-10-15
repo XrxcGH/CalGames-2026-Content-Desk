@@ -34,6 +34,10 @@ h2 { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
 .statusline { font-family: var(--font-cond); font-weight: 600; font-size: 20px;
   letter-spacing: .06em; }
 .statusline b { color: var(--accent); }
+/* Quieter than the figures it qualifies, but a word, never colour alone. */
+.statusline .unofficial { font-size: 14px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-dim); border: 1px solid var(--text-dim);
+  padding: 1px 7px; margin-left: 4px; vertical-align: middle; }
 
 .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 /* Same large-text reasoning as the alliance chips: white on the official
@@ -133,8 +137,9 @@ import { mountNav } from '/shared/nav.js';
 // No screen takes here. The announcer's tablet sits on a podium and gets
 // knocked; nothing on it should be able to change what is on air.
 mountNav('talent', { screens: false });
-import { connect, startTicker, clockDisplayFor, phaseFor, PHASE_LABEL } from '/shared/desk-client.js';
+import { connect, startTicker, clockDisplayFor, phaseFor, PHASE_LABEL, teamLabel } from '/shared/desk-client.js';
 import { DEFAULT_THRESHOLDS } from '/shared/rp.js';
+import { lineupKey } from '/shared/alliance.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('talent');
@@ -168,20 +173,24 @@ function flagsFor(team) {
   return out;
 }
 
-function card(t, rankings) {
-  const row = (rankings ?? []).find(r => r.team === t.number);
+function card(t, s) {
+  const row = (s.rankings ?? []).find(r => r.team === t.number);
   const flags = flagsFor(t.number)
     .map(f => `<span class="tflag ${f.cls}">${esc(f.text)}</span>`).join('');
+  // What the announcer SAYS is the label (a second robot is "100B", not the
+  // 9999 it is registered under). Notes, rankings and cards stay keyed on the
+  // number, so a team's notes do not move if its label is ever corrected.
+  const label = teamLabel(s, t.number);
   return `
     <div class="tcard">
       <div class="top">
-        <span class="tnum num">${t.number}</span>
+        <span class="tnum num">${esc(label)}</span>
         <span class="tname">${esc(t.name || '-')}</span>
         <span class="tmeta">${row ? `Rank ${row.rank} · ${row.record} · ${(row.avgRp ?? 0).toFixed(1)} RP/match` : ''}</span>
       </div>
       ${flags ? `<div class="tflags">${flags}</div>` : ''}
       <textarea class="tnote" data-team="${t.number}" rows="1"
-        aria-label="Notes for team ${t.number}"
+        aria-label="Notes for team ${esc(label)}"
         placeholder="Pronunciation / one fact (saves on this tablet)">${esc(note(t.number))}</textarea>
     </div>`;
 }
@@ -192,6 +201,11 @@ function card(t, rankings) {
  * refresh on match change plus a slow poll covers both without a new event.
  */
 let lastMatchId = null;
+
+// Repaints are keyed on lineupKey (the match id PLUS the teams), not the id: a
+// playoff team substitution re-loads the same match with a different team, and
+// keyed on the id the announcer kept reading the swapped-out team's number,
+// rank and pronunciation note for the whole match.
 async function loadCards() {
   try {
     const res = await fetch('/api/discipline');
@@ -205,23 +219,25 @@ async function loadCards() {
     // announcer is typing pronunciation notes into, and rebuilding them
     // under a cursor loses the keystroke.
     if (changed) { lastMatchId = null; if (desk.state) paintTeams(desk.state); }
+    // (paintTeams stamps lastMatchId itself, so the next state frame does not
+    // rebuild the same cards a second time under the announcer's cursor.)
   } catch { /* transient */ }
 }
 void loadCards();
 setInterval(() => { if (!document.hidden) void loadCards(); }, 20_000);
 
 function paintTeams(s) {
+  lastMatchId = lineupKey(s);
   $('matchName').textContent = s.match?.displayName ?? '-';
-  $('redCards').innerHTML = (s.match?.red ?? []).map(t => card(t, s.rankings)).join('') || '<p class="hint">-</p>';
-  $('blueCards').innerHTML = (s.match?.blue ?? []).map(t => card(t, s.rankings)).join('') || '<p class="hint">-</p>';
+  $('redCards').innerHTML = (s.match?.red ?? []).map(t => card(t, s)).join('') || '<p class="hint">-</p>';
+  $('blueCards').innerHTML = (s.match?.blue ?? []).map(t => card(t, s)).join('') || '<p class="hint">-</p>';
   for (const ta of document.querySelectorAll('.tnote')) {
     ta.oninput = () => localStorage.setItem(`talent.note.${ta.dataset.team}`, ta.value);
   }
 }
 
 desk.on('state', s => {
-  if (s.match?.id !== lastMatchId) {
-    lastMatchId = s.match?.id ?? null;
+  if (lineupKey(s) !== lastMatchId) {
     // A new match is also the moment a card issued in the last one starts
     // mattering to the next set of teams.
     void loadCards();
@@ -233,8 +249,12 @@ desk.on('state', s => {
   const th = s.thresholds ?? DEFAULT_THRESHOLDS;
   const rp = side => {
     const sc = s.score[side];
+    // Fuel and tower are the typed-in breakdown, which `confidence` tracks
+    // separately from the total. A bonus worked out from a guessed figure is
+    // not a ranking point the field has awarded, and "earned" read aloud is.
+    const guess = s.confidence === 'estimated';
     const seg = (label, val, need, got) =>
-      `<span class="${got ? 'got' : ''}">${label} <b>${val}/${need}</b>${got ? ' earned' : ''}</span>`;
+      `<span class="${got ? 'got' : ''}">${label} <b>${val}/${need}</b>${got ? (guess ? ' earned, unofficial' : ' earned') : ''}</span>`;
     return `<span style="text-transform:uppercase">${side}</span> ` +
       seg('Energized', sc.fuel, th.energizedFuel, sc.rp.energized) + ' ' +
       seg('Supercharged', sc.fuel, th.superchargedFuel, sc.rp.supercharged) + ' ' +
@@ -246,9 +266,10 @@ desk.on('state', s => {
   // between matches, and "Red" in red is found faster than "red" in the same
   // white as everything around it. The word stays, so color is never the
   // only thing carrying the meaning.
+  const names = list => list.map(n => esc(teamLabel(s, n))).join(', ');
   const up = (s.upcoming ?? []).slice(0, 3).map(m =>
-    `<b>${esc(m.shortName)}</b> <span class="al al--red">Red</span> ${m.red.join(', ')}` +
-    ` <span class="vs">vs</span> <span class="al al--blue">Blue</span> ${m.blue.join(', ')}`).join('<br>');
+    `<b>${esc(m.shortName)}</b> <span class="al al--red">Red</span> ${names(m.red)}` +
+    ` <span class="vs">vs</span> <span class="al al--blue">Blue</span> ${names(m.blue)}`).join('<br>');
   $('next').innerHTML = up || 'Nothing queued yet.';
   $('queueCredit').hidden = s.queueFrom !== 'nexus';
 });
@@ -267,11 +288,16 @@ startTicker(() => {
   const timerText = t
     ? `<b>${esc(t.label)} ${Math.floor(tLeft / 60)}:${String(tLeft % 60).padStart(2, '0')}</b> · `
     : '';
+  // A shadow-scored total is the desk's own typing, not the field's answer, and
+  // the announcer reads this line aloud. It says so in a WORD, because a
+  // colour or an outline does not survive being read off a tablet at a podium.
+  const unofficial = s.totalConfidence === 'estimated'
+    ? ' <span class="unofficial">unofficial</span>' : '';
   const html = timerText + (s.status
     ? `<b>${esc(s.status.message)}</b>`
     : `${esc(s.match?.displayName ?? 'No match loaded')} · ` +
       `${PHASE_LABEL[phaseFor(s, c)] ?? ''} <b>${clockDisplayFor(s, c)}</b> · ` +
-      `red <b>${s.score.red.total}</b> · blue <b>${s.score.blue.total}</b>${behindText}`);
+      `red <b>${s.score.red.total}</b> · blue <b>${s.score.blue.total}</b>${unofficial}${behindText}`);
   // Only when it actually changed. This runs on rAF, so it was destroying and
   // re-parsing this line sixty times a second, all day, on a battery-powered
   // tablet sitting on the podium.

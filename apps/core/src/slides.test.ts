@@ -58,7 +58,7 @@ test('a shout-out is queued, not aired: the human is the gate', async () => {
     bus.subscribe(ev => emitted.push(ev.type));
     const slides = new Slides(dir, bus, []);
 
-    await slides.submit({ name: 'Ana', team: 846,
+    await slides.submit({ to: 'the queuers', name: 'Ana', team: 846,
       message: 'Team 1868 lent us their spare radio five minutes before our match' });
 
     assert.equal(slides.deck.length, 0, 'NOT in the deck the side screens read');
@@ -81,7 +81,7 @@ test('the pending queue survives a restart too', async () => {
   try {
     const slides = new Slides(dir, new EventBus(), []);
     await slides.load();
-    await slides.submit({ name: 'Ana', message: 'Somebody did a genuinely kind thing today' });
+    await slides.submit({ to: 'the queuers', name: 'Ana', message: 'Somebody did a genuinely kind thing today' });
 
     const reopened = new Slides(dir, new EventBus(), []);
     await reopened.load();
@@ -98,24 +98,24 @@ test('the screeners and the rate limit hold the door', async () => {
   try {
     const slides = new Slides(dir, new EventBus(), []);
 
-    await assert.rejects(() => slides.submit({ name: 'fuck', message: 'a perfectly fine message here' }),
+    await assert.rejects(() => slides.submit({ to: 'the queuers', name: 'fuck', message: 'a perfectly fine message here' }),
       /different name/);
-    await assert.rejects(() => slides.submit({ name: 'Ana', message: 'fuck this event honestly' }),
+    await assert.rejects(() => slides.submit({ to: 'the queuers', name: 'Ana', message: 'fuck this event honestly' }),
       /big-screen friendly/);
-    await assert.rejects(() => slides.submit({ name: 'Ana', message: 'too short' }),
+    await assert.rejects(() => slides.submit({ to: 'the queuers', name: 'Ana', message: 'too short' }),
       /a little more/);
 
     // Five from one address is plenty; the sixth waits.
     for (let i = 0; i < 5; i++) {
-      await slides.submit({ name: 'Ana', message: `A genuinely gracious thing number ${i} happened` },
+      await slides.submit({ to: 'the queuers', name: 'Ana', message: `A genuinely gracious thing number ${i} happened` },
         '10.0.100.9');
     }
     await assert.rejects(
-      () => slides.submit({ name: 'Ana', message: 'A sixth gracious thing happened just now' },
+      () => slides.submit({ to: 'the queuers', name: 'Ana', message: 'A sixth gracious thing happened just now' },
         '10.0.100.9'),
       /plenty for now/);
     // A different phone is not punished for the first one's enthusiasm.
-    await slides.submit({ name: 'Ben', message: 'A different phone saw something gracious too' },
+    await slides.submit({ to: 'the queuers', name: 'Ben', message: 'A different phone saw something gracious too' },
       '10.0.100.10');
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -151,7 +151,7 @@ test('simultaneous submissions cannot tear the saved file', async () => {
     await Promise.all([
       slides.add({ title: 'Typed during the rush', kind: 'recognition' }),
       ...Array.from({ length: 8 }, (_, i) =>
-        slides.submit({ name: 'Ana', message: `A genuinely gracious thing number ${i} happened` },
+        slides.submit({ to: 'the queuers', name: 'Ana', message: `A genuinely gracious thing number ${i} happened` },
           `10.0.0.${i}`)),
     ]);
 
@@ -180,7 +180,7 @@ test('an approved shout-out survives a restart at full length', async () => {
       + 'rookie team\'s entire electrical board so they could play their first ever '
       + 'elimination match of the season';
     assert.ok(message.length > 90 && message.length <= 200, 'long enough to catch the old cap');
-    await slides.submit({ name: 'Ana', team: 846, message });
+    await slides.submit({ to: 'the queuers', name: 'Ana', team: 846, message });
     await slides.approve(slides.queue[0]!.id);
 
     const reopened = new Slides(dir, new EventBus(), []);
@@ -229,6 +229,41 @@ test('config slides cannot be removed from the console', async () => {
     const slides = new Slides(dir, new EventBus(), CONFIG);
     assert.equal(await slides.remove('syscore'), false);
     assert.equal(slides.deck.length, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a shout-out names who it is for, and that becomes the headline', async () => {
+  /*
+   * The form was framed only as team-to-team Gracious Professionalism, so the
+   * people a crowd most wants to thank (the queuer who found their pit, the
+   * inspector who stayed late, the WRRF interns) had nowhere to go but the
+   * message body. The recipient is now its own field, and it leads the slide:
+   * it is the line somebody across the gym reads to find out whether the
+   * screen is about them.
+   */
+  const dir = await scratch();
+  try {
+    const slides = new Slides(dir, new EventBus(), []);
+
+    await assert.rejects(
+      () => slides.submit({ name: 'Ana', message: 'Found our pit when we were completely lost' }),
+      /who is the shout-out for/i, 'a shout-out to nobody is not one');
+    await assert.rejects(
+      () => slides.submit({ to: 'fuck', name: 'Ana', message: 'Found our pit when we were lost' }),
+      /big-screen friendly/, 'the recipient is screened like the message');
+
+    await slides.submit({ to: 'the queuing volunteers', name: 'Ana', team: 846,
+      message: 'Found our pit when we were lost and got us on the field in time' });
+    assert.equal(slides.queue[0]?.to, 'the queuing volunteers', 'the moderator sees it');
+
+    const slide = await slides.approve(slides.queue[0]!.id);
+    assert.equal(slide.title, 'Shout-out to the queuing volunteers');
+    assert.equal(slide.lines[1], 'From Ana, Team 846');
+    // The attribution used to lead with a typographic dash, which this
+    // project bans from its output as well as its files.
+    assert.equal(/[\u2013\u2014]/.test(JSON.stringify(slide)), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

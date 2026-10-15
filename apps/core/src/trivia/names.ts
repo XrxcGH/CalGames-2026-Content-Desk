@@ -67,13 +67,40 @@ const RESERVED = ['admin', 'moderator', 'referee', 'head ref', 'fta', 'announcer
 const SUFFIXES = ['', 's', 'es', 'ed', 'ing', 'er', 'ers', 'y', 'ie', 'ies', 'ish', 'head', 'face', 'hole'];
 
 /**
+ * Drop format characters (Unicode category Cf): zero-width space, joiner and
+ * non-joiner, soft hyphen, word joiner, the byte-order mark, and the bidi
+ * marks and overrides.
+ *
+ * They draw nothing on the projector, but every one of them was a separator to
+ * the folder, so "fuc" + soft hyphen + "k" screened as the harmless words "fuc"
+ * and "k" while the screen showed the slur intact. A trailing single letter
+ * after a split ("ni" ZWSP "gge" ZWSP "r") also dodges the joined-word pass,
+ * which deliberately skips a name that ends in an initial. Removing them is
+ * the only fix that does not depend on guessing where the split falls.
+ *
+ * The price is that a ZWJ emoji sequence (a family, a flag with a skin tone)
+ * comes out as its parts, and an Indic or Persian name loses its joiner. A
+ * display name that reads slightly off beats one that gets a slur onto a
+ * projector in front of a gym of children.
+ *
+ * Exported because the store must store the SAME string it screened: screening
+ * a stripped copy and keeping the raw one would show the room something other
+ * than what was checked.
+ */
+export function stripInvisible(raw: string): string {
+  return raw.replace(/\p{Cf}/gu, '');
+}
+
+/**
  * Fold lookalikes and collapse runs, keeping anything that is not a letter as
  * a separator. This is the form that still has words in it.
  */
 function foldWords(raw: string): string[] {
   // NFKD splits an accented letter into a plain one plus a combining mark,
   // and the mark is dropped here. Without it an accent read as a separator.
-  const bare = raw.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  // Invisible format characters go first, for the same reason in reverse: left
+  // in, they read as separators and split a word that is whole on the screen.
+  const bare = stripInvisible(raw).normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
   const folded = [...bare.toLowerCase()].map(c => FOLD[c] ?? c).join('');
   return folded
     .split(/[^a-z]+/)
@@ -114,8 +141,9 @@ const isBannedWord = (word: string): boolean => {
  * spare the human moderator the worst of the queue, and the human is the gate.
  */
 export function screenText(raw: string): boolean {
-  const rawWords = raw.toLowerCase().split(/[^a-z]+/).filter(Boolean);
-  return ![...foldWords(raw), ...rawWords].some(isBannedWord);
+  const text = stripInvisible(raw);
+  const rawWords = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  return ![...foldWords(text), ...rawWords].some(isBannedWord);
 }
 
 export interface NameVerdict {
@@ -132,7 +160,10 @@ export interface NameVerdict {
  * "pick another name" is all the information anybody needs.
  */
 export function screenName(raw: string): NameVerdict {
-  const trimmed = raw.trim();
+  // Invisible characters out BEFORE the trim and every comparison below. The
+  // raw-letter split and the reserved-name test read `trimmed` directly, not
+  // through foldWords, so they need the clean copy too.
+  const trimmed = stripInvisible(raw).trim();
   if (!trimmed) return { ok: false, reason: 'A name is required.' };
 
   const flat = trimmed.toLowerCase();

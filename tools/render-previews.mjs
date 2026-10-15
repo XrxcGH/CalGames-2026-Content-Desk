@@ -215,11 +215,11 @@ const SHOTS = [
       // moderation queue without photographing anyone's real words. These go
       // through the real /api/gp path a phone in the stands would use.
       await post('/api/gp', {
-        name: 'Sam R', team: 604,
+        name: 'Sam R', team: 604, to: 'the pit crew next door',
         message: 'Huge thanks to the pit crew who lent us a battery between matches.',
       });
       await post('/api/gp', {
-        name: 'Jordan P', team: 1678,
+        name: 'Jordan P', team: 1678, to: 'our mentors',
         message: 'Our rookies wired their first robot this week and it moved on the first try.',
       });
 
