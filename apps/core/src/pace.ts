@@ -24,9 +24,8 @@ export interface Pace {
   cycleSec: number | null;
   /**
    * Wall-clock estimate for the start of the first match that has NOT started
-   * yet: one median cycle after the last start. While a match is on the field
-   * that is the match after it, so it belongs to on-deck row 1 when the queue
-   * still lists the playing match as row 0 (see startedRows). Null until two
+   * yet: one median cycle after the last start. Which on-deck row that is, is
+   * the deck's business (deck.ts: the row whose offset is 0). Null until two
    * starts, because the projection needs a measured cycle.
    */
   nextStartAt: number | null;
@@ -84,6 +83,25 @@ export function behindMinutes(
 }
 
 const norm = (x: string | null | undefined): string => (x ?? '').trim().toLowerCase();
+
+/**
+ * The PUBLISHED start of a deck row, epoch ms, or null when nobody published
+ * one.
+ *
+ * A Nexus row's `time` is the queuers' estimate, recomputed on every poll, so
+ * "behind schedule" measured against it was the desk's projection minus
+ * Nexus's projection: about zero, all day, however late the event ran. Only
+ * the row's `scheduled` counts there. A field row's `time` is the arena's
+ * published schedule. A row the deck made up for the loaded match has none.
+ */
+export function scheduledAt(
+  row: Pick<UpcomingMatch, 'time' | 'scheduled'> | undefined, queueFrom: DeskState['queueFrom'],
+): number | null {
+  if (!row) return null;
+  const raw = row.scheduled ?? (queueFrom === 'nexus' ? null : row.time);
+  const t = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
 
 /**
  * Is on-deck row 0 the match that is on the field right now?
@@ -148,27 +166,54 @@ export function etaForRow(
  * forward while the field is stalled, without any new events.
  */
 export function attachPace(bus: EventBus): () => void {
-  const starts: number[] = [];
+  // Each start with whether it was the sample's. A sample start and the first
+  // real one an hour later are not a cycle, and one minutes apart is a wrong
+  // one, so the sample's are dropped the moment the field starts a real match.
+  // The demo loop's are all sample and stay: they are its whole pace.
+  const starts: { ts: number; sample: boolean }[] = [];
+  const times = (): number[] => starts.map(x => x.ts);
+  const dropSample = (): void => {
+    for (let i = starts.length - 1; i >= 0; i--) if (starts[i]!.sample) starts.splice(i, 1);
+  };
   let lastEmit = '';
-  // From match.start until its score commits, upcoming[0] is still the match
-  // on the field, and comparing the NEXT match's projection against it read
-  // a full cycle behind on a field running exactly on time, snapping back at
-  // every commit. So the figure is latched at each start (this match against
-  // its own scheduled time) and held until the queue head moves on.
-  let held: { behindMin: number; head: string } | null = null;
+  // While a match plays, the figure is latched at its start (this match
+  // against its own published time) and held until its score commits or
+  // another match loads. Comparing the NEXT match's projection mid-match is
+  // right in principle but jumps around with every stall; the start is the
+  // one moment the field said exactly how late it was.
+  let held: { behindMin: number; match: string | null } | null = null;
 
   const compute = (now = Date.now()): Pace => {
-    const lastStartAt = starts.at(-1) ?? null;
-    const cycleMs = medianCycleMs(starts);
+    const s = bus.state;
+    const lastStartAt = starts.at(-1)?.ts ?? null;
+    const cycleMs = medianCycleMs(times());
     const nextStartAt = projectNextStart(lastStartAt, cycleMs, now);
-    const sched = bus.state.upcoming[0]?.time;
-    const nextScheduledAt = sched ? Date.parse(sched) : null;
+    const holding = held !== null && s.lastMatchStartedAt !== null && s.scorePostedAt === null
+      && (s.match?.id ?? null) === held.match;
+    // The row nextStartAt belongs to, by the deck's reckoning, is offset 0.
+    // When it has no published time (a replay, a practice match, a row the
+    // deck made up for the loaded match), the first row after it that has one
+    // stands in, at its own projected start. Never across a break: past lunch
+    // the projection stops meaning anything.
+    const behind = (): number | null => {
+      const deck = s.deck;
+      if (!deck || nextStartAt === null) return null;
+      for (let i = 0; i < deck.rows.length; i++) {
+        const off = deck.offs[i];
+        if (off === null || off === undefined) continue;
+        const at = scheduledAt(deck.rows[i], s.queueFrom);
+        if (at !== null) {
+          if (off > 0 && cycleMs === null) return null;
+          return behindMinutes(nextStartAt + off * (cycleMs ?? 0), at);
+        }
+        if (deck.rows[i]!.breakAfter) return null;
+      }
+      return null;
+    };
     return {
       cycleSec: cycleMs === null ? null : Math.round(cycleMs / 1000),
       nextStartAt,
-      behindMin: held !== null
-        ? held.behindMin
-        : behindMinutes(nextStartAt, Number.isFinite(nextScheduledAt) ? nextScheduledAt : null),
+      behindMin: holding ? held!.behindMin : behind(),
       lastStartAt,
     };
   };
@@ -184,30 +229,37 @@ export function attachPace(bus: EventBus): () => void {
 
   const unsubscribe = bus.subscribe(ev => {
     if (ev.type === 'match.start') {
-      // Captured before the queue advances: the head IS the match starting.
-      // Same credibility bound as behindMinutes: a latched figure computed
-      // against a schedule from another day (replay, bad import) is nonsense.
-      const head = bus.state.upcoming[0];
-      const schedAt = head?.time ? Date.parse(head.time) : NaN;
-      const latched = Number.isFinite(schedAt)
-        ? Math.round((ev.ts - schedAt) / 60_000)
+      // The bus reduces before subscribers run, so the deck already shows the
+      // starting match as the one on the field (offset null), found by
+      // identity rather than by assuming it is row 0: a Nexus queue has
+      // dropped it, and latching this start against the NEXT match's time
+      // read a full cycle ahead for the whole match. No row, or no published
+      // time for it (a Nexus estimate is not one), and nothing is latched.
+      // Same credibility bound as behindMinutes: a figure against a schedule
+      // from another day (replay, bad import) is nonsense.
+      const s = bus.state;
+      const onField = s.deck?.rows[s.deck.offs.indexOf(null)];
+      const schedAt = scheduledAt(onField, s.queueFrom);
+      const latched = schedAt === null ? null : Math.round((ev.ts - schedAt) / 60_000);
+      held = latched !== null && Math.abs(latched) <= MAX_CREDIBLE_BEHIND_MIN
+        ? { behindMin: latched, match: s.match?.id ?? null }
         : null;
-      // Only when the head really is the match starting. A Nexus queue has
-      // already dropped it (and a test match was never in any queue), so there
-      // the head is the NEXT match and latching this start against its time
-      // read a full cycle AHEAD for the whole match. Unlatched, compute()
-      // compares the next match's projection against the next match's time,
-      // which is the right pair.
-      held = head && latched !== null && Math.abs(latched) <= MAX_CREDIBLE_BEHIND_MIN
-        && headIsPlaying(head, bus.state.match, bus.state.queueFrom)
-        ? { behindMin: latched, head: head.shortName }
-        : null;
-      starts.push(ev.ts);
+      const sample = ev.source === 'demo';
+      if (!sample) dropSample();
+      starts.push({ ts: ev.ts, sample });
       while (starts.length > KEEP + 1) starts.shift();
       emit();
-    } else if (ev.type === 'queue.updated') {
-      // The committed match has left the queue: back to projecting the next.
-      if (held && bus.state.upcoming[0]?.shortName !== held.head) held = null;
+    } else if (ev.type === 'match.unloaded') {
+      // The sample data's clear. Its starts go, and the figure is published
+      // again even if it has not changed, because the clear has just wiped
+      // what the sample put in state.pace.
+      dropSample();
+      held = null;
+      lastEmit = '';
+      emit();
+    } else if (ev.type === 'queue.updated' || ev.type === 'match.loaded'
+      || ev.type === 'match.score_posted' || ev.type === 'match.ended_before_join') {
+      // Any of these can move which row is next, or end the latch.
       emit();
     }
   });

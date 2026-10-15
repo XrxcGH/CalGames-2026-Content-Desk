@@ -8,6 +8,7 @@
 
 import { clockDisplay, clockFrom, hubActiveAt, isLockdown, phaseAt } from './clock.ts';
 import { phaseOf } from './types.ts';
+import { buildDeck, sameDeckInputs } from './deck.ts';
 import {
   emptyAllianceScore, REBUILT,
   type Alliance, type AllianceScore, type CardCall, type Confidence,
@@ -189,6 +190,40 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           ...(heldOnAResult ? { screenHold: false } : {}),
         };
       }
+
+      case 'match.ended_before_join':
+        // Only ever the first word from the field after a (re)start, so it
+        // never overwrites a real end.
+        return { ...state, matchEndedAt: state.matchEndedAt ?? ev.ts };
+
+      case 'schedule.played': {
+        const p = ev.payload as { names?: unknown };
+        return Array.isArray(p?.names)
+          ? { ...state, fieldPlayed: p.names.map(String) }
+          : state;
+      }
+
+      case 'match.unloaded':
+        // Back to "nothing loaded", the way the desk boots. Per-team card
+        // totals and anything not about this one match are left alone.
+        return {
+          ...state,
+          match: null,
+          officialWinner: null,
+          tiebreakReason: null,
+          matchRun: 1,
+          matchStartedAt: null,
+          lastMatchStartedAt: null,
+          matchEndedAt: null,
+          scorePostedAt: null,
+          autoWinner: null,
+          autoWinnerKnown: false,
+          hubAuthoritative: null,
+          score: { red: emptyAllianceScore(), blue: emptyAllianceScore() },
+          cards: { ...state.cards, thisMatch: [] },
+          cardCall: null,
+          surrogates: [],
+        };
 
       case 'match.preview':
         return { ...state, screen: auto(state, 'overview') };
@@ -451,10 +486,19 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'queue.updated': {
         const p = ev.payload as {
           upcoming?: DeskState['upcoming']; nowQueuing?: string | null;
+          recent?: DeskState['queueRecent'];
         };
+        const nexus = ev.source === 'nexus';
         return {
           ...state,
           upcoming: p.upcoming ?? state.upcoming,
+          // Nexus's dropped rows, which the deck needs to find the match on the
+          // field. A field-sourced list replaces the Nexus one wholesale, so
+          // Nexus's rows go with it; a payload with no list (the banner clear)
+          // leaves them alone.
+          queueRecent: p.upcoming
+            ? (nexus && Array.isArray(p.recent) ? p.recent : [])
+            : state.queueRecent,
           // Which source the deck on screen came from. Nexus asks that
           // anything using their data link back to frc.nexus, and the surfaces
           // can only honour that if they know when they are showing it.
@@ -858,7 +902,25 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
     }
   })();
 
-  return { ...retime(next, ev.ts), updatedAt: ev.ts };
+  const out = retime(next, ev.ts);
+  // Rebuilt only when something it reads changed: this runs on every event,
+  // realtime score ticks included.
+  const deck = sameDeckInputs(state, out) && state.deck ? state.deck : safeDeck(out);
+  return { ...out, deck, updatedAt: ev.ts };
+}
+
+/**
+ * The deck, never a throw. A reducer that throws loses the event for every
+ * screen; a deck that cannot be worked out is shown as the raw queue, which
+ * is what the screens showed before there was a deck at all.
+ */
+function safeDeck(s: DeskState): DeskState['deck'] {
+  try {
+    return buildDeck(s);
+  } catch {
+    const rows = s.upcoming ?? [];
+    return { rows, offs: rows.map((_, i) => i) };
+  }
 }
 
 /** Called by the server ticker so phase transitions land without an event. */

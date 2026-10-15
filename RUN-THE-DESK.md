@@ -79,7 +79,13 @@ the desk crew plans around.
   being called to queue on every side screen, but only with an API key: get
   one at frc.nexus/api and put it in `config.json` under `"nexus"` as
   `"apiKey"` (chapter 2 shows how to make that file). Without a key everything
-  still works; the desk works out the queue from the field instead.
+  still works; the desk works out the queue from the field instead. That
+  needs the field connected (step 7): with **neither** the key nor the field,
+  the side screens and the "when do we play" page have no queue to show. The
+  key is read when the desk starts, so a key that arrives later means a
+  restart. Either way, the match on the field and the next one to start are
+  always at the top of the on-deck list, even after a queuer has marked the
+  next match "On field" in Nexus.
 - **Every team's pit is known** (Aisle 1 is pits A and B, Aisle 2 is C and D,
   Aisle 3 is E and F). The "when do we play" page shows a followed team's
   pit.

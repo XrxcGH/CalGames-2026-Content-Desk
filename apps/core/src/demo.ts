@@ -426,6 +426,17 @@ export function clearSampleState(bus: EventBus, extras: DemoExtras = {}): boolea
   if (s.panel?.title === 'Sample analysis desk') emit('panel.hide');
   if (s.award?.id === 'sample-award') emit('award.clear');
   if (s.cardCall?.reason?.startsWith('Sample')) emit('card.call_clear');
+  // The sample's pace figures, which it wrote straight into state: "running
+  // 6 min behind" stayed on the talent tablet with nothing loaded. Before the
+  // unload below, so the pace model can publish its own figure over this.
+  emit('pace.updated', { cycleSec: null, nextStartAt: null, behindMin: null, lastStartAt: null });
+  // The sample's own match, if nothing real has loaded over it. Left loaded,
+  // every screen went on saying "Now playing: Qualification 42" with the
+  // sample's teams on the deck.
+  const red = (s.match?.red ?? []).map(t => t.number).join(',');
+  if (s.match?.id === `q${SAMPLE_MATCH}` && red === RED.map(t => t.number).join(',')) {
+    emit('match.unloaded');
+  }
   // Lists the sample filled wholesale. A live field or Nexus re-asserts its
   // own within a minute; with nothing connected, empty is the honest answer.
   emit('rankings.updated', { rankings: [], highestPlayedMatch: '' });
@@ -437,9 +448,12 @@ export function clearSampleState(bus: EventBus, extras: DemoExtras = {}): boolea
   return true;
 }
 
+/** The match the sample puts on the field. */
+const SAMPLE_MATCH = 42;
+
 export function seedSampleState(bus: EventBus, extras: DemoExtras = {}): void {
   sampleActive = true;
-  const matchNumber = 42;
+  const matchNumber = SAMPLE_MATCH;
   seedStatic(bus, extras, matchNumber);
   seedContent(extras);
 

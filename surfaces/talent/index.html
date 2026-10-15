@@ -267,7 +267,11 @@ desk.on('state', s => {
   // white as everything around it. The word stays, so color is never the
   // only thing carrying the meaning.
   const names = list => list.map(n => esc(teamLabel(s, n))).join(', ');
-  const up = (s.upcoming ?? []).slice(0, 3).map(m =>
+  // The desk's deck, not the raw queue: under Nexus the raw queue has already
+  // dropped the one about to start. Without the match on the field, which the
+  // line above already names: this is what is COMING UP.
+  const deck = s.deck ?? { rows: s.upcoming ?? [], offs: (s.upcoming ?? []).map((_, i) => i) };
+  const up = deck.rows.filter((_, i) => deck.offs[i] !== null).slice(0, 3).map(m =>
     `<b>${esc(m.shortName)}</b> <span class="al al--red">Red</span> ${names(m.red)}` +
     ` <span class="vs">vs</span> <span class="al al--blue">Blue</span> ${names(m.blue)}`).join('<br>');
   $('next').innerHTML = up || 'Nothing queued yet.';
@@ -278,9 +282,15 @@ startTicker(() => {
   const s = desk.state;
   if (!s) return;
   const c = desk.matchClock;
+  // The field's own wording first, the same figure the side screens show:
+  // an announcer reading a different number from the one on the wall gets
+  // corrected by the room.
   const behind = s.pace?.behindMin;
-  const behindText = behind != null && Math.abs(behind) >= 2
-    ? ` · running <b>${Math.abs(behind)} min ${behind > 0 ? 'behind' : 'ahead'}</b>` : '';
+  const official = s.pace?.officialLate;
+  const behindText = official
+    ? (/on schedule/i.test(official) ? '' : ` · <b>${esc(official)}</b>`)
+    : behind != null && Math.abs(behind) >= 2
+      ? ` · running <b>${Math.abs(behind)} min ${behind > 0 ? 'behind' : 'ahead'}</b>` : '';
   // A live event timer leads the line: "field setup, forty seconds" is a
   // thing the announcer says out loud, and it beats whatever else is here.
   const t = s.timer && desk.serverNow < s.timer.endsAt + 5000 ? s.timer : null;

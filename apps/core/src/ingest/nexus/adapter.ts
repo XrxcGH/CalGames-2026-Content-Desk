@@ -78,11 +78,7 @@ const ON_FIELD = 'on field';
  * to point a test at it directly with the spec's own payloads.
  */
 export function pendingMatches(matches: NexusMatch[]): NexusMatch[] {
-  let lastOnField = -1;
-  for (let i = 0; i < matches.length; i++) {
-    if ((matches[i]!.status ?? '').trim().toLowerCase() === ON_FIELD) lastOnField = i;
-  }
-  return matches.slice(lastOnField + 1).filter(m => {
+  return matches.slice(onFieldCut(matches)).filter(m => {
     if (!(m.label ?? '').trim()) return false;
     // AutoQueue events stamp a commit time when the scores go up. Nothing
     // before the cut should carry one, so this only catches a row that has
@@ -90,6 +86,25 @@ export function pendingMatches(matches: NexusMatch[]): NexusMatch[] {
     return !m.times?.actualCommitTime;
   });
 }
+
+/** Where pendingMatches cuts: one past the LAST "On field" row. */
+export function onFieldCut(matches: NexusMatch[]): number {
+  let lastOnField = -1;
+  for (let i = 0; i < matches.length; i++) {
+    if ((matches[i]!.status ?? '').trim().toLowerCase() === ON_FIELD) lastOnField = i;
+  }
+  return lastOnField + 1;
+}
+
+/**
+ * How many of the rows before the cut are sent along as `recent`.
+ *
+ * The match a queuer has marked On field before it starts is dropped from the
+ * pending list, and so is the one still playing when they mark the next. The
+ * deck has to find the field's loaded match among them (deck.ts), and a
+ * queuer catching up in a burst can mark several at once, so a few spare.
+ */
+const RECENT_ROWS = 8;
 
 const teamNumbers = (raw: (string | null)[] | undefined): number[] =>
   (raw ?? []).map(t => Number(t)).filter(n => Number.isInteger(n) && n > 0);
@@ -260,7 +275,7 @@ export class NexusAdapter {
   #applyQueue(status: NexusEventStatus): void {
     const matches = Array.isArray(status.matches) ? status.matches : [];
 
-    const upcoming: UpcomingMatch[] = pendingMatches(matches).slice(0, 6).map(m => ({
+    const toRow = (m: NexusMatch): UpcomingMatch => ({
       name: (m.label ?? '').trim(),
       shortName: shortLabel(m.label ?? ''),
       // ISO-ish local time string is what the surfaces render; null when Nexus
@@ -276,7 +291,16 @@ export class NexusAdapter {
       // its day around; the desk had been parsing it away.
       ...(m.breakAfter ? { breakAfter: m.breakAfter } : {}),
       ...(m.replayOf ? { replayOf: m.replayOf } : {}),
-    }));
+      // The published time, kept apart from the estimate above: "behind
+      // schedule" is measured against this, never against Nexus's guess.
+      ...(m.times?.scheduledStartTime
+        ? { scheduled: new Date(m.times.scheduledStartTime).toISOString() } : {}),
+    });
+    const upcoming = pendingMatches(matches).slice(0, 6).map(toRow);
+    const cut = onFieldCut(matches);
+    const recent = matches.slice(Math.max(0, cut - RECENT_ROWS), cut)
+      .filter(m => (m.label ?? '').trim())
+      .map(toRow);
 
     // Emitted even when empty. It used to return early on an empty list, so
     // once Nexus marked the last qual Completed the side screens went on
@@ -291,6 +315,7 @@ export class NexusAdapter {
         confidence: 'derived',
         payload: {
           upcoming,
+          recent,
           nowQueuing: status.nowQueuing ?? null,
           from: 'nexus',
         },

@@ -251,6 +251,19 @@ export class CheesyAdapter {
   #autoFuel: Record<Alliance, number> = { red: 0, blue: 0 };
   #autoWinnerSent = false;
   #matchLoaded = false;
+  /** Whether any matchTime frame has arrived yet, in this desk's lifetime. */
+  #sawMatchTime = false;
+  /**
+   * The desk's FIRST matchTime frame said PostMatch: it started (or was
+   * restarted) after the buzzer, during the referees' review or with the score
+   * already up. No match.start was ever seen for the loaded match, so to the
+   * desk it looked unplayed, and the on-deck list put the match that had just
+   * been played back on top as the next to start. Used once, for the match
+   * loaded at that moment, then cleared; any other state clears it too.
+   */
+  #joinedAfterBuzzer = false;
+  /** The last list of played matches sent, so a poll that changes nothing sends nothing. */
+  #playedKey = '';
   /** Latched per match: armed fires once, when the field first goes ready. */
   #armedSent = false;
   /** Id of the last loaded match, to tell a reconnect replay from a fresh load. */
@@ -516,6 +529,20 @@ export class CheesyAdapter {
         const nexusFresh = Date.now() - this.#nexusQueueAt <= 90_000;
         if (!nexusFresh || this.#bus.state.upcoming.length === 0) {
           this.#emit({ type: 'queue.updated', payload: { upcoming } });
+        }
+
+        // Which matches have a result, sent whatever the queue source: the
+        // deck uses it to keep a played match from being listed as next when
+        // Nexus cannot tell played from on-the-field. Only on change.
+        const played = [...qual, ...playoff]
+          .filter(m => m.Status === MatchStatus.RedWon || m.Status === MatchStatus.BlueWon
+            || m.Status === MatchStatus.Tie)
+          .map(m => m.LongName ?? m.ShortName ?? '')
+          .filter(Boolean);
+        const playedKey = played.join('|');
+        if (playedKey !== this.#playedKey) {
+          this.#playedKey = playedKey;
+          this.#emit({ type: 'schedule.played', payload: { names: played } });
         }
 
         this.#noticeCorrections([...qual, ...playoff]);
@@ -866,6 +893,13 @@ export class CheesyAdapter {
     this.#loadedTypeOrder = typeof m.TypeOrder === 'number' ? m.TypeOrder : null;
     this.#cardsSeen.clear();
     this.#emit({ type: 'match.loaded', payload: { ...match, run } });
+    if (this.#joinedAfterBuzzer) this.#endedBeforeJoin();
+  }
+
+  /** See #joinedAfterBuzzer. Its own event: a real match.end fires cues. */
+  #endedBeforeJoin(): void {
+    this.#joinedAfterBuzzer = false;
+    this.#emit({ type: 'match.ended_before_join' });
   }
 
   /**
@@ -875,6 +909,15 @@ export class CheesyAdapter {
    */
   #onMatchTime(msg: MatchTimeMessage): void {
     const state = msg.MatchState ?? MatchState.PreMatch;
+    // Either socket can win the race after a (re)start, so this works in both
+    // orders: frame first (the load then picks it up), or load first.
+    if (!this.#sawMatchTime) {
+      this.#sawMatchTime = true;
+      this.#joinedAfterBuzzer = state === MatchState.PostMatch;
+      if (this.#joinedAfterBuzzer && this.#matchLoaded) this.#endedBeforeJoin();
+    } else if (state !== MatchState.PostMatch) {
+      this.#joinedAfterBuzzer = false;
+    }
     if (state === this.#matchState) return;
     const previous = this.#matchState;
     this.#matchState = state;

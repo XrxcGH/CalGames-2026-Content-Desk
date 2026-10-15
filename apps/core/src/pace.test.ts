@@ -210,10 +210,12 @@ test('behindMin is not latched against the NEXT match when the queue is Nexus\'s
     // time read 7 minutes AHEAD on a field running exactly on schedule.
     const t0 = Date.now() - 14 * MIN;
     const iso = (t: number) => new Date(t).toISOString();
+    // `scheduled`, the published time: a Nexus row's `time` is the queuers'
+    // estimate, and behind schedule is never measured against that.
     const nexus = (head: number) => bus.emit({
       type: 'queue.updated', source: 'nexus',
       payload: {
-        upcoming: [{ ...row(head), time: iso(t0 + (head - 42) * 7 * MIN) }],
+        upcoming: [{ ...row(head), scheduled: iso(t0 + (head - 42) * 7 * MIN) }],
       },
     });
 

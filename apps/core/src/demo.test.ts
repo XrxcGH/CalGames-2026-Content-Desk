@@ -206,6 +206,10 @@ test('clearing the sample takes every trace of it back off the desk', async () =
     assert.deepEqual(s.upcoming, [], 'sample schedule');
     assert.equal(s.nowQueuing, null);
     assert.deepEqual(s.selection?.alliances, [], 'and the sample alliance board');
+    assert.equal(s.match, null, 'and the sample match, so no screen says it is playing');
+    assert.equal(s.pace.behindMin, null, 'and its "running 6 min behind"');
+    assert.equal(s.pace.nextStartAt, null);
+    assert.deepEqual(s.deck.rows, [], 'and nothing of it on the on-deck list');
 
     assert.equal(clearSampleState(bus, st), false, 'twice is a no-op');
   } finally {

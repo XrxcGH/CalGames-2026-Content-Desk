@@ -637,26 +637,17 @@ function restartRotation() {
 }
 
 /**
- * How many rows at the head of the on-deck queue have already started: 1 from
- * match.start until that match's score commits, otherwise 0.
- *
- * A copy of startedRows() in apps/core/src/pace.ts, which holds the reasoning
- * and the tests (surfaces are plain browser JS and cannot import it). Keep the
- * two in step. The short version: the field's queue keeps the playing match as
- * row 0 until it commits, but Nexus drops it the moment it is "On field", so
- * the loaded match's own name is what settles it.
+ * The on-deck list and where each row sits in time, worked out by the desk
+ * (apps/core/src/deck.ts, which holds the reasoning and the tests). `offs[i]`
+ * is whole cycles after pace.nextStartAt, or null for the match on the field.
+ * This page used to count "rows already started" itself, and with a Nexus
+ * queue it counted wrong: Nexus drops a match the moment a queuer marks it On
+ * field, so every estimate read a cycle early. The fallback is only for a
+ * state from a desk too old to send a deck.
  */
-const norm = x => String(x ?? '').trim().toLowerCase();
-function startedRows(s) {
-  if (s.lastMatchStartedAt == null || s.scorePostedAt != null) return 0;
-  const head = s.upcoming?.[0];
-  if (!head) return 0;
-  const playing = norm(s.match?.displayName);
-  if (!playing) return s.queueFrom === 'nexus' ? 0 : 1;
-  const named = norm(head.name) === playing
-    || (norm(head.shortName) !== '' && norm(head.shortName) === playing);
-  return named ? 1 : 0;
-}
+const deckOf = s => s.deck ?? {
+  rows: s.upcoming ?? [], offs: (s.upcoming ?? []).map((_, i) => i),
+};
 
 function paint(s) {
   if (!s) return;
@@ -691,7 +682,8 @@ function paint(s) {
   if (panel === 'note') fitNote();
 
   // ---- on deck ----
-  const up = (s.upcoming ?? []).slice(0, 4);
+  const deck = deckOf(s);
+  const up = deck.rows.slice(0, 4);
   const clock = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const behind = s.pace?.behindMin;
   // The FIELD's wording when it has one. The arena derives how late the day
@@ -719,22 +711,17 @@ function paint(s) {
   // teamLabel, not the raw number: a second robot is registered under a
   // made-up number (9999) that nobody in the room knows, and prints as 100B.
   const teamSpans = list => list.map(n => `<span>${escapeHtml(teamLabel(s, n))}</span>`).join('');
-  // Rows already out: the match on the field is still row 0 of the queue until
-  // its score commits. The projected next start (pace.nextStartAt) is the first
-  // match that has NOT started, so counting from row 0 put the next match's
-  // time on the match already playing and every row after it a full cycle late.
-  const started = startedRows(s);
   // Estimated start per row: the projected next start plus one median cycle
-  // per row after the ones already out. Only shown once the pace model has
-  // real signal. A match that is playing gets the plain fact instead.
-  const eta = i => i < started
+  // per row after it, as the desk placed them. Only shown once the pace model
+  // has real signal. The match on the field gets the plain fact instead.
+  const eta = i => deck.offs[i] === null
     ? '<div class="deck-eta deck-eta--field">On field</div>'
     : s.pace?.nextStartAt && s.pace?.cycleSec
-      ? `<div class="deck-eta">~${clock(s.pace.nextStartAt + (i - started) * s.pace.cycleSec * 1000)}</div>`
+      ? `<div class="deck-eta">~${clock(s.pace.nextStartAt + deck.offs[i] * s.pace.cycleSec * 1000)}</div>`
       : '';
   $('deck').innerHTML = up.length
     ? up.map((m, i) => `
-        <div class="deck-row"${i === started ? ' data-next' : ''}>
+        <div class="deck-row"${deck.offs[i] === 0 ? ' data-next' : ''}>
           <div><div class="deck-name num">${escapeHtml(m.shortName || m.name)}</div>${eta(i)}</div>
           <div class="deck-teams deck-teams--red num" style="--n:${Math.max(1, m.red.length)}">${teamSpans(m.red)}</div>
           <div class="deck-teams deck-teams--blue num" style="--n:${Math.max(1, m.blue.length)}">${teamSpans(m.blue)}</div>

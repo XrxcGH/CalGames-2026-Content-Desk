@@ -84,6 +84,14 @@ export type DeskEventType =
   | 'match.start' | 'match.auto_end' | 'match.teleop_start'
   | 'match.shift_change' | 'match.endgame'
   | 'match.end' | 'match.aborted' | 'match.score_posted'
+  // Nothing on the field any more. Only the sample data's clear sends it, to
+  // take the sample's own match back off: no field ever unloads a match, it
+  // only loads the next. Reducer-only; nothing reacts to it.
+  | 'match.unloaded'
+  // The desk (re)started after the buzzer: the field was already past the end
+  // of the loaded match when the desk first heard from it. Reducer-only, so
+  // nothing that reacts to a real match.end (cues, coverage) fires twice.
+  | 'match.ended_before_join'
   // A score the field CHANGED after committing it. The arena suppresses its
   // score-posted notifier for a match-review edit, so the only way the desk
   // learns is by noticing the schedule poll disagree with what it recorded.
@@ -106,6 +114,8 @@ export type DeskEventType =
   // The visible-from-the-field countdown: robot setup, meeting starts.
   | 'timer.started' | 'timer.cleared'
   | 'break.started' | 'queue.updated'
+  // Which matches the field has a result for, from its schedule. See deck.ts.
+  | 'schedule.played'
   // Queuers called a match: the four minutes before the field knows anything.
   | 'queue.called'
   // Mirrored from the event's own announcement channel.
@@ -412,6 +422,14 @@ export interface UpcomingMatch {
   breakAfter?: string;
   /** This match is a replay of an earlier one, which shares its number. */
   replayOf?: string;
+  /**
+   * The PUBLISHED start time, when the source says what it is. Only Nexus
+   * rows carry it, because a Nexus row's `time` is the queuers' estimate, and
+   * "behind schedule" measured against an estimate is the desk disagreeing
+   * with Nexus, not the event running late. A field row's `time` is already
+   * the published schedule.
+   */
+  scheduled?: string | null;
 }
 
 /** How the event is actually running vs. the published schedule. */
@@ -682,6 +700,27 @@ export interface DeskState {
    */
   queueFrom: 'nexus' | 'field' | null;
   /**
+   * The last few matches Nexus has already dropped from its pending list
+   * (marked On field, or played), in its own order. Only from Nexus, empty
+   * otherwise. The match a queuer has marked On field before it started is
+   * among them, and without it the deck cannot tell where the field is. See
+   * deck.ts.
+   */
+  queueRecent: UpcomingMatch[];
+  /**
+   * The on-deck list as every screen should show it, with each row's place in
+   * time. Derived from the fields above on every event; never sent by a
+   * source. See deck.ts.
+   */
+  deck: { rows: UpcomingMatch[]; offs: (number | null)[] };
+  /**
+   * The names of every match the FIELD has a result for (Cheesy's schedule:
+   * status red won, blue won or tie). The one source that knows for certain
+   * a match has been played, which Nexus cannot say: a played match and the
+   * one being set up are both just "On field" there. Empty with no field.
+   */
+  fieldPlayed: string[];
+  /**
    * Which run of the loaded match this is. 1 unless the field replayed it.
    *
    * Cheesy re-runs a committed match under the SAME Match.Id and both commits
@@ -780,6 +819,9 @@ export const initialState = (): DeskState => ({
   highestPlayedMatch: '',
   upcoming: [],
   queueFrom: null,
+  queueRecent: [],
+  fieldPlayed: [],
+  deck: { rows: [], offs: [] },
   matchRun: 1,
   officialWinner: null,
   tiebreakReason: null,

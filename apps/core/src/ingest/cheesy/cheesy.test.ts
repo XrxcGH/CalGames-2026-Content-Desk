@@ -1785,3 +1785,45 @@ test('the field\'s own "how late is the event" figure wins over the desk\'s', ()
   adapter.ingest('eventStatus', { EarlyLateMessage: '' });
   assert.equal(bus.state.pace.officialLate, null);
 });
+
+test('a desk that starts after the buzzer says so once, in either socket order', () => {
+  const load = (adapter: CheesyAdapter, id: number) => adapter.ingest('matchLoad', {
+    Match: { Id: id, LongName: `Qualification ${id}`, Red1: 846, Red2: 1868, Red3: 253,
+             Blue1: 100, Blue2: 115, Blue3: 670 },
+  });
+  for (const order of ['load first', 'frame first']) {
+    const bus = new EventBus();
+    const types: string[] = [];
+    bus.subscribe(ev => types.push(ev.type));
+    const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+    if (order === 'load first') {
+      load(adapter, 43);
+      adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+    } else {
+      adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+      load(adapter, 43);
+    }
+    assert.equal(types.filter(t => t === 'match.ended_before_join').length, 1, order);
+    assert.ok(bus.state.matchEndedAt !== null, order);
+    assert.equal(types.includes('match.end'), false, `${order}: no real end, so no end cue`);
+
+    // The day goes on: the next match is loaded and played normally.
+    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+    load(adapter, 44);
+    assert.equal(bus.state.matchEndedAt, null, `${order}: the next match is not over`);
+    assert.equal(types.filter(t => t === 'match.ended_before_join').length, 1, order);
+  }
+});
+
+test('a desk that starts before or during a match never claims it was over', () => {
+  for (const first of [MatchState.PreMatch, MatchState.AutoPeriod, MatchState.TeleopPeriod]) {
+    const bus = new EventBus();
+    const types: string[] = [];
+    bus.subscribe(ev => types.push(ev.type));
+    const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+    adapter.ingest('matchLoad', { Match: { Id: 5, LongName: 'Qualification 5' } });
+    adapter.ingest('matchTime', { MatchState: first, MatchTimeSec: 30 });
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+    assert.equal(types.includes('match.ended_before_join'), false, String(first));
+  }
+});
