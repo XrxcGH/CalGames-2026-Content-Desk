@@ -104,7 +104,10 @@ Two ways to stop it, both of which take more than one careless click:
 - PowerShell: `Stop-Process -Name CalGamesContentDesk -Force`
 
 Either one stops the desk properly: the event log is flushed and the port is released, so the next
-double-click starts cleanly. Running the launcher FROM a PowerShell or cmd window still attaches to
+double-click starts cleanly. A double-click on a desk that is already running is answered before
+anything is unpacked or the field is scanned: it opens the running desk in the browser, and if
+start-only options were given (`/pin`, `/cheesy-host`, `/display-id`, `/no-cheesy`, `/demo`,
+`/rehearsal`) a message box says they were ignored and how to stop the desk first. Running the launcher FROM a PowerShell or cmd window still attaches to
 that window and prints everything, and Ctrl-C there works as it always did.
 
 The teardown is worth stating because it used to be false. Closing the window with the X button left

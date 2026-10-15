@@ -136,9 +136,38 @@ input:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px;
 .rankline b { font-family: var(--font-num); color: var(--cg-gold); font-size: 20px; }
 .rankline span { display: block; }
 [hidden] { display: none !important; }
+
+/* The safety message, as a banner. The venue screens and the program overlay
+   take the whole frame; a phone cannot, because the page under it is still the
+   thing somebody is trying to use, so this sits on top of it and stays on
+   screen while the page scrolls. Gold on black, never red: red already means
+   an alliance on every other screen this weekend. */
+.emerg-banner { position: sticky; top: 0; z-index: 50; display: grid; gap: 6px;
+  background: var(--cg-gold); color: var(--cg-black);
+  clip-path: var(--chamfer); --ch: 14px; padding: 14px 18px; }
+.emerg-banner[hidden] { display: none; }
+.emerg-banner b { font-family: var(--font-cond); font-weight: 700; font-size: 15px;
+  letter-spacing: .2em; text-transform: uppercase; }
+.emerg-banner .emerg-msg { font-family: var(--font-display); font-weight: 800;
+  font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.emerg-banner .emerg-detail { font-family: var(--font-cond); font-weight: 600;
+  font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
+/* Read from across a pit, when /s/watch mounts this page as a kiosk. */
+:root[data-kiosk="1"] .emerg-banner { padding: 24px 32px; gap: 12px; --ch: 20px; }
+:root[data-kiosk="1"] .emerg-banner b { font-size: 34px; }
+:root[data-kiosk="1"] .emerg-banner .emerg-msg { font-size: 56px; }
+:root[data-kiosk="1"] .emerg-banner .emerg-detail { font-size: 34px; }
 </style>
 </head>
 <body>
+  <!-- Safety message, from state.emergency. Hidden until the desk raises one,
+       and hidden again when a human clears it. role=alert so a screen reader
+       says it the moment it appears. -->
+  <div class="emerg-banner" id="emerg" hidden role="alert">
+    <b id="emergKind"></b>
+    <div class="emerg-msg" id="emergMsg"></div>
+    <div class="emerg-detail" id="emergDetail"></div>
+  </div>
   <div>
     <h1>When do we play?</h1>
     <div class="tick" aria-hidden="true"></div>
@@ -293,6 +322,25 @@ $('follow').addEventListener('submit', async e => {
 
 const clock = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
+// The same labels surfaces/program/program.js and the side screen use, so the
+// word on a phone is the word on the wall.
+const EMERG_KIND = {
+  evacuate: 'Evacuate',
+  shelter: 'Shelter in place',
+  medical: 'Medical',
+  hold: 'Hold',
+  allclear: 'All clear',
+  custom: 'Announcement',
+};
+function paintEmergency(e) {
+  $('emerg').hidden = !e;
+  if (!e) return;
+  setText($('emergKind'), EMERG_KIND[e.kind] ?? EMERG_KIND.custom);
+  setText($('emergMsg'), e.message);
+  setText($('emergDetail'), e.detail ?? '');
+  $('emergDetail').hidden = !e.detail;
+}
+
 function paintAccess(a) {
   const box = document.getElementById('access');
   const list = a?.services ?? [];
@@ -370,6 +418,9 @@ function noMatches(s, ahead) {
 
 function paint(s) {
   lastState = s;
+  // First: the safety message outranks everything below, and it has to be on
+  // screen before trimToFit() measures what is left for the match list.
+  paintEmergency(s.emergency);
   fitFollowForm(s);
   // The field's own wording first, as the side screens do: two screens in
   // one gym giving different minute figures starts arguments at the scoring
@@ -380,8 +431,17 @@ function paint(s) {
     ? (/on schedule/i.test(official) ? '' : ` · ${official}`)
     : behind == null || Math.abs(behind) < 2 ? ''
       : behind > 0 ? ` · ${behind} min behind` : ` · ${-behind} min ahead`;
+  // A break card's "back ~2:15" is stamped from the break's scheduled length,
+  // and an Awards Break routinely runs over it: past that time the line keeps
+  // the message and says "back soon", as the side screens do, rather than
+  // promising a time already gone. This repaints on every poll, so it turns
+  // over by itself. Judged on the DESK's clock (see deskSkew), as the side
+  // screens and the stream are: a pit monitor's own clock can be minutes out,
+  // and the same break must not read "back ~2:15" on one screen and "back
+  // soon" on the screen beside it.
+  const back = s.status?.backAt;
   setText($('now'), s.status
-    ? `${s.status.message}${s.status.backAt ? ` · back ~${clock(s.status.backAt)}` : ''}`
+    ? `${s.status.message}${!back ? '' : Date.now() + deskSkew < back ? ` · back ~${clock(back)}` : ' · back soon'}`
     : s.match?.displayName
       ? `Now playing · ${s.match.displayName}${behindText}`
       : 'Waiting for the field');
@@ -468,9 +528,19 @@ function trimToFit() {
   }
 }
 
+/**
+ * How far the desk's clock is ahead of this device's, from the Date header on
+ * each poll. Venue machines are not NTP-disciplined; a second's precision is
+ * plenty for a line that turns over by the minute.
+ */
+let deskSkew = 0;
 async function poll() {
-  try { paint(await fetch('/api/state').then(r => r.json())); }
-  catch { setText($('now'), 'reconnecting...'); }
+  try {
+    const res = await fetch('/api/state');
+    const at = Date.parse(res.headers?.get?.('date') ?? '');
+    if (Number.isFinite(at)) deskSkew = at - Date.now();
+    paint(await res.json());
+  } catch { setText($('now'), 'reconnecting...'); }
 }
 setInterval(poll, 5000);
 poll();

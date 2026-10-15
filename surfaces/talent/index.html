@@ -209,6 +209,10 @@ let lastMatchId = null;
 async function loadCards() {
   try {
     const res = await fetch('/api/discipline');
+    // Signed out (the desk restarted, or the sign-in ran out): the flags on
+    // screen are frozen at the last ledger, and a card issued since would
+    // never show while the tablet read "linked". Go and sign in instead.
+    if (res.status === 401) { void desk.checkSignIn(); return; }
     if (!res.ok) return;
     const next = await res.json();
     if (!next) return;

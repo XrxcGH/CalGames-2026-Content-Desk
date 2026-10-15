@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../bus.ts';
 import { TriviaStore } from './store.ts';
-import { award, standings, BASE_POINTS, PICK_BLUE, PICK_TIE, SPEED_POINTS } from './model.ts';
+import { award, standings, BASE_POINTS, PICK_BLUE, PICK_RED, PICK_TIE, SPEED_POINTS } from './model.ts';
 import type { TriviaQuestion } from './model.ts';
 import { DEFAULT_QUESTIONS, SESSIONS } from './questions.ts';
 import type { DeskEvent } from '../types.ts';
@@ -226,7 +226,7 @@ test('a tie pays the people who said tie, and never the undecided', () => {
   assert.equal(store.playView(hedger).me!.score, 0, 'not committing pays nothing');
 });
 
-test('next() discards a prediction the field has abandoned, scoring nobody', () => {
+test('next() discards a prediction whose match was never posted, scoring nobody', () => {
   const bus = new EventBus();
   bus.emit({
     type: 'match.loaded', source: 'cheesy',
@@ -239,24 +239,137 @@ test('next() discards a prediction the field has abandoned, scoring nobody', () 
   store.answer(ana, PICK_BLUE);
   assert.throws(() => store.next(), /Reveal before/, 'no skipping a live prediction');
 
-  // The host sits on it and the field moves on. match.loaded resets
-  // scorePostedAt, so reveal refuses both before and after the next score,
-  // and Next has to be the way out.
-  bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+  // The field moves on WITHOUT posting Q42 (the scorekeeper loaded Q43 in
+  // its place). This used to post Q42 first and expect the reveal to fail,
+  // which was the bug: a posted match's prediction is revealable after the
+  // next load. Here there really is no result, and the host is told exactly
+  // that rather than to wait for a post that is never coming.
   bus.emit({
     type: 'match.loaded', source: 'cheesy',
     payload: { id: 'q43', displayName: 'Qualification 43', red: [], blue: [] },
   });
-  assert.throws(() => store.reveal(), /not posted yet/);
+  assert.throws(() => store.reveal(),
+    /Qualification 42 is no longer loaded and this desk never saw its score posted/);
+  // Q43's own post is not an answer for Q42.
   bus.emit({ type: 'match.score_posted', source: 'cheesy' });
-  assert.throws(() => store.reveal(), /moved on/);
+  assert.throws(() => store.reveal(), /never saw its score posted/);
 
   const s = store.next();
   assert.equal(s.phase, 'idle');
   assert.equal(store.playView(ana).me?.score, 0, 'an abandoned prediction pays nobody');
   assert.ok(!store.bank().some(q => q.id === 'pick-qualification-42'),
     'the dead question leaves the bank');
-  store.pick();   // and the new match can be picked straight away
+  // And the next match can be picked straight away (Q43 is scored already).
+  bus.emit({
+    type: 'match.loaded', source: 'cheesy',
+    payload: { id: 'q44', displayName: 'Qualification 44', red: [], blue: [] },
+  });
+  store.pick();
+});
+
+/** The real reducer's load of one match, with a team on each side. */
+const loadMatch = (bus: EventBus, id: string, displayName: string, run = 1): void => {
+  bus.emit({
+    type: 'match.loaded', source: 'cheesy',
+    payload: { id, displayName, run, red: [{ number: 254, name: '' }], blue: [{ number: 846, name: '' }] },
+  });
+};
+
+/** A post the way the Cheesy adapter emits one: the committed totals and the arena's verdict. */
+const postScore = (bus: EventBus, red: number, blue: number, winner?: 'red' | 'blue' | 'tie'): void => {
+  bus.emit({
+    type: 'match.score_posted', source: 'cheesy',
+    payload: { red: { score: red }, blue: { score: blue }, ...(winner ? { winner } : {}) },
+  });
+};
+
+test('a prediction is revealed against its own match after the next match has loaded', () => {
+  /*
+   * The field loads the next match 20 to 60 seconds after a post, and that
+   * load clears scorePostedAt. The reveal read the live state, so a host who
+   * revealed after it was told "The score is not posted yet", which was
+   * false. And it must still be THIS match's result, not the next one's.
+   */
+  const bus = new EventBus();
+  loadMatch(bus, 'q42', 'Qualification 42');
+  const store = new TriviaStore(bus, []);
+  const blueFan = store.join('Blue Fan').playerId;
+  const redFan = store.join('Red Fan').playerId;
+  store.pick();
+  store.open(20);
+  store.answer(blueFan, PICK_BLUE);
+  store.answer(redFan, PICK_RED);
+
+  postScore(bus, 61, 88, 'blue');
+  loadMatch(bus, 'q43', 'Qualification 43');
+  assert.equal(bus.state.scorePostedAt, null, 'the next load has cleared the live result');
+  // The next match is played and posted the other way before the host gets to it.
+  postScore(bus, 120, 40, 'red');
+
+  // A result exists, so this is an ordinary question: Next does not throw
+  // the room's answers away unscored.
+  assert.throws(() => store.next(), /Reveal before/);
+  store.reveal();
+  assert.equal(store.snapshot().question?.answer, PICK_BLUE, 'Qualification 42 went blue');
+  assert.equal(store.playView(blueFan).me?.correct, true);
+  assert.ok(store.playView(blueFan).me!.score > 0, 'and the right call is paid');
+  assert.equal(store.playView(redFan).me?.score, 0);
+});
+
+test('the field\'s verdict settles a level playoff, not the totals', () => {
+  // A playoff level on points is decided on tiebreakers and the bracket
+  // advances the winner. Comparing the totals paid "Tie" for a match the
+  // arena gave to blue.
+  const bus = new EventBus();
+  loadMatch(bus, 'sf3', 'Match 3 (R1)');
+  const store = new TriviaStore(bus, []);
+  const tie = store.join('Tie Picker').playerId;
+  const blue = store.join('Blue Picker').playerId;
+  store.pick();
+  store.open(20);
+  store.answer(tie, PICK_TIE);
+  store.answer(blue, PICK_BLUE);
+
+  postScore(bus, 100, 100, 'blue');
+  store.reveal();
+  assert.equal(store.snapshot().question?.answer, PICK_BLUE);
+  assert.ok(store.playView(blue).me!.score > 0);
+  assert.equal(store.playView(tie).me?.score, 0);
+});
+
+test('a replayed match voids its first result: the prediction waits for the re-run', () => {
+  const bus = new EventBus();
+  loadMatch(bus, 'q42', 'Qualification 42');
+  const store = new TriviaStore(bus, []);
+  const ana = store.join('Ana').playerId;
+  store.pick();
+  store.open(20);
+  store.answer(ana, PICK_BLUE);
+
+  postScore(bus, 90, 60, 'red');
+  // The scorekeeper replays it: same match, loaded again.
+  loadMatch(bus, 'q42', 'Qualification 42', 2);
+  assert.throws(() => store.reveal(), /not posted yet/, 'the thrown-away run pays nobody');
+
+  postScore(bus, 70, 95, 'blue');
+  store.reveal();
+  assert.equal(store.snapshot().question?.answer, PICK_BLUE, 'the re-run decides it');
+  assert.ok(store.playView(ana).me!.score > 0);
+});
+
+test('a match that has already been scored cannot be picked', () => {
+  // The scored match stays loaded for up to a minute with its result on
+  // every screen; a prediction opened then pays whoever reads fastest.
+  const bus = new EventBus();
+  loadMatch(bus, 'q42', 'Qualification 42');
+  const store = new TriviaStore(bus, []);
+  postScore(bus, 61, 88);
+  assert.throws(() => store.pick(), /already been scored/);
+  assert.equal(store.bank().length, 0);
+
+  loadMatch(bus, 'q43', 'Qualification 43');
+  store.pick();
+  assert.deepEqual(store.bank().map(q => q.id), ['pick-qualification-43']);
 });
 
 test('a pick cannot cut in front of the question still on screen', () => {

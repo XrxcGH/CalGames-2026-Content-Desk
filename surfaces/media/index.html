@@ -180,6 +180,13 @@ function row(file) {
         headers: { 'Content-Type': 'image/png' },
         body: await file.arrayBuffer(),
       });
+      // Signed out (the desk restarted): say what to do, the way the consent
+      // list does. Deliberately no automatic trip to the sign-in page here:
+      // it would throw away every photo still waiting in this list.
+      if (res.status === 401) {
+        throw new Error('Not saved: the desk restarted and signed this page out. '
+          + 'Reload this page to sign back in, then drop this photo again.');
+      }
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'Upload failed');
 

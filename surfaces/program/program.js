@@ -11,6 +11,7 @@ import {
 } from '/shared/desk-client.js';
 import { rpStrip } from '/shared/rp.js';
 import { allianceRoster, lineupKey, availablePool, finalVerdict } from '/shared/alliance.js';
+import { overviewKeys, overviewChange, backLine } from '/s/program/decide.js';
 
 const params = applyDisplayMode();
 // ?mode=clean is the second-stream variant: minimal score bar and clock over a
@@ -26,9 +27,34 @@ fitStage($('stage'));
 // ---- screens --------------------------------------------------------------
 const SCREENS = [
   'overview', 'match', 'score', 'analysis', 'arcade', 'selection', 'explain',
-  'cardcall', 'sponsor', 'award', 'slide', 'blank',
+  'cardcall', 'sponsor', 'award', 'slide', 'replay', 'blank',
 ];
 let currentScreen = null;
+
+/**
+ * A replay is playing on program: OBS has the clip in a Media Source under
+ * this overlay, and the replay cue said so (state.replayOnAir). The overlay
+ * stands aside for the clip's length, because the screen it would otherwise
+ * show after a match is the full-frame Final, which hid the clip completely.
+ * Judged on the desk's clock, and re-judged every frame (see the ticker),
+ * because nothing arrives on the bus at the moment a clip ends.
+ */
+function replayUp(state) {
+  const r = state?.replayOnAir;
+  return !!r && desk.serverNow < r.at + r.seconds * 1000;
+}
+
+/*
+ * The pit monitors' copy of this overlay (/s/watch frames it with kiosk=1)
+ * never stands aside. Its picture underneath is the live field feed, not
+ * OBS, so the clip is not there: standing aside would put a "Replay" chip
+ * over the live field and hide the Final score from the pits.
+ */
+const KIOSK = params.get('kiosk') === '1';
+
+/** The screen this overlay should be on right now. */
+const wantedScreen = state =>
+  (CLEAN ? 'match' : !KIOSK && replayUp(state) ? 'replay' : state.screen);
 
 function showScreen(name) {
   if (!SCREENS.includes(name)) name = 'blank';
@@ -265,17 +291,63 @@ function robotCard(team, i, state) {
   const text = teamLabel(state, team.number);
   const label = escapeHtml(text);
   const len = text.length;
-  const art = media
-    ? `<div class="robot-art"><img src="${media.src}" alt=""></div>`
-    // Fallback must look deliberate, since most teams won't have a photo.
-    : `<div class="robot-art"><div class="robot-art--fallback"><span class="num" data-len="${len}">${label}</span></div></div>`;
-  return `<div class="robot reveal reveal--up" data-photo="${!!media}" style="--i:${i}">
-    ${art}
+  // data-team and data-src let a photo that lands later be swapped into this
+  // card without rebuilding it (see swapPhotos).
+  return `<div class="robot reveal reveal--up" data-photo="${!!media}" data-team="${team.number}"
+      data-src="${escapeHtml(media?.src ?? '')}" style="--i:${i}">
+    <div class="robot-art">${robotArt(media, text)}</div>
     <div class="robot-id">
       <div class="robot-num num" data-len="${len}">${label}</div>
       <div class="robot-name">${escapeHtml(team.name ?? '')}</div>
     </div>
   </div>`;
+}
+
+/** What goes inside a card's plate: the photo, or the team's printed label. */
+function robotArt(media, text) {
+  return media
+    ? `<img src="${media.src}" alt="">`
+    // Fallback must look deliberate, since most teams won't have a photo.
+    : `<div class="robot-art--fallback"><span class="num" data-len="${text.length}">${escapeHtml(text)}</span></div>`;
+}
+
+/**
+ * Bring the overview up to date with the match and the photos, rebuilding
+ * the cards only when what they say has changed. See overviewKeys: a
+ * rebuild replays the robots' entrance, and the desk pushes a whole
+ * snapshot for every photo uploaded, so rebuilding on each one made the
+ * overview blink on air once per photo.
+ */
+let ovKeys = null;
+function syncOverview(state) {
+  const match = state?.match;
+  const keys = overviewKeys(match, n => teamLabel(state, n), n => desk.mediaFor(n)?.src ?? null);
+  const change = overviewChange(ovKeys, keys);
+  ovKeys = keys;
+  if (change === 'build') buildOverview(match, state);
+  else if (change === 'photos') swapPhotos(state);
+  // The heading is text, not a card: kept current without a rebuild.
+  if (match) $('ovLabel').textContent = match.displayName ?? '';
+}
+
+/**
+ * A photo that changed for a team already on the overview goes into its card
+ * in place: the card, and the entrance it has already played, stay put.
+ * Only cards whose photo actually changed are touched, so the other robots'
+ * images are never reloaded.
+ */
+function swapPhotos(state) {
+  for (const id of ['redRobots', 'blueRobots']) {
+    for (const card of $(id).children) {
+      const team = Number(card.dataset.team);
+      const media = desk.mediaFor(team);
+      const src = media?.src ?? '';
+      if ((card.dataset.src ?? '') === src) continue;
+      card.dataset.src = src;
+      card.dataset.photo = String(!!media);
+      card.querySelector('.robot-art').innerHTML = robotArt(media, teamLabel(state, team));
+    }
+  }
 }
 
 function buildOverview(match, state) {
@@ -499,8 +571,11 @@ const STATUS_KIND = {
 };
 
 let statusLeaveTimer = null;
+/** The card being painted, so the ticker can retire its time (see paintBack). */
+let statusShown = null;
 function paintStatus(status) {
   const card = $('statusCard');
+  statusShown = status;
   if (!status) {
     // Fades out rather than disappearing between two frames, which on a
     // broadcast reads as a glitch rather than as the card retiring.
@@ -526,14 +601,25 @@ function paintStatus(status) {
   delete card.dataset.leaving;
   $('statusKind').textContent = STATUS_KIND[status.kind] ?? 'Update';
   $('statusMsg').textContent = status.message;
-  // Its own element, not a suffix on the clamped message. See .sc-back.
-  const backEl = $('statusBack');
-  backEl.hidden = !status.backAt;
-  if (status.backAt) {
-    backEl.textContent = `Back ~${new Date(status.backAt)
-      .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
-  }
+  paintBack();
   card.hidden = false;
+}
+
+/**
+ * The card's "Back ~" line, re-judged on every frame as well as every state
+ * frame: the moment the time passes is a clock, not a bus event, and a break
+ * is exactly when the bus goes quiet. See backLine for why it changes.
+ * Its own element, not a suffix on the clamped message. See .sc-back.
+ */
+const CLOCK = new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
+function paintBack() {
+  // A card on its way out keeps the line it had while it fades.
+  if (!statusShown) return;
+  const backEl = $('statusBack');
+  const text = backLine(statusShown.backAt, desk.serverNow, t => CLOCK.format(t));
+  if (text === backEl.textContent && backEl.hidden === !text) return;
+  backEl.hidden = !text;
+  backEl.textContent = text;
 }
 
 // ---- lower third ----------------------------------------------------------
@@ -631,11 +717,17 @@ startTicker(() => {
   }
 
   if (currentScreen === 'selection') paintSelectionClock(st.selection);
+  paintBack();
+
+  // The end of a replay is a moment on the clock, not an event: hand the
+  // screen back when the clip has run, and only then. Limited to the replay
+  // edge so every other switch stays with the state frame below.
+  const want = wantedScreen(st);
+  if (want !== currentScreen && (want === 'replay' || currentScreen === 'replay')) showScreen(want);
 });
 
 // ---- wiring ---------------------------------------------------------------
 let lastMatchId = null;
-let lastMatchLoaded = null;
 
 desk.on('state', state => {
   // Cards land mid-match and change what the team lines say, so the key is
@@ -643,18 +735,16 @@ desk.on('state', state => {
   // PLUS the teams: a playoff substitution re-sends matchLoad with the same id
   // and different teams, and keyed on the id the overview and the scorebug
   // went on naming the swapped-out team for the whole match.
-  const lineup = lineupKey(state);
-  const teamKey = lineup + JSON.stringify(state.cards?.byTeam ?? {})
+  const teamKey = lineupKey(state) + JSON.stringify(state.cards?.byTeam ?? {})
     + JSON.stringify(state.surrogates ?? []);
   if (teamKey !== lastMatchId) {
-    // Rebuilt for a different lineup, not just a different match id: the
-    // overview animates in, so it must not rebuild for a card alone.
-    const freshMatch = lineup !== lastMatchLoaded;
     lastMatchId = teamKey;
-    lastMatchLoaded = lineup;
-    if (freshMatch) buildOverview(state.match, state);
     paintTeams(state.match, state);
   }
+  // Keyed on its own inputs (the lineup and its photos), never on this
+  // frame having arrived: the overview animates in, so it must not rebuild
+  // for a card, a score, or a snapshot that changed nothing it shows.
+  syncOverview(state);
   paintRpStrips(state.thresholds);
   paintScore(state);
   if (state.screen === 'score') paintFinal(state);
@@ -665,13 +755,18 @@ desk.on('state', state => {
   if (state.selection) paintSelection(state.selection, state);
   paintThird(CLEAN ? null : state.lowerThird);
   paintPanel(CLEAN ? null : state.panel);
-  paintStatus(CLEAN ? null : state.status);
+  // The field's own break card yields to an award or a slide on this
+  // overlay: the scheduled Awards Break is exactly when the award plate is
+  // up, and the plate already says what is happening. The side screens still
+  // carry it. An operator's card is never hidden: it is a deliberate take.
+  const plateUp = state.screen === 'award' || state.screen === 'slide';
+  paintStatus(CLEAN || (state.status?.auto && plateUp) ? null : state.status);
   paintEmergency(state.emergency);
   paintCardCall(state.cardCall);
   paintSponsor(state.sponsor);
   paintAward(state.award);
   paintSlide(state.slide);
-  showScreen(CLEAN ? 'match' : state.screen);
+  showScreen(wantedScreen(state));
 });
 
 // The event, not the state frame, is the authority for a fresh entrance: an
@@ -992,9 +1087,13 @@ function paintCardCall(call) {
   }
 }
 
-// Media can land after the overview was built. Rebuild so a photo uploaded
-// on Sunday morning appears without anyone reloading the Browser Source.
-desk.on('ready', () => { buildOverview(desk.state?.match, desk.state); });
+// Media can land after the overview was built, so a photo uploaded on Sunday
+// morning appears without anyone reloading the Browser Source. Today it rides
+// a snapshot, whose state frame (just before 'ready') has already synced it;
+// 'media' is for a client that one day sends the photo list on its own.
+// Either way only a photo that changed is swapped, and nothing replays.
+desk.on('ready', () => { syncOverview(desk.state); });
+desk.on('media', () => { syncOverview(desk.state); });
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>

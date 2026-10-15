@@ -113,6 +113,19 @@ export class CoverageLedger {
 
   /** Exposed so a replayed log rebuilds the ledger without a bus. */
   observe(ev: DeskEvent): void {
+    /*
+     * Sample data is never history (rebuild.ts skips it for the same reason).
+     * The sample loads and starts "Qualification 42" with six real teams, and
+     * 160 s later the CLOCK, not the sample, fires match.end: so ignoring demo
+     * events alone still marked the sample match played. A sample load also
+     * forgets the current match, so that clock buzzer finds nothing to mark.
+     * Left counted, the doors check went amber over a match nobody played and
+     * the public team page told parents six real teams had played it Friday.
+     */
+    if (ev.source === 'demo') {
+      if (ev.type === 'match.loaded') this.#lastLoaded = null;
+      return;
+    }
     switch (ev.type) {
       case 'match.loaded': {
         const p = ev.payload as {

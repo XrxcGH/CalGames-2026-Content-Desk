@@ -134,6 +134,20 @@ internal static class Launcher
                        " or newer by hand and run START-DESK.cmd.");
             }
 
+            // A double-click on a desk that is already up is answered here,
+            // before anything is unpacked or scanned. It used to run all of
+            // steps 1 to 3 first: no window, a field sweep of up to 25 seconds,
+            // and the files under the running show rewritten, all to end in
+            // "open the browser". Only the no-console path takes the short
+            // cut; a console run still gets the stop-or-open question in step 4.
+            if (_silent && !PortFree(_opt.Port) && DeskAnswers(_opt.Port))
+            {
+                // So the NOTE below lands in the desk's own log, not %TEMP%.
+                string home = _opt.InstallDir ?? Path.Combine(DownloadsFolder(), FolderName);
+                if (Directory.Exists(home)) _logDir = home;
+                return ReopenRunningDesk(_opt.Port);
+            }
+
             string installDir = Step1Unpack();
             string nodeExe = Step2Node();
             string fieldHost = Step3Field();
@@ -983,6 +997,83 @@ internal static class Launcher
         catch { }
     }
 
+    /*
+     * Options that only mean something at the moment a desk STARTS.
+     *
+     * The field bridge, the practice mode, the rehearsal tag and the PIN are
+     * all fixed when node is launched (the bridge is argv-only on purpose), so
+     * handing any of them to a desk that is already up changes nothing. A
+     * double-click that only reopened the browser swallowed them without a
+     * word: the coordinator typed the field address, saw the browser open,
+     * and waited for a green dot that could never come. The honest answer is
+     * to say so, and to say how to get a desk that will listen.
+     */
+    private static List<string> StartOnlyOptionsGiven()
+    {
+        List<string> given = new List<string>();
+        if (_opt.PinGiven) given.Add("/pin");
+        if (_opt.CheesyHost != null) given.Add("/cheesy-host");
+        if (_opt.DisplayIdGiven) given.Add("/display-id");
+        if (_opt.NoCheesy) given.Add("/no-cheesy");
+        if (_opt.Demo) given.Add("/demo");
+        if (_opt.Rehearsal) given.Add("/rehearsal");
+        return given;
+    }
+
+    /// The console version of the notice below, for a run that has a window.
+    private static void NoteIgnoredStartOptions()
+    {
+        List<string> unused = StartOnlyOptionsGiven();
+        if (unused.Count == 0) return;
+        Warn(string.Join(", ", unused) + " ignored: the desk that is already running was not restarted.");
+        Detail("to use them, stop the desk (Task Manager, find \"" + AppTitle + "\", End task) and start again.");
+    }
+
+    /// A desk is already answering on this port and nobody is at a console.
+    /// Opens it, unless start-only options came with the double-click, in which
+    /// case the browser opening would look like they had worked. Then it says
+    /// what was ignored and how to stop the desk, and leaves the desk alone.
+    private static int ReopenRunningDesk(int port)
+    {
+        List<string> unused = StartOnlyOptionsGiven();
+        if (unused.Count == 0)
+        {
+            if (!_opt.NoBrowser)
+            {
+                try { Process.Start("http://localhost:" + port + "/"); } catch { }
+            }
+            Ok("a desk is already running here" + (_opt.NoBrowser ? "" : "; opened it in the browser"));
+            return 0;
+        }
+
+        ShowNotice(
+            "A content desk is already running on this computer, so " + string.Join(", ", unused)
+              + (unused.Count == 1 ? " was" : " were") + " ignored. Nothing was changed, and the running desk was not touched."
+              + Environment.NewLine + Environment.NewLine
+              + "Those options only take effect when the desk starts. To use them, stop the desk first: "
+              + "press Ctrl+Shift+Esc to open Task Manager, find \"" + AppTitle + "\", select it and press End task. "
+              + "Then start the desk again the same way."
+              + Environment.NewLine + Environment.NewLine
+              + "To go back to the desk that is running, open http://localhost:" + port + "/ in your browser.");
+        return 0;
+    }
+
+    /// Something the operator should read on the double-click path, where there
+    /// is no window to print it in. Not an error: it carries no icon of alarm
+    /// and does not claim that nothing is running.
+    private static void ShowNotice(string text)
+    {
+        WriteLog("NOTE: " + text.Replace(Environment.NewLine, " "));
+        if (!_silent) return;
+        try
+        {
+            // MB_ICONINFORMATION | MB_SETFOREGROUND: a notice that opens behind
+            // the browser or OBS is the same silence this exists to end.
+            MessageBox(IntPtr.Zero, text, AppTitle, 0x40 | 0x10000);
+        }
+        catch { }
+    }
+
     /// The port is taken. Almost always that is a desk left over from an earlier
     /// double-click, which is the one case a volunteer cannot diagnose and can
     /// fix in one keystroke. Returns -1 to carry on starting, or the exit code.
@@ -1020,22 +1111,23 @@ internal static class Launcher
         // browser tab, did NOTHING visible at all. Open the desk that is
         // already running instead. It is the safe answer (it never stops a
         // show) and it is what they were trying to get back to.
-        if (_silent)
-        {
-            try { Process.Start("http://localhost:" + port + "/"); } catch { }
-            Ok("a desk is already running here; opened it in the browser");
-            return 0;
-        }
+        if (_silent) return ReopenRunningDesk(port);
+
         // Only ever offer to kill something that answered as our own desk.
         if (pid <= 0 || _opt.NoWait)
         {
             Detail("close the other window and try again, or:  START-DESK.cmd /port:" + (port + 1));
+            NoteIgnoredStartOptions();
             Hold();
             return 1;
         }
 
         Console.WriteLine();
         Console.WriteLine("  [S] stop it and start fresh      [O] open the one already running      [Q] quit");
+        // Said before the choice, not after: [O] never reads these options.
+        List<string> unused = StartOnlyOptionsGiven();
+        if (unused.Count > 0)
+            Detail("[O] ignores " + string.Join(", ", unused) + ". Only [S] starts the desk with them.");
         while (true)
         {
             ConsoleKey key;
@@ -1047,6 +1139,7 @@ internal static class Launcher
             {
                 try { Process.Start("http://localhost:" + port + "/"); } catch { }
                 Ok("opened the desk that was already running");
+                NoteIgnoredStartOptions();
                 Hold();
                 return 0;
             }
@@ -1433,6 +1526,9 @@ internal static class Launcher
          * event announced itself as the same name.
          */
         public string DisplayId = "contentdesk1";
+        /// True only when /display-id: was typed this time, for the same reason
+        /// as PinGiven: the default is a value, so the value alone cannot say.
+        public bool DisplayIdGiven;
         public bool Demo;
         /// A practice run the crew drives BY HAND on the event machine. The
         /// desk rebuilds the day from the day's log at boot, so an untagged
@@ -1467,7 +1563,11 @@ internal static class Launcher
                 }
                 else if (lower.StartsWith("/dir:", StringComparison.Ordinal)) o.InstallDir = a.Substring(5);
                 else if (lower.StartsWith("/cheesy-host:", StringComparison.Ordinal)) o.CheesyHost = a.Substring(13);
-                else if (lower.StartsWith("/display-id:", StringComparison.Ordinal)) o.DisplayId = a.Substring(12);
+                else if (lower.StartsWith("/display-id:", StringComparison.Ordinal))
+                {
+                    o.DisplayId = a.Substring(12);
+                    o.DisplayIdGiven = o.DisplayId.Length > 0;
+                }
                 else if (lower.StartsWith("/port:", StringComparison.Ordinal))
                 {
                     int p;

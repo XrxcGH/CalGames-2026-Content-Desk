@@ -7,6 +7,7 @@
  */
 
 import { connect, startTicker, clockDisplay, PHASE_LABEL, REBUILT } from '/shared/desk-client.js';
+import { wallAt as wallOn, markerWindow } from '/s/replay/timeline.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('replay');
@@ -70,10 +71,16 @@ let inClock = null;
 let outClock = null;
 let lastClip = null;
 
-/** Match clock -> wall ms. Exact, because match start is a logged timestamp. */
-function wallAt(clock) {
-  const started = desk.state?.matchStartedAt ?? desk.state?.lastMatchStartedAt;
-  return started ? started + (clock - T0) * 1000 : null;
+/**
+ * Match clock -> wall ms. Exact, because match start and the teleop re-anchor
+ * are logged timestamps; timeline.js says why there are two of them.
+ */
+function wallAt(clock) { return wallOn(desk.state, clock, T0); }
+
+/** Frame a marker by its own wall time. See markerWindow. */
+function frameMarker(m) {
+  const w = markerWindow(desk.state, m, T0);
+  if (w) setBounds(w[0], w[1]);
 }
 
 function setBounds(a, b) {
@@ -124,17 +131,16 @@ function paintMarkers() {
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', `Frame ${label} at ${clockDisplay(m.matchClock)}`);
     // Frame the marker: enough lead-in to see the build-up, enough tail to see
-    // the result. A human hits the button late, so the marker itself already
-    // sits 2s back (see the desk console).
-    const frameMarker = () => setBounds(m.matchClock - 6, m.matchClock + 4);
-    el.onclick = ev => { ev.stopPropagation(); frameMarker(); };
+    // the result. A human hits the button late, so a manual mark already
+    // sits 2s back (see the desk console and markersSince).
+    el.onclick = ev => { ev.stopPropagation(); frameMarker(m); };
     el.addEventListener('keydown', ev => {
       if (ev.key !== 'Enter' && ev.key !== ' ') return;
       ev.preventDefault();
       // Stop this Enter from also reaching the page-level shortcut (Enter = Cut
       // clip): the marker's own Enter means "frame this marker", not "cut now".
       ev.stopPropagation();
-      frameMarker();
+      frameMarker(m);
     });
     track.parentElement.appendChild(el);
   }
@@ -173,7 +179,7 @@ function paintMarkers() {
       if (m.matchClock === null || m.matchClock === undefined) {
         row.disabled = true;
       } else {
-        row.onclick = () => setBounds(m.matchClock - 6, m.matchClock + 4);
+        row.onclick = () => frameMarker(m);
       }
       return row;
     })
@@ -267,6 +273,11 @@ async function cut() {
 }
 
 async function cutMatch() {
+  // One at a time: a second press re-cut the same match under the same name
+  // while the first ffmpeg still had its files open. The cut runs for many
+  // seconds and the button gave no sign it had been heard.
+  if ($('cutMatch').disabled) return;
+  $('cutMatch').disabled = true;
   const mine = ++cutSeq;
   say('Cutting full match video...');
   try {
@@ -275,7 +286,11 @@ async function cutMatch() {
     showClip(clip);
     say(`Match video ready · ${clip.seconds.toFixed(1)}s · ${clip.parts} part(s)` +
       (clip.parts > 1 ? ' (referee delay cut out)' : ''));
-  } catch (err) { if (mine === cutSeq) say(err.message, true); }
+  } catch (err) {
+    if (mine === cutSeq) say(err.message, true);
+  } finally {
+    $('cutMatch').disabled = false;
+  }
 }
 
 function showClip(clip) {
@@ -313,14 +328,56 @@ async function sendFrame() {
   } catch (err) { say(err.message, true); }
 }
 
+/*
+ * Take, and then wait to be told.
+ *
+ * This used to print "Sent to program." the moment the event left, and the
+ * clip never went anywhere: the only thing listening cut OBS to the replay
+ * scene, which held the overlay over nothing, and only when its autopilot
+ * happened to be armed. The desk's replay cue now loads the clip into OBS and
+ * answers with replay.on_air or replay.failed, carrying this take's id, and
+ * only that answer is allowed to say "on program". No answer at all is said
+ * out loud too: the operator must not talk over a replay nobody can see.
+ */
+let pendingTake = null;
+const TAKE_WAIT_MS = 20_000;   // four OBS requests at four seconds each, and slack
+
 function take() {
   if (!lastClip) return say('Nothing cut yet.', true);
-  // emit() drops silently on a closed socket, so "Sent" would be a lie there.
+  // emit() drops silently on a closed socket, so waiting would be a lie there.
   // A server-side rejection comes back as 'denied' and overwrites this line.
   if (!desk.connected) return say('Link is down. Wait for the dot, then try again.', true);
-  desk.emit({ type: 'replay.play', payload: lastClip });
-  say('Sent to program.');
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  if (pendingTake) clearTimeout(pendingTake.timer);
+  pendingTake = {
+    id,
+    timer: setTimeout(() => {
+      if (pendingTake?.id !== id) return;
+      pendingTake = null;
+      say('No answer from the desk about that take. Look at the program feed before '
+        + 'anybody talks over a replay.', true);
+    }, TAKE_WAIT_MS),
+  };
+  desk.emit({ type: 'replay.play', payload: { ...lastClip, takeId: id } });
+  say('Taking to program...');
 }
+
+/** The answer to THIS console's latest take, or null for anyone else's. */
+function answerFor(ev) {
+  if (!pendingTake || ev?.source !== 'cue' || ev.payload?.takeId !== pendingTake.id) return null;
+  clearTimeout(pendingTake.timer);
+  pendingTake = null;
+  return ev.payload;
+}
+
+desk.on('replay.on_air', ev => {
+  const p = answerFor(ev);
+  if (p) say(`On program · ${Number(p.seconds).toFixed(1)}s`);
+});
+desk.on('replay.failed', ev => {
+  const p = answerFor(ev);
+  if (p) say(`NOT on air. ${p.error}`, true);
+});
 
 $('cut').onclick = cut;
 $('cutMatch').onclick = cutMatch;
@@ -360,6 +417,8 @@ addEventListener('keydown', e => {
 let signedOut = false;
 desk.on('denied', () => {
   signedOut = true;
+  // A refused take gets no answer; the signed-out line below is the answer.
+  if (pendingTake) { clearTimeout(pendingTake.timer); pendingTake = null; }
   $('dot').dataset.up = 'false';
   $('linkText').textContent = 'signed out: reload this page to sign in again';
   say('Signed out. Reload this page and sign in again.', true);

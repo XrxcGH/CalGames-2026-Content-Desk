@@ -61,10 +61,28 @@ export interface AllianceScoreFields {
 export interface RealtimeScoreMessage {
   Red?: AllianceScoreFields;
   Blue?: AllianceScoreFields;
+  /** Per-team cards, keyed by team number. Qualification and practice only. */
   RedCards?: Record<string, string>;
   BlueCards?: Record<string, string>;
+  /**
+   * A playoff card, which belongs to the ALLIANCE: "yellow", "red" or empty.
+   * The referee panel sets this and empties the per-team map in the same
+   * breath (web/referee_panel.go), so in a playoff RedCards is always empty
+   * and this is the only place a card appears.
+   */
+  PlayoffRedAllianceCard?: string;
+  PlayoffBlueAllianceCard?: string;
   MatchState?: MatchState;
 }
+
+/**
+ * The `audienceDisplayMode` notifier is a bare string, arena.AudienceDisplayMode:
+ * "blank", "intro", "match", "score", "bracket", "timeout", "allianceSelection",
+ * "sponsor", "logo", "logoLuma". The commit sets "score"; the arena's own
+ * automation (AutomateAudienceDisplay) moves it on 20 s later, or the
+ * scorekeeper does by hand.
+ */
+export type AudienceDisplayModeMessage = string;
 
 export interface MatchTimeMessage {
   MatchState?: MatchState;
@@ -142,6 +160,14 @@ export interface MatchLoadMessage {
    */
   RedOffFieldTeams?: (CheesyTeam | null)[];
   BlueOffFieldTeams?: (CheesyTeam | null)[];
+  /**
+   * The alliance is carrying a yellow card from an EARLIER playoff match.
+   * Standing state, not a new card: the card itself reached the desk on the
+   * realtime frames of the match it was issued in, and announcing it again on
+   * every load would count one yellow once per match.
+   */
+  PlayoffRedAllianceYellowCard?: boolean;
+  PlayoffBlueAllianceYellowCard?: boolean;
 }
 
 /**

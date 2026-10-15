@@ -13,7 +13,10 @@
  *   arms here, before any countdown) -> StartMatch -> AutoPeriod with auto
  *   fuel -> PausePeriod (auto winner decided on fuel) -> TeleopPeriod with
  *   alternating hub shifts via ActiveRemainingSec -> endgame tower climbs ->
- *   PostMatch -> scorePosted with bonus RPs -> field reset -> next match.
+ *   PostMatch -> scorePosted with bonus RPs, and in the SAME breath the next
+ *   match loaded (the arena's commitAndPost: commit, audience display to
+ *   "score", reset, load next) -> 20 s later the arena's own automation moves
+ *   its audience display on to "intro" -> field reset -> robots link -> ...
  *
  *   node --experimental-strip-types apps/core/src/ingest/cheesy/fake-arena.ts \
  *     [--port 8091] [--speed 4]
@@ -40,11 +43,21 @@ const SOCKET_PATHS: readonly string[] = ALLOWED_SOCKETS;
 // socket, so the desk, which subscribes to all six, ingested six copies of
 // every frame: six match.loaded per load and sixfold robot_down markers,
 // none of which happens against a real field.
+//
+// And on EVERY endpoint that carries it, copied from each handler's
+// HandleNotifiers list (web/api.go, web/*_display.go). The desk takes each
+// notifier from whichever socket delivers it first, so the commit's
+// scorePosted (audience only) and the next match's matchLoad (usually the
+// arena API's) race on two connections exactly as they do at the venue.
 const ROUTES: Record<string, readonly string[]> = {
-  matchLoad: ['/api/arena/websocket', '/displays/audience/websocket'],
-  matchTime: ['/api/arena/websocket', '/displays/audience/websocket'],
-  realtimeScore: ['/displays/audience/websocket'],
+  matchLoad: ['/api/arena/websocket', '/displays/audience/websocket',
+    '/displays/field_monitor/websocket', '/displays/queueing/websocket',
+    '/displays/bracket/websocket'],
+  matchTime: ['/api/arena/websocket', '/displays/audience/websocket',
+    '/displays/field_monitor/websocket', '/displays/queueing/websocket'],
+  realtimeScore: ['/displays/audience/websocket', '/displays/field_monitor/websocket'],
   scorePosted: ['/displays/audience/websocket'],
+  audienceDisplayMode: ['/displays/audience/websocket'],
   allianceSelection: ['/displays/audience/websocket'],
   arenaStatus: ['/displays/field_monitor/websocket'],
 };
@@ -118,6 +131,9 @@ export function startFakeArena(opts: FakeArenaOpts) {
   const timers = new Set<NodeJS.Timeout>();
   let stopped = false;
 
+  let resolveReady: (port: number) => void = () => {};
+  const ready = new Promise<number>(r => { resolveReady = r; });
+
   const http = createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0]!;
     const json = (body: unknown): void => {
@@ -141,8 +157,19 @@ export function startFakeArena(opts: FakeArenaOpts) {
   // Latest frame per notifier. Real Cheesy sends each notifier's current
   // payload the moment a display subscribes, so a desk that boots mid-match
   // still knows who is on the field. The fake must do the same.
-  const latest = new Map<string, unknown>();
-  const REPLAY_ORDER = ['matchLoad', 'matchTime', 'arenaStatus', 'realtimeScore'];
+  //
+  // All of them, the last result and the display mode included: a
+  // reconnecting desk is sent the previous match's score while the arena has
+  // the next one loaded, and has to know that is not news. Seeded as a
+  // freshly started arena has them: a blank screen, and a "result" for the
+  // empty match it boots with, which is a test match.
+  const latest = new Map<string, unknown>([
+    ['audienceDisplayMode', 'blank'],
+    ['scorePosted', { Match: { Id: 0, Type: 0 }, RedScoreSummary: { Score: 0 }, BlueScoreSummary: { Score: 0 } }],
+  ]);
+  const REPLAY_ORDER = [
+    'audienceDisplayMode', 'arenaStatus', 'matchLoad', 'matchTime', 'realtimeScore', 'scorePosted',
+  ];
 
   const wss = new WebSocketServer({ noServer: true });
   http.on('upgrade', (req, socket, head) => {
@@ -214,27 +241,50 @@ export function startFakeArena(opts: FakeArenaOpts) {
     Score: autoFuel + teleFuel + autoTower + teleTower + fouls,
   });
 
-  function runMatch(): void {
-    if (stopped) return;
+  /*
+   * The arena's LoadMatch: matchLoad, then straight behind it an all-zero
+   * realtimeScore. The matchTime that says PreMatch follows on the arena
+   * loop's next tick. A number for Type, as on the wire (model.MatchType is a
+   * plain Go int); this used to send the string "qualification", which the
+   * desk cannot map, so rehearsals never exercised anything keyed on the kind
+   * of match.
+   */
+  const loadMatch = (): void => {
     const name = `Qualification ${matchNumber}`;
     log(`loading ${name}`);
-
-    // t=0: scorekeeper loads the match. Field state resets to PreMatch.
-    send('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
     send('matchLoad', {
       Match: {
-        Id: matchNumber, Type: 'qualification', TypeOrder: matchNumber,
+        Id: matchNumber, Type: 2, TypeOrder: matchNumber,
         LongName: name, ShortName: `Q${matchNumber}`,
-        Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670,
+        Red1: 846, Red2: 9999, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670,
       },
       Teams: TEAMS,
-      Rankings: { '846': 2, '1868': 4, '253': 8, '100': 5, '115': 6, '670': 7 },
+      Rankings: { '846': 1, '9999': 16, '253': 13, '100': 9, '115': 5, '670': 12 },
     });
+    send('realtimeScore', {
+      MatchState: MatchState.PreMatch,
+      Red: { ScoreSummary: summary(0, 0, 0, 0, 0), ActiveRemainingSec: 0 },
+      Blue: { ScoreSummary: summary(0, 0, 0, 0, 0), ActiveRemainingSec: 0 },
+      RedCards: {}, BlueCards: {},
+    });
+    send('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+  };
+
+  /**
+   * One match, from the moment it is loaded. `resetMs` is the field reset
+   * before its robots start linking: none for the first match of the run,
+   * and the referees' and volunteers' half minute for every match loaded
+   * straight off a commit, which is what keeps the next start well clear of
+   * the arena's own 20 s on the score.
+   */
+  function runMatch(resetMs: number): void {
+    if (stopped) return;
+    const name = `Qualification ${matchNumber}`;
 
     // Robots link up one at a time over ~9s. The desk must arm only when the
     // LAST one links: that moment precedes the announcer's countdown.
     for (let linked = 1; linked <= 6; linked++) {
-      at(1500 * linked, () => send('arenaStatus', {
+      at(resetMs + 1500 * linked, () => send('arenaStatus', {
         MatchId: matchNumber,
         AllianceStations: stations(linked),
         MatchState: MatchState.PreMatch,
@@ -242,11 +292,13 @@ export function startFakeArena(opts: FakeArenaOpts) {
       }));
     }
 
-    // ~8s of announcer countdown after the field goes green, then start.
-    const T0 = 9000 + 8000;                       // wall start of AUTO
+    // ~8s of announcer countdown after the field goes green, then start. The
+    // arena's own audience display goes to the match screen at the start.
+    const T0 = resetMs + 9000 + 8000;             // wall start of AUTO
     at(T0, () => {
       log('match start');
       send('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+      send('audienceDisplayMode', 'match');
       send('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 0 });
     });
 
@@ -324,13 +376,22 @@ export function startFakeArena(opts: FakeArenaOpts) {
         Blue: { ScoreSummary: summary(9, blueFuel - 9, 0, blueTower, 0), ActiveRemainingSec: 0 },
       });
     });
+    // matchEndScoreDwellSec: the arena blanks its own screen 3 s after.
+    at(T_END + 3_000, () => send('audienceDisplayMode', 'blank'));
 
-    // Referees deliberate ~8s, then the score posts with bonus RPs.
+    /*
+     * Referees deliberate ~8s, then the scorekeeper presses Commit, and the
+     * arena does ALL of this in one handler (commitPostAndLoadNextMatch):
+     * scorePosted, its audience display to "score", ResetMatch, and
+     * LoadNextMatch. The field never sits on the played match after a
+     * commit. This script used to wait 8 s before loading the next match,
+     * which hid the one thing the desk most needed to cope with: the final
+     * score wiped by the next load the instant it posted.
+     */
     at(T_END + 8_000, () => {
       log('score posted');
       send('scorePosted', {
-        MatchType: 'qualification',
-        Match: { Id: matchNumber, LongName: name, ShortName: `Q${matchNumber}` },
+        Match: { Id: matchNumber, Type: 2, TypeOrder: matchNumber, LongName: name, ShortName: `Q${matchNumber}` },
         RedScoreSummary: {
           ...summary(4, redFuel - 4, 15, redTower - 15, 0),
           EnergizedBonusRankingPoint: redFuel >= 100,
@@ -345,25 +406,38 @@ export function startFakeArena(opts: FakeArenaOpts) {
         },
         RedRankingPoints: (redFuel + redTower > blueFuel + blueTower ? 3 : 0) + (redFuel >= 100 ? 1 : 0) + (redTower >= 50 ? 1 : 0),
         BlueRankingPoints: (blueFuel + blueTower > redFuel + redTower ? 3 : 0) + (blueFuel >= 100 ? 1 : 0) + (blueTower >= 50 ? 1 : 0),
+        RedWon: redFuel + redTower > blueFuel + blueTower,
+        BlueWon: blueFuel + blueTower > redFuel + redTower,
+        TiebreakReason: '',
       });
-    });
-
-    // Field reset, next match.
-    at(T_END + 16_000, () => {
-      send('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+      send('audienceDisplayMode', 'score');
       matchNumber++;
-      runMatch();
+      loadMatch();
+      // AutomateAudienceDisplay: 20 s on the score, then the next match's
+      // intro. That is the desk's cue to let the next match in. Logged, so a
+      // rehearsal (and commit.test.ts) can see the desk waited for it.
+      at(20_000, () => {
+        log('audience display to intro');
+        send('audienceDisplayMode', 'intro');
+      });
+      runMatch(30_000);
     });
   }
 
   // Loopback explicitly: a host-less listen() binds every interface, and a
   // rehearsal box plugged into the venue network must not be reachable from it.
   http.listen(opts.port, '127.0.0.1', () => {
-    log(`listening on 127.0.0.1:${opts.port} at ${speed}x speed`);
-    runMatch();
+    const address = http.address();
+    const port = typeof address === 'object' && address ? address.port : opts.port;
+    log(`listening on 127.0.0.1:${port} at ${speed}x speed`);
+    resolveReady(port);
+    loadMatch();
+    runMatch(0);
   });
 
   return {
+    /** The port actually bound, once listening: pass `port: 0` for any free one. */
+    ready,
     close(): void {
       stopped = true;
       for (const t of timers) clearTimeout(t);

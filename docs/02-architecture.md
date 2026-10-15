@@ -96,7 +96,7 @@ Deliberately a superset of Cheesy Arena's notifiers so the Cheesy adapter is nea
 `queue.updated` · `rankings.updated`
 
 **Production**: `graphic.show` · `graphic.hide` · `lower_third.show` · `lower_third.hide` ·
-`replay.marker` · `replay.clip_ready` · `replay.play` · `telestrator.stroke` · `telestrator.undo` ·
+`replay.marker` · `replay.clip_ready` · `replay.play` · `replay.on_air` · `replay.failed` · `telestrator.stroke` · `telestrator.undo` ·
 `telestrator.clear` · `telestrator.frame` · `telestrator.hide` · `screen.change` · `scene.change` ·
 `sound.play`
 

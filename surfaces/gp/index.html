@@ -91,9 +91,33 @@ input:focus-visible, textarea:focus-visible {
   font-family: var(--font-cond); font-weight: 700; font-size: 14px;
   letter-spacing: .1em; text-transform: uppercase; }
 .again:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -6px; }
+
+/* The safety message, as a banner. The venue screens and the program overlay
+   take the whole frame; a phone cannot, because the page under it is still the
+   thing somebody is trying to use, so this sits on top of it and stays on
+   screen while the page scrolls. Gold on black, never red: red already means
+   an alliance on every other screen this weekend. */
+.emerg-banner { position: sticky; top: 0; z-index: 50; display: grid; gap: 6px;
+  background: var(--cg-gold); color: var(--cg-black);
+  clip-path: var(--chamfer); --ch: 14px; padding: 14px 18px; }
+.emerg-banner[hidden] { display: none; }
+.emerg-banner b { font-family: var(--font-cond); font-weight: 700; font-size: 15px;
+  letter-spacing: .2em; text-transform: uppercase; }
+.emerg-banner .emerg-msg { font-family: var(--font-display); font-weight: 800;
+  font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.emerg-banner .emerg-detail { font-family: var(--font-cond); font-weight: 600;
+  font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
+  <!-- Safety message, from state.emergency. Hidden until the desk raises one,
+       and hidden again when a human clears it. role=alert so a screen reader
+       says it the moment it appears. -->
+  <div class="emerg-banner" id="emerg" hidden role="alert">
+    <b id="emergKind"></b>
+    <div class="emerg-msg" id="emergMsg"></div>
+    <div class="emerg-detail" id="emergDetail"></div>
+  </div>
   <h1>Shout-outs<div class="tick"></div></h1>
   <p class="sub">A volunteer who went out of their way, a team that lent you a
     part, a mentor, the ref crew: tell the whole gym. A content desk volunteer
@@ -147,6 +171,42 @@ input:focus-visible, textarea:focus-visible {
 
 <script type="module">
 const $ = id => document.getElementById(id);
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+
+// The same labels surfaces/program/program.js and the side screen use, so the
+// word on a phone is the word on the wall.
+const EMERG_KIND = {
+  evacuate: 'Evacuate',
+  shelter: 'Shelter in place',
+  medical: 'Medical',
+  hold: 'Hold',
+  allclear: 'All clear',
+  custom: 'Announcement',
+};
+function paintEmergency(e) {
+  $('emerg').hidden = !e;
+  if (!e) return;
+  setText($('emergKind'), EMERG_KIND[e.kind] ?? EMERG_KIND.custom);
+  setText($('emergMsg'), e.message);
+  setText($('emergDetail'), e.detail ?? '');
+  $('emergDetail').hidden = !e.detail;
+}
+
+// This page does not otherwise read the desk's state, so the safety message
+// needs a read of its own. Slow and quiet: a phone that is offline keeps
+// whatever banner it already had rather than clearing a safety message on a
+// failed request, and a hidden tab does not poll at all (it catches up the
+// moment it is shown again).
+async function pollEmergency() {
+  if (document.hidden) return;
+  try {
+    const res = await fetch('/api/state', { cache: 'no-store' });
+    if (res.ok) paintEmergency((await res.json()).emergency ?? null);
+  } catch { /* offline: leave the banner as it is */ }
+}
+setInterval(pollEmergency, 8000);
+document.addEventListener('visibilitychange', pollEmergency);
+pollEmergency();
 
 $('msg').addEventListener('input', () => {
   $('count').textContent = `${200 - $('msg').value.length} left`;

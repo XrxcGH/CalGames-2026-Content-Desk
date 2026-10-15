@@ -872,36 +872,103 @@ test('an arena that sends no match id on scorePosted is unaffected', () => {
   assert.equal(bus.state.screen, 'score');
 });
 
-test('a reconnect echo of matchLoad in the post-score gap does not wipe the score', () => {
-  // The field sits in PreMatch for minutes after a score posts, and Cheesy
-  // replays every notifier when a display socket reconnects. That echo used
-  // to run the full load reset: score off air, program yanked back to the
-  // finished match's overview, the timestamps the gap cue and publish cut
-  // key off nulled. Same id, no IsReplay, score still on the board = echo.
+test('a reconnect in the post-score gap does not wipe the score', () => {
+  // This test used to say the field sits in PreMatch for minutes after a
+  // score posts, with the finished match still loaded. No real arena does:
+  // commitAndPost loads the NEXT match in the same handler, and the desk
+  // holds that load back while the result is up (commit.test.ts). So what a
+  // reconnecting display is sent in this gap is the NEXT match's load, the
+  // finished match's result, and the pre-match clock and score. None of it
+  // may wipe the result, re-reveal it, or load the next match early.
   const bus = new EventBus();
   const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
-  const load = { Match: { Id: 42, LongName: 'Qualification 12', Type: 'qualification' } };
+  const q12 = { Match: { Id: 12, LongName: 'Qualification 12', Type: 2, TypeOrder: 12 } };
+  const q13 = { Match: { Id: 13, LongName: 'Qualification 13', Type: 2, TypeOrder: 13 } };
+  const posted = {
+    Match: { Id: 12, LongName: 'Qualification 12', Type: 2 },
+    RedScoreSummary: { Score: 100 }, BlueScoreSummary: { Score: 80 },
+  };
+  const zeroFrame = {
+    MatchState: MatchState.PreMatch, Red: { ScoreSummary: {} }, Blue: { ScoreSummary: {} },
+  };
 
-  adapter.ingest('matchLoad', load);
+  adapter.ingest('matchLoad', q12);
   adapter.ingest('matchTime', { MatchState: MatchState.StartMatch });
   adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
-  adapter.ingest('scorePosted', {
-    Match: { Id: 42, LongName: 'Qualification 12', Type: 'qualification' },
-    RedScoreSummary: { Score: 100 }, BlueScoreSummary: { Score: 80 },
-  });
+  // The commit, as the arena sends it.
+  adapter.ingest('scorePosted', posted);
+  adapter.ingest('audienceDisplayMode', 'score');
+  adapter.ingest('matchLoad', q13);
+  adapter.ingest('realtimeScore', zeroFrame);
   adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
-  assert.ok(bus.state.scorePostedAt !== null, 'fixture sanity: a score is on the board');
+  const postedAt = bus.state.scorePostedAt;
+  assert.ok(postedAt !== null, 'fixture sanity: a score is on the board');
 
-  const loadsBefore = bus.recent.filter(e => e.type === 'match.loaded').length;
-  adapter.ingest('matchLoad', load);                    // the reconnect echo
-  assert.equal(bus.recent.filter(e => e.type === 'match.loaded').length, loadsBefore,
-    'the echo must not re-emit match.loaded');
-  assert.ok(bus.state.scorePostedAt !== null, 'the posted score must stay on air');
+  const count = (type: string) => bus.recent.filter(e => e.type === type).length;
+  const loadsBefore = count('match.loaded');
+  // The reconnect: every notifier's current value, in the audience
+  // display's subscription order.
+  adapter.ingest('audienceDisplayMode', 'score');
+  adapter.ingest('matchLoad', q13);
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+  adapter.ingest('realtimeScore', zeroFrame);
+  adapter.ingest('scorePosted', posted);
+  assert.equal(count('match.loaded'), loadsBefore, 'the echo must not load anything');
+  assert.equal(count('match.score_posted'), 1, 'nor reveal the result a second time');
+  assert.equal(bus.state.scorePostedAt, postedAt, 'the posted score stays on air');
+  assert.equal(bus.state.match?.displayName, 'Qualification 12');
+  assert.equal(bus.state.score.red.total, 100);
 
-  // A GENUINE scorekeeper re-run of the same match says so, and still resets.
-  adapter.ingest('matchLoad', { ...load, IsReplay: true });
-  assert.equal(bus.recent.filter(e => e.type === 'match.loaded').length, loadsBefore + 1,
+  // A GENUINE scorekeeper re-run of the finished match says so, and resets.
+  adapter.ingest('matchLoad', { ...q12, IsReplay: true });
+  assert.equal(count('match.loaded'), loadsBefore + 1,
     'a flagged replay is a real re-run and must reset');
+  assert.equal(bus.state.match?.displayName, 'Qualification 12');
+  assert.equal(bus.state.matchRun, 2);
+  assert.equal(bus.state.scorePostedAt, null);
+  adapter.stop();
+});
+
+test('the finished match re-sent without the replay flag is an echo, not a re-run', () => {
+  // A real Cheesy loads a committed match with IsReplay set, always. The
+  // same id without it, while that match's score is posted, is a socket
+  // replaying an old frame (or an arena build that posts without moving on),
+  // and letting it in wiped the result and put the dead match's overview up.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  const q12 = { Match: { Id: 12, LongName: 'Qualification 12', Type: 2, TypeOrder: 12 } };
+  const q13 = { Match: { Id: 13, LongName: 'Qualification 13', Type: 2, TypeOrder: 13 } };
+  const count = (type: string) => bus.recent.filter(e => e.type === type).length;
+
+  for (const held of [true, false]) {
+    adapter.ingest('matchLoad', held ? q12 : { ...q12, IsReplay: true });
+    adapter.ingest('matchTime', { MatchState: MatchState.StartMatch });
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+    adapter.ingest('scorePosted', {
+      Match: { Id: 12, LongName: 'Qualification 12', Type: 2 },
+      RedScoreSummary: { Score: 100 }, BlueScoreSummary: { Score: 80 },
+    });
+    adapter.ingest('audienceDisplayMode', 'score');
+    // With the next match held behind the result, as a real commit does, and
+    // without, as an arena build that posts without loading does.
+    if (held) adapter.ingest('matchLoad', q13);
+    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+    const postedAt = bus.state.scorePostedAt;
+    assert.ok(postedAt !== null, 'fixture sanity: a score is on the board');
+    const loadsBefore = count('match.loaded');
+
+    adapter.ingest('matchLoad', q12);
+    assert.equal(count('match.loaded'), loadsBefore, `held ${held}: the echo loads nothing`);
+    assert.equal(bus.state.scorePostedAt, postedAt, `held ${held}: the result stays on air`);
+    assert.equal(bus.state.screen, 'score', `held ${held}`);
+    assert.equal(bus.state.score.red.total, 100, `held ${held}`);
+    if (held) {
+      // And the next match is still waiting behind it, not dropped.
+      adapter.ingest('audienceDisplayMode', 'intro');
+      assert.equal(bus.state.match?.displayName, 'Qualification 13', 'the hold survived the echo');
+    }
+  }
+  adapter.stop();
 });
 
 test('a desk that restarts mid-match picks the match up where it is', () => {
@@ -1308,10 +1375,16 @@ test('a genuine tie is still a tie, and a new match clears the verdict', () => {
   assert.equal(bus.state.officialWinner, 'tie');
   assert.equal(bus.state.tiebreakReason, 'TRUE TIE');
 
-  // The last match's verdict is not this match's.
+  // The last match's verdict is not this match's. The arena loads Q10 in the
+  // same breath as the commit, and the desk lets it in once the arena's own
+  // display moves off the score (see commit.test.ts).
   adapter.ingest('matchLoad', { Match: { Id: 10, LongName: 'Qualification 10', Type: 2 } });
+  assert.equal(bus.state.officialWinner, 'tie', 'still the result on screen');
+  adapter.ingest('audienceDisplayMode', 'intro');
+  assert.equal(bus.state.match?.displayName, 'Qualification 10');
   assert.equal(bus.state.officialWinner, null);
   assert.equal(bus.state.tiebreakReason, null);
+  adapter.stop();
 });
 
 test('a playoff alliance names its backup, from the field rather than a join', () => {
@@ -1342,6 +1415,71 @@ test('a playoff alliance names its backup, from the field rather than a join', (
   // empty array that a surface would render as a heading with nothing under it.
   adapter.ingest('matchLoad', { Match: { Id: 12, LongName: 'Qualification 12', Type: 2 } });
   assert.equal(bus.state.match?.redOffField, undefined);
+});
+
+test('a second robot sitting a playoff match out is named like one on the field', () => {
+  // The arena takes its nicknames from TBA, and TBA calls every offseason
+  // second-robot number "Off-Season Demo Team 9999". The robots on the field
+  // were already renamed from the roster; the one sitting out was not, so the
+  // posted result card printed that placeholder under 100B.
+  const bus = new EventBus();
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', {
+    Match: { Id: 11, LongName: 'Match 11', Type: 3, Red1: 846, Red2: 253, Red3: 1700 },
+    RedOffFieldTeams: [{ Id: 9999, Nickname: 'Off-Season Demo Team 9999' }],
+    BlueOffFieldTeams: [{ Id: 1678, Nickname: 'Citrus Circuits' }],
+  });
+  assert.deepEqual(bus.state.match?.redOffField, [{ number: 9999, name: 'The Wildhats' }]);
+  assert.deepEqual(bus.state.match?.blueOffField, [{ number: 1678, name: 'Citrus Circuits' }],
+    'everyone else keeps the name the field sends');
+});
+
+test('a playoff card is the alliance\'s, and reaches every member of it', () => {
+  /*
+   * In a playoff the referee panel records the card on the ALLIANCE
+   * (PlayoffAllianceCard) and empties the per-team map in the same breath,
+   * so reading the map alone meant no playoff card ever reached the desk: no
+   * mark on the bar, no chip on the Final screen, nothing in the ledger the
+   * announcer reads, and a disqualified alliance showing a zero with nothing
+   * beside it.
+   */
+  const bus = new EventBus();
+  const cards: { alliance: string; team: number; card: string; match: string }[] = [];
+  bus.subscribe(ev => {
+    if (ev.type === 'card.issued') cards.push(ev.payload as typeof cards[number]);
+  });
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  adapter.ingest('matchLoad', {
+    Match: { Id: 11, LongName: 'Match 11', Type: 3, Red1: 254, Red2: 846, Red3: 100,
+             Blue1: 971, Blue2: 115, Blue3: 670 },
+    RedOffFieldTeams: [{ Id: 1678, Nickname: 'Citrus Circuits' }],
+  });
+  const frame = (red: string, blue = '') => ({
+    MatchState: MatchState.PostMatch,
+    Red: { ScoreSummary: {} }, Blue: { ScoreSummary: {} },
+    RedCards: {}, BlueCards: {},
+    PlayoffRedAllianceCard: red, PlayoffBlueAllianceCard: blue,
+  });
+
+  adapter.ingest('realtimeScore', frame('yellow'));
+  adapter.ingest('realtimeScore', frame('yellow'));      // rides every frame
+  assert.deepEqual(cards.map(c => c.team), [254, 846, 100, 1678],
+    'the whole alliance, the member sitting out included, once');
+  assert.ok(cards.every(c => c.alliance === 'red' && c.card === 'yellow' && c.match === 'Match 11'));
+
+  // An upgrade to red is new, and announced once.
+  adapter.ingest('realtimeScore', frame('red'));
+  adapter.ingest('realtimeScore', frame('red'));
+  assert.equal(cards.length, 8);
+  assert.ok(cards.slice(4).every(c => c.card === 'red'));
+  assert.equal(bus.state.cards.byTeam[1678]?.reds, 1, 'the ledger has it');
+  assert.equal(bus.state.cards.thisMatch.filter(c => c.color === 'red').length, 4,
+    'and the Final screen\'s chips do');
+
+  // Blue's side is its own.
+  adapter.ingest('realtimeScore', frame('red', 'yellow'));
+  assert.deepEqual(cards.slice(8).map(c => [c.alliance, c.team]),
+    [['blue', 971], ['blue', 115], ['blue', 670]]);
 });
 
 test('a break says what it is, when it ends, and what comes after', () => {
@@ -1723,6 +1861,61 @@ test('a score changed after the commit is noticed from the schedule poll', async
   }
 });
 
+test('a scorekeeper replay is a new result, not a correction of the old one', async () => {
+  /*
+   * A re-run of a committed match changes the committed score too, and the
+   * poll compared against what IT had last seen, so the replay's own result
+   * was reported as a post-commit correction. The publish queue then told
+   * the operator to hand-edit the description of the abandoned first run, a
+   * moment after telling them to pull that video.
+   */
+  let score = { red: 88, blue: 71 };
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.url?.includes('rankings')) return res.end('{"Rankings":[]}');
+    if (req.url?.includes('qualification')) {
+      return res.end(JSON.stringify([{
+        Id: 12, Type: 2, TypeOrder: 12, ShortName: 'Q12',
+        LongName: 'Qualification 12', Status: MatchStatus.RedWon,
+        Result: { RedSummary: { Score: score.red }, BlueSummary: { Score: score.blue } },
+      }]));
+    }
+    res.end('[]');
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+
+  const bus = new EventBus();
+  const seen: unknown[] = [];
+  bus.subscribe(ev => { if (ev.type === 'match.score_corrected') seen.push(ev.payload); });
+  const adapter = new CheesyAdapter({ bus, host: `127.0.0.1:${port}`, displayId: 'test' });
+  try {
+    await adapter.pollNow();                       // run 1, committed 88-71
+
+    // The field faults, and the scorekeeper re-runs Q12.
+    adapter.ingest('matchLoad', {
+      Match: { Id: 12, Type: 2, TypeOrder: 12, LongName: 'Qualification 12' }, IsReplay: true,
+    });
+    adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+    adapter.ingest('scorePosted', {
+      Match: { Id: 12, Type: 2, LongName: 'Qualification 12' },
+      RedScoreSummary: { Score: 90 }, BlueScoreSummary: { Score: 65 },
+    });
+    score = { red: 90, blue: 65 };
+    await adapter.pollNow();
+    assert.deepEqual(seen, [], 'the replay posted this score itself: nothing was corrected');
+
+    // A real edit on /match_review afterwards is still caught.
+    score = { red: 91, blue: 65 };
+    await adapter.pollNow();
+    assert.deepEqual(seen, [{ label: 'Qualification 12', red: 91, blue: 65 }]);
+  } finally {
+    adapter.stop();
+    await new Promise(r => server.close(r));
+  }
+});
+
 test('clearing a mis-entered pick does not slide the next one into its column', () => {
   /*
    * The arena pre-allocates every alliance's TeamIds to full length and fills
@@ -1807,11 +2000,19 @@ test('a desk that starts after the buzzer says so once, in either socket order',
     assert.ok(bus.state.matchEndedAt !== null, order);
     assert.equal(types.includes('match.end'), false, `${order}: no real end, so no end cue`);
 
-    // The day goes on: the next match is loaded and played normally.
-    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+    // The day goes on: the scorekeeper commits, the arena loads the next
+    // match in the same breath, and the desk lets it in when the arena's own
+    // display moves off the score (see commit.test.ts).
+    adapter.ingest('scorePosted', {
+      Match: { Id: 43 }, RedScoreSummary: { Score: 90 }, BlueScoreSummary: { Score: 80 },
+    });
     load(adapter, 44);
+    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+    adapter.ingest('audienceDisplayMode', 'intro');
+    assert.equal(bus.state.match?.displayName, 'Qualification 44', order);
     assert.equal(bus.state.matchEndedAt, null, `${order}: the next match is not over`);
     assert.equal(types.filter(t => t === 'match.ended_before_join').length, 1, order);
+    adapter.stop();
   }
 });
 
@@ -2185,6 +2386,45 @@ test('a desk that boots on the test match does not reveal the arena\'s last resu
   });
   assert.equal(bus.state.screen, 'score');
   assert.equal(bus.state.score.red.total, 101);
+});
+
+test('alliance selection is not interrupted by the arena replaying the last qual\'s result', () => {
+  /*
+   * After the last qual the arena sits on its test match, which the desk does
+   * not load, so the last qual is still the match on screen and the identity
+   * check passed its result straight through again. Any audience-socket blip
+   * through alliance selection or the awards re-revealed it: the Final screen
+   * over the selection board, the stream cut to the score scene, the playlist
+   * back in the room, and the gap cue's clock restarted.
+   */
+  const posted80 = {
+    Match: { Id: 80, Type: 2, LongName: 'Qualification 80' },
+    RedScoreSummary: { Score: 150 }, BlueScoreSummary: { Score: 40 }, RedWon: true, BlueWon: false,
+  };
+  const { bus, types, adapter } = lastQualPosted();
+  adapter.ingest('matchLoad', TEST_LOAD);
+  const postedAt = bus.state.scorePostedAt;
+  adapter.ingest('scorePosted', posted80);            // the reconnect
+  assert.equal(types.filter(t => t === 'match.score_posted').length, 1, 'no second reveal');
+  assert.equal(bus.state.scorePostedAt, postedAt, 'and the gap cue keeps its clock');
+
+  // The genuine race still lands: the last qual's result trailing the test
+  // load onto the desk by a socket is the first post, not a replay.
+  const bus2 = new EventBus();
+  const types2: string[] = [];
+  bus2.subscribe(ev => types2.push(ev.type));
+  const a2 = new CheesyAdapter({ bus: bus2, host: '127.0.0.1:1', displayId: 'test' });
+  a2.ingest('matchLoad', { Match: { Id: 80, Type: 2, TypeOrder: 80, LongName: 'Qualification 80' } });
+  a2.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  a2.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  a2.ingest('matchLoad', TEST_LOAD);
+  a2.ingest('scorePosted', posted80);
+  assert.equal(types2.filter(t => t === 'match.score_posted').length, 1, 'the result lands');
+  assert.equal(bus2.state.screen, 'score');
+  a2.ingest('scorePosted', posted80);
+  assert.equal(types2.filter(t => t === 'match.score_posted').length, 1, 'and its replay does not');
+  adapter.stop();
+  a2.stop();
 });
 
 test('a desk that joins after a test match buzzed does not call the next real match over', () => {

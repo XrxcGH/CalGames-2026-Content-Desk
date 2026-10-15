@@ -285,10 +285,13 @@ export interface DemoExtras {
 function seedContent(extras: DemoExtras): void {
   extras.slides?.seedSample(SAMPLE_SLIDES);
   extras.profiles?.seedSample(SAMPLE_PROFILES);
-  // Two of the six, deliberately. Most teams at an offseason have no photo
-  // and get the tier-3 plinth, so an overview where every robot has a picture
-  // would be a prettier lie than the one the event will actually show.
-  extras.media?.seedSample([846, 971]);
+  // Two of the six, deliberately, one per alliance. Most teams at an offseason
+  // have no photo and get the tier-3 plinth, so an overview where every robot
+  // has a picture would be a prettier lie than the one the event will show.
+  // Both are on the sample match (971 was not, so only one photo ever drew).
+  // They are real teams: MediaLibrary.seedSample keeps any real upload they
+  // already have and puts it back on clear, and never writes a placeholder.
+  extras.media?.seedSample([846, 100]);
 }
 
 /**

@@ -105,10 +105,14 @@ time is real.
 - Timeline is the **match clock**, phase-segmented, not a raw video scrubber. The operator thinks
   in "endgame," not "18:42:07."
 - **SEND TO DESK** pushes whichever frame the clip preview is paused on to the telestrator as a
-  frozen backdrop. **TAKE** puts the clip straight to program with the gold replay wipe.
-- Pre-render 0.5x and 0.25x versions of any clip flagged for telestration: smooth slow-mo needs
-  frame interpolation (`minterpolate`) which is too slow to do live, but fine on a 12-second clip
-  during the ~90 seconds between matches.
+  frozen backdrop. **TAKE** plays the clip through OBS's `CG Replay Clip` media source in
+  `CG_REPLAY`, cuts to it, and cuts back when the clip ends; autopilot holds its own cuts while it
+  runs. It asks OBS first, so a cut the switcher made by hand during the clip is left alone, and
+  back-to-back takes return to where the first one came from. It needs the desk connected to OBS on the same laptop; without that the console says it is
+  not on air and how to play it by hand.
+- 0.5x and 0.25x are trimmed first and then frame-blended with ffmpeg's `framerate` filter, so a
+  10-second window renders in a few seconds. (Motion-compensated `minterpolate` was tried and was
+  far too slow: a quarter-speed cut could not finish inside the five-minute limit.)
 
 ### Timing budget
 

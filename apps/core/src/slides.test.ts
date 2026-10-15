@@ -268,3 +268,55 @@ test('a shout-out names who it is for, and that becomes the headline', async () 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('Next after Hide advances instead of re-airing the slide just taken down', async () => {
+  // Hide used to null the only "has anything aired" signal next() had, so the
+  // first Next after every Hide repeated the hidden slide and the button
+  // looked dead. Only the very first press since boot shows deck[0] as is.
+  const dir = await scratch();
+  try {
+    const bus = new EventBus();
+    const slides = new Slides(dir, bus, [
+      { id: 'a', kind: 'info', title: 'A', lines: [] },
+      { id: 'b', kind: 'info', title: 'B', lines: [] },
+      { id: 'c', kind: 'info', title: 'C', lines: [] },
+    ]);
+    const seen: string[] = [];
+    bus.subscribe(ev => { if (ev.type === 'slide.show') seen.push((ev.payload as { id: string }).id); });
+
+    slides.next();
+    slides.next();
+    slides.hide();
+    slides.next();
+    assert.deepEqual(seen, ['a', 'b', 'c']);
+
+    // A picked slide still advances from its own place in the deck.
+    slides.hide();
+    slides.show('a');
+    slides.next();
+    assert.deepEqual(seen.slice(-2), ['a', 'b']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pending shout-out keeps its recipient across a restart', async () => {
+  // The recipient is in data/slides.json, but load() used to drop it, so a
+  // shout-out approved after a restart aired as a generic "Gracious
+  // Professionalism" slide with its thank-you cut loose from who it was for.
+  const dir = await scratch();
+  try {
+    const slides = new Slides(dir, new EventBus(), []);
+    await slides.load();
+    await slides.submit({ to: 'The queuing volunteers', name: 'Ana', team: 846,
+      message: 'Found our pit when we were lost and got us there' });
+
+    const reopened = new Slides(dir, new EventBus(), []);
+    await reopened.load();
+    assert.equal(reopened.queue[0]?.to, 'The queuing volunteers', 'the moderator still sees it');
+    const slide = await reopened.approve(reopened.queue[0]!.id);
+    assert.equal(slide.title, 'Shout-out to The queuing volunteers');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

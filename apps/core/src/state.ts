@@ -158,6 +158,13 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           matchRun: Math.max(1, Number((ev.payload as { run?: number })?.run ?? 1)),
           matchStartedAt: null,
           lastMatchStartedAt: null,
+          teleopAnchorAt: null,
+          // replayOnAir deliberately survives: the field moves the next
+          // match in 20 to 60 seconds after a post, which is exactly when a
+          // replay is likely to be running, and dropping it here put the
+          // full-frame overview over the clip halfway through the action.
+          // The overview comes up when the clip ends; the field arming or
+          // starting still takes the overlay back at once (below).
           matchLoadedAt: ev.ts,
           matchEndedAt: null,
           scorePostedAt: null,
@@ -214,6 +221,7 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           matchRun: 1,
           matchStartedAt: null,
           lastMatchStartedAt: null,
+          teleopAnchorAt: null,
           matchEndedAt: null,
           scorePostedAt: null,
           autoWinner: null,
@@ -231,26 +239,33 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       // Field reset between matches. Deliberately no screen change: the next
       // match's `match.loaded` owns the transition back to the overview.
       // Prestart is also how a timeout visibly ends (TimeoutActive returns
-      // through PreMatch), so it retires the automatic timeout card. Only
-      // that one: an operator card carries the producer's wording and stays
-      // until they clear it themselves.
+      // through PreMatch), so it retires the automatic break card. Only that
+      // one, known by its `auto` mark rather than its wording: an operator
+      // card carries the producer's wording and stays until they clear it
+      // themselves, even one that happens to read "Field timeout".
       case 'match.prestart':
-        return state.status?.message === 'Field timeout'
-          ? { ...state, status: null }
-          : state;
+        return state.status?.auto ? { ...state, status: null } : state;
 
       // The field is armed and ready: every robot linked, scorekeeper about to
       // hand it to the announcer. Flip to the score bar NOW, so the graphic is
       // already in place when the countdown starts, never mid-"3, 2, 1".
+      // A replay still running gives the overlay back: the score bar has to
+      // be up before the countdown, whatever the switcher is showing.
       case 'match.armed':
-        return { ...state, screen: auto(state, 'match') };
+        return { ...state, screen: auto(state, 'match'), replayOnAir: null };
 
       case 'match.start':
         return {
           ...state, matchStartedAt: ev.ts, lastMatchStartedAt: ev.ts,
+          teleopAnchorAt: ev.ts,
           // A running field-setup countdown is over by definition: the match
           // it was counting down to just started, whoever forgot to clear it.
           timer: null,
+          // Likewise the field's own break card, should the prestart that
+          // normally retires it have been lost on the wire: the field cannot
+          // be on a break and running a match. An operator's card stays.
+          ...(state.status?.auto ? { status: null } : {}),
+          replayOnAir: null,
           screen: auto(state, 'match'),
         };
 
@@ -279,9 +294,16 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       // there, on the field's own axis. lastMatchStartedAt keeps the true
       // wall-clock start for clip cutting. Desk-only operation never sees
       // this event and the clock simply stays contiguous.
-      case 'match.teleop_start':
-        return state.matchStartedAt === null ? state
-          : { ...state, matchStartedAt: ev.ts + REBUILT.AUTO_START * 1000 };
+      //
+      // teleopAnchorAt keeps the re-anchored origin past the buzzer, which
+      // clears matchStartedAt. The replay console maps teleop clocks to wall
+      // time with it after the match; mapping them from the true start put
+      // every teleop moment early by the pause and cut the result off.
+      case 'match.teleop_start': {
+        if (state.matchStartedAt === null) return state;
+        const anchor = ev.ts + REBUILT.AUTO_START * 1000;
+        return { ...state, matchStartedAt: anchor, teleopAnchorAt: anchor };
+      }
 
       case 'match.aborted':
         return { ...state, matchStartedAt: null, screen: auto(state, 'match') };
@@ -648,7 +670,9 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           // "Show the award" is the same intent as taking a screen by hand,
           // and during a ceremony they have usually just held one; an award
           // that silently loses to that hold is a button that does nothing.
-          // The hold also keeps a gap-filler cue from stomping the ceremony.
+          // The hold (and the award itself) also keeps the gap-filler cue
+          // from cutting the camera to the arcade mid-ceremony: see its
+          // when() in cue/engine.ts.
           screen: 'award',
           screenHold: true,
         };
@@ -773,8 +797,37 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'emergency.clear':
         return { ...state, emergency: null };
 
-      case 'scene.change':
-        return { ...state, scene: String((ev.payload as { scene?: string }).scene ?? '') || null };
+      // A cut anywhere but the scene the replay is playing in ends the replay
+      // as far as the overlay is concerned: it stood aside for the clip, and
+      // the clip is no longer what the stream shows.
+      case 'scene.change': {
+        const scene = String((ev.payload as { scene?: string }).scene ?? '') || null;
+        return {
+          ...state, scene,
+          ...(state.replayOnAir && state.replayOnAir.scene !== scene ? { replayOnAir: null } : {}),
+        };
+      }
+
+      // Trusted from the replay cue only, which emits it after OBS has
+      // accepted the clip and the stream has cut to it. Any surface holding
+      // the PIN can emit events, and one that could claim a replay was on air
+      // could blank the overlay over a live picture for as long as it liked.
+      case 'replay.on_air': {
+        if (ev.source !== 'cue') return state;
+        const p = (ev.payload ?? {}) as { label?: unknown; seconds?: unknown; scene?: unknown };
+        const seconds = Number(p.seconds);
+        // A clip longer than ten minutes is a match video, not a replay, and
+        // an overlay standing aside that long is a broken overlay.
+        if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) return state;
+        return {
+          ...state,
+          replayOnAir: {
+            label: String(p.label ?? '').trim().slice(0, 90),
+            seconds, at: ev.ts,
+            scene: String(p.scene ?? ''),
+          },
+        };
+      }
 
       case 'queue.called':
         return { ...state, nowQueuing: String((ev.payload as { label?: string }).label ?? '') || null };
@@ -866,14 +919,40 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
       case 'status.hide':
         return { ...state, status: null };
 
-      // A field timeout raises the delay card on its own, so the stoppage is
-      // explained even if nobody at the desk reacts. Never over an
-      // operator-set card: the producer's wording wins. It clears itself when
-      // the field moves on, via the match lifecycle cases below clearing
-      // status only when it was this automatic card (marked by its message).
-      case 'break.started':
-        return state.status !== null ? state
-          : { ...state, status: { kind: 'delay', message: 'Field timeout', backAt: null } };
+      /*
+       * A break on the field raises a card on its own, so the stoppage is
+       * explained even if nobody at the desk reacts.
+       *
+       * It says what the arena says the break IS. This used to ignore the
+       * payload and print "Field delay: Field timeout" with no clock for
+       * every break, so the scheduled fifteen-minute Awards Breaks before
+       * each final went out over the award presentations as a broken field.
+       * A labelled break is an announcement with its end time; only the
+       * arena's bare "Timeout" (or no label at all) is the delay card.
+       *
+       * Never over an operator-set card: the producer's wording wins. It is
+       * marked `auto`, which is what lets prestart and match.start retire it
+       * when the field moves on without touching an operator's card.
+       */
+      case 'break.started': {
+        if (state.status !== null && !state.status.auto) return state;
+        const p = (ev.payload ?? {}) as { label?: unknown; seconds?: unknown };
+        // Trailing asterisks off: the bracket names the break before the
+        // deciding final "Awards Break *", its own note that the match may
+        // not be needed, which means nothing to the room.
+        const label = String(p.label ?? '').replace(/[\s*]+$/, '').trim();
+        const seconds = Number(p.seconds);
+        const timeout = !label || /^timeout$/i.test(label);
+        return {
+          ...state,
+          status: {
+            kind: timeout ? 'delay' : 'custom',
+            message: timeout ? 'Field timeout' : label.slice(0, 90),
+            backAt: Number.isFinite(seconds) && seconds > 0 ? ev.ts + seconds * 1000 : null,
+            auto: true,
+          },
+        };
+      }
 
       // Thresholds arrive from config at boot. Re-scoring immediately means a
       // mid-event correction repaints every badge instead of waiting for the

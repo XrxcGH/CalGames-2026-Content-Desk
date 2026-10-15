@@ -270,6 +270,70 @@ test('an unquoted numeric pin in config.json does not take the health report dow
   }
 });
 
+test('an empty desk PIN is the gate switched off, and the doors check blocks on it', async () => {
+  // REMOTE_PIN="" is the kitchen-table escape hatch: the server lets every
+  // request through. An empty string is not the shipped default, so it used
+  // to count as "changed" and, with the other two codes set, the row read OK
+  // while every control surface was open to the venue Wi-Fi.
+  const saved = { desk: process.env['REMOTE_PIN'], ja: process.env['JA_PIN'], setup: process.env['SETUP_PIN'] };
+  process.env['REMOTE_PIN'] = '';
+  process.env['JA_PIN'] = '7531';
+  process.env['SETUP_PIN'] = '9753';
+  try {
+    const r = await new Vitals(base()).report();
+    const codes = find(r, 'codes');
+    assert.equal(codes.level, 'fail');
+    assert.match(codes.detail, /desk PIN is empty/);
+    assert.ok(r.blockers.some(c => c.id === 'codes'), 'and it blocks the doors');
+
+    // A real PIN with the other two changed is still the quiet OK.
+    process.env['REMOTE_PIN'] = '7391';
+    assert.equal(find(await new Vitals(base()).report(), 'codes').level, 'ok');
+  } finally {
+    for (const [key, val] of [['REMOTE_PIN', saved.desk], ['JA_PIN', saved.ja], ['SETUP_PIN', saved.setup]] as const) {
+      if (val === undefined) delete process.env[key]; else process.env[key] = val;
+    }
+  }
+});
+
+test('an empty desk PIN on a desk only this machine can reach is a note, not a blocker', async () => {
+  // The preview renderer runs exactly that on purpose (no PIN, 127.0.0.1),
+  // and the doors check painted its console red over a door nobody on the
+  // venue Wi-Fi can reach. Any other address is still the blocker.
+  const saved = { desk: process.env['REMOTE_PIN'], ja: process.env['JA_PIN'], setup: process.env['SETUP_PIN'] };
+  process.env['REMOTE_PIN'] = '';
+  process.env['JA_PIN'] = '7531';
+  process.env['SETUP_PIN'] = '9753';
+  try {
+    for (const host of ['127.0.0.1', '127.4.5.6', 'localhost', '::1', '[::1]']) {
+      const r = await new Vitals(base({ host })).report();
+      const codes = find(r, 'codes');
+      assert.equal(codes.level, 'off', host);
+      assert.match(codes.detail, /only answers on this machine/);
+      assert.ok(!r.blockers.some(c => c.id === 'codes'), `${host} holds no door shut`);
+      assert.notEqual(r.worst, 'fail', `${host} paints nothing red`);
+    }
+    for (const host of ['0.0.0.0', '::', '192.168.1.20', '10.0.100.40', undefined]) {
+      const r = await new Vitals(base(host === undefined ? {} : { host })).report();
+      assert.equal(find(r, 'codes').level, 'fail', String(host));
+      assert.ok(r.blockers.some(c => c.id === 'codes'), `${String(host)} is reachable, so it blocks`);
+    }
+  } finally {
+    for (const [key, val] of [['REMOTE_PIN', saved.desk], ['JA_PIN', saved.ja], ['SETUP_PIN', saved.setup]] as const) {
+      if (val === undefined) delete process.env[key]; else process.env[key] = val;
+    }
+  }
+});
+
+test('the OBS row says how the exe turns OBS on, not a command-line flag', async () => {
+  // The packaged exe has no command line, so "(no --obs)" pointed a
+  // first-time crew at something they can never type.
+  const off = find(await new Vitals(base()).report(), 'obs');
+  assert.equal(off.level, 'off');
+  assert.match(off.detail, /"obs": \{ "enabled": true \} in config\.json/);
+  assert.doesNotMatch(off.detail, /--obs/);
+});
+
 test('"not streaming" is fine on Friday and an emergency during a match', async () => {
   // The same reading means opposite things, and the desk could not tell them
   // apart: OBS idle between days looks identical to OBS idle during a final.

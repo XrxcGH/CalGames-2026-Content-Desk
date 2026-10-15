@@ -167,10 +167,15 @@ same network to see the screens.
 There is no other window, on purpose. If something goes wrong, a red error
 box says what. Lost the browser tab, or something looks stuck? Double-click
 again: if the desk is running it just reopens it, and it never stops a show.
+To start it fresh instead (for example once the field is on the network, so it
+looks for the field again), stop it first: Task Manager (Ctrl+Shift+Esc), find
+"CalGames 2026 Content Desk", End task, then double-click again.
 
 To check every screen before there is a show, press "Fill the screens with
-sample data" in the Start here box. Restart the desk before the first
-practice match so the sample clears.
+sample data" in the Start here box. You do not need to restart anything
+afterwards: the sample clears itself from every screen when the first real
+match loads. To clear it sooner, press "Clear sample data" in the Sample
+data section of the desk console.
 
 Do not delete config.json or data/trivia.json: those are yours, and the
 launcher leaves them alone when it updates everything else.

@@ -648,19 +648,65 @@ addEventListener('keydown', e => {
 // operator marks both ends by hand.
 let segFrom = null;
 
+/*
+ * The start mark is kept on this machine, not only in a page variable. A
+ * ceremony runs 20 to 40 minutes, and a desk restart in the middle of one
+ * signs this page out: the only way back is a reload through /signin, which
+ * used to drop the start mark with no way to enter it again, so the ceremony
+ * could not be queued with its real start. Storage can throw (a private
+ * window, blocked site data), and then the mark simply lives in the page as
+ * it always did.
+ */
+const SEG_KEY = 'desk.segmentMark';
+/** No ceremony runs this long; an older mark is one somebody abandoned. */
+const SEG_MAX_AGE_MS = 6 * 3600_000;
+const saveSegMark = () => {
+  try {
+    if (segFrom === null) localStorage.removeItem(SEG_KEY);
+    else {
+      localStorage.setItem(SEG_KEY, JSON.stringify({
+        from: segFrom, kind: $('segKind').value, title: $('segTitle').value,
+      }));
+    }
+  } catch { /* storage unavailable: the page variable still holds it */ }
+};
+
 // "Other..." reveals a title field: the API takes any unlisted string as a
 // literal title, which is how a single award gets its own video.
-$('segKind').onchange = () => {
+const showSegOther = () => {
   const other = $('segKind').value === 'other';
   $('segOtherRow').style.display = other ? 'flex' : 'none';
-  if (other) $('segTitle').focus();
+  return other;
 };
+$('segKind').onchange = () => {
+  if (showSegOther()) $('segTitle').focus();
+  if (segFrom !== null) saveSegMark();
+};
+$('segTitle').addEventListener('input', () => { if (segFrom !== null) saveSegMark(); });
 
 $('segStart').onclick = () => {
   segFrom = Date.now();
+  saveSegMark();
   $('segQueue').disabled = false;
   $('segState').textContent = `Marking since ${new Date(segFrom).toLocaleTimeString()}.`;
 };
+
+// Back from a reload with a mark still running: say so, and let it be queued.
+try {
+  const kept = JSON.parse(localStorage.getItem(SEG_KEY) ?? 'null');
+  const from = Number(kept?.from);
+  if (Number.isFinite(from) && from > 0 && Date.now() - from < SEG_MAX_AGE_MS) {
+    segFrom = from;
+    if ([...$('segKind').options].some(o => o.value === kept.kind)) $('segKind').value = kept.kind;
+    if (typeof kept.title === 'string') $('segTitle').value = kept.title;
+    showSegOther();
+    $('segQueue').disabled = false;
+    $('segState').textContent = `Marking since ${new Date(segFrom).toLocaleTimeString()} `
+      + '(kept through a reload of this page).';
+  } else if (kept) {
+    localStorage.removeItem(SEG_KEY);
+  }
+} catch { /* nothing kept, or storage unavailable */ }
 
 $('segQueue').onclick = async () => {
   if (segFrom === null) return;
@@ -685,6 +731,7 @@ $('segQueue').onclick = async () => {
       ? `${item.label} queued and held: ${item.error}`
       : `${item.label} queued.`;
     segFrom = null;
+    saveSegMark();
   } catch (err) {
     $('segState').textContent = err.message;
     $('segQueue').disabled = false;
@@ -713,7 +760,7 @@ function paintStream(s) {
   // thing failing (a desk restart mid-poll, a blocked fetch). Pointing at a
   // healthy indicator sent operators hunting in the wrong place.
   if (!s) line = 'Stream status did not answer. If the desk just restarted, the next poll picks it up on its own.';
-  else if (!s.available) line = 'No OBS control: launch the desk with --obs to run the stream from here.';
+  else if (!s.available) line = 'No OBS control: turn it on in config.json (handbook chapter 4, step 7) to run the stream from here.';
   else if (!s.connected) line = 'OBS is not connected. Start OBS on this machine; the desk retries on its own.';
   else if (s.streaming === null) line = 'OBS is connected but did not answer the status probe.';
   else if (s.streaming) {
@@ -1492,6 +1539,10 @@ function vitalsNotAnswering() {
 async function loadVitals(manual = false) {
   try {
     const res = await fetch('/api/vitals');
+    // A 401 here is not "the doors check is not answering": this console is
+    // signed out, and every other panel is failing the same way in silence.
+    // The 30-second poll makes this the console's sign-in watchdog.
+    if (res.status === 401) void desk.checkSignIn();
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const r = await res.json();
     vitalsMisses = 0;

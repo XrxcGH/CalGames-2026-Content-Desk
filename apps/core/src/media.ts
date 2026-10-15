@@ -68,6 +68,9 @@ export function airsOnScreen(m: RobotMedia): boolean {
   return Math.max(m.w, m.h) >= AIRABLE_MIN_EDGE;
 }
 
+/** A drawn sample placeholder (see seedSample), never a real upload. */
+const isSample = (m: RobotMedia): boolean => m.src.startsWith('/sample/');
+
 const WIDTHS = [400, 800, 1600] as const;
 
 // ---------------------------------------------------------------------------
@@ -226,21 +229,66 @@ export class MediaLibrary {
    */
   seedSample(teams: number[]): void {
     for (const team of teams) {
+      // The sample teams are REAL teams (846 is on the CalGames list), so a
+      // photographer may already have uploaded one. Overwriting that record
+      // and then deleting the slot on clear lost the real photo from the
+      // overview for the rest of the weekend. Keep it, and put it back.
+      const existing = this.#manifest[team];
+      if (existing && !isSample(existing) && !this.#displaced.has(team)) {
+        this.#displaced.set(team, existing);
+      }
+      // A team that said no keeps saying no: a drawing labelled with their
+      // number is still their number on the overview. Hard-coding "granted"
+      // put it there anyway, over a decline on disk or one made earlier in
+      // this session. `existing` is the real record or a placeholder already
+      // carrying its answer (setConsent writes both), and the set covers a
+      // team with no real record once its placeholder has been cleared.
+      const declined = existing?.consent === 'declined' || this.#declinedSample.has(team);
       this.#manifest[team] = {
         team, version: 1, w: 1200, h: 900,
         src: `/sample/robot/${team}.svg`,
         uploadedAt: Date.now(),
         warnings: ['Sample placeholder, not a photograph of this team.'],
-        consent: 'granted',
+        consent: declined ? 'declined' : 'granted',
       };
     }
   }
 
-  /** Take the drawn placeholders back out. Never touches a real upload. */
-  clearSample(): void {
+  /**
+   * Take the drawn placeholders back out, and put back any real record one
+   * was standing in front of. Never touches a real upload. Returns whether
+   * anything changed, so the caller knows to push the new set to the screens.
+   */
+  clearSample(): boolean {
+    let changed = false;
     for (const [team, m] of Object.entries(this.#manifest)) {
-      if (m.src.startsWith('/sample/')) delete this.#manifest[Number(team)];
+      if (isSample(m)) { delete this.#manifest[Number(team)]; changed = true; }
     }
+    for (const [team, real] of this.#displaced) {
+      // A real upload made while the sample was up already took the slot.
+      if (!this.#manifest[team]) { this.#manifest[team] = real; changed = true; }
+    }
+    this.#displaced.clear();
+    return changed;
+  }
+
+  /**
+   * Real records a sample placeholder is currently standing in front of.
+   * Memory only, like the placeholders: the real record is still on disk.
+   */
+  #displaced = new Map<number, RobotMedia>();
+
+  /**
+   * Teams with no real photo who declined while the sample was up. Memory
+   * only, like the placeholder they declined: there is no real record to
+   * write it to, and a re-seed must not bring the drawing back on air.
+   */
+  #declinedSample = new Set<number>();
+
+  /** The team's real record, whether it is on show or behind a placeholder. */
+  #real(team: number): RobotMedia | undefined {
+    const m = this.#manifest[team];
+    return m && !isSample(m) ? m : this.#displaced.get(team);
   }
 
   get airable(): Manifest {
@@ -257,11 +305,33 @@ export class MediaLibrary {
    * asking at the pit desk is off the screen before they walk back.
    */
   async setConsent(team: number, consent: MediaConsent): Promise<RobotMedia> {
-    const media = this.#manifest[team];
-    if (!media) throw new Error('No robot photo has been uploaded for team ' + team + '.');
+    const shown = this.#manifest[team];
+    // Only a REAL record is ever written. With the sample up, the record in
+    // the manifest can be a drawn placeholder, and writing it used to put
+    // "/sample/robot/846.svg" into media/teams/846/meta.json: after the next
+    // restart that team's photo was the placeholder for good, and a later
+    // real upload inherited its consent.
+    const media = this.#real(team);
+    if (!media && shown && isSample(shown)) {
+      // Only the drawing: there is nothing on disk to write, but the answer
+      // still has to reach the screen. This used to throw advice to upload
+      // the team's photo, at a volunteer whose team had just asked to come
+      // OFF the screen, and the drawing stayed on air. Memory only, so the
+      // placeholder never lands in media/teams.
+      shown.consent = consent;
+      if (consent === 'declined') this.#declinedSample.add(team);
+      else this.#declinedSample.delete(team);
+      return shown;
+    }
+    if (!media) {
+      throw new Error('No robot photo has been uploaded for team ' + team + '.');
+    }
     media.consent = consent;
     await writeFile(join(this.#root, 'teams', String(team), 'meta.json'),
       JSON.stringify(media, null, 2));
+    // A team that says no is off every screen at once, placeholder included:
+    // a drawing labelled with their number is still their number on air.
+    if (shown && shown !== media) shown.consent = consent;
     return media;
   }
 
@@ -285,6 +355,8 @@ export class MediaLibrary {
     }
 
     this.#manifest = next;
+    // Disk holds only real records, so nothing is behind a placeholder now.
+    this.#displaced.clear();
     console.log(`[media] ${Object.keys(next).length} robot cutouts loaded`);
   }
 
@@ -312,7 +384,11 @@ export class MediaLibrary {
 
     const dir = join(this.#root, 'teams', String(team));
     await mkdir(dir, { recursive: true });
-    const version = (this.#manifest[team]?.version ?? 0) + 1;
+    // The REAL prior record, never a sample placeholder: the placeholder's
+    // version 1 would have this upload overwrite robot.v2.png of a real
+    // history, and its "granted" would overrule a team that had said no.
+    const prior = this.#real(team);
+    const version = (prior?.version ?? 0) + 1;
 
     let w = header.w, h = header.h;
     const sharp = await getSharp();
@@ -362,11 +438,16 @@ export class MediaLibrary {
       uploadedAt: Date.now(),
       warnings,
       // Preserved across a re-upload: a team that said no does not have to say
-      // it again because somebody replaced the photo.
-      consent: this.#manifest[team]?.consent ?? 'unknown',
+      // it again because somebody replaced the photo. That includes a no said
+      // to the sample's drawing, before they had a photo at all.
+      consent: prior?.consent ?? (this.#declinedSample.has(team) ? 'declined' : 'unknown'),
     };
     await writeFile(join(dir, 'meta.json'), JSON.stringify(media, null, 2));
     this.#manifest[team] = media;
+    // A real photo now holds the slot, so clearing the sample has nothing of
+    // this team's to put back, and the decline now lives on disk with it.
+    this.#displaced.delete(team);
+    this.#declinedSample.delete(team);
     return media;
   }
 

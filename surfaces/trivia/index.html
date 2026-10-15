@@ -135,6 +135,15 @@
 .lb-name b { font-family: var(--font-num); font-weight: 900; margin-right: 14px; color: var(--cg-gold); }
 .lb-pts { font-family: var(--font-num); font-variant-numeric: tabular-nums;
   font-weight: 900; font-size: 64px; line-height: 1; color: var(--cg-white); }
+/* The safety message is the program overlay's own plate (.emerg in
+   broadcast.css), drawn by this page over everything on it. Not a page that
+   steps aside for the overlay: this is also a crowd monitor, framed by
+   /s/watch over a black stage, and a page that hid itself left that monitor
+   black for the whole of an evacuation. Drawn here, the plate is right
+   wherever this page is: over the program overlay in OBS, or alone on a TV.
+   One long word (a message with no spaces) wraps rather than leaving the
+   plate. */
+#emerg .emerg-msg, #emerg .emerg-detail { max-width: 100%; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -169,6 +178,15 @@
   </section>
 
   <div id="sweep"></div>
+
+  <!-- Last in the stage and z-index 90, so it covers every pane and the sweep.
+       Hidden whenever state.emergency is null, which is also how it clears:
+       the desk's clear sends null on the next frame. -->
+  <div class="emerg" id="emerg" hidden role="alert">
+    <div class="emerg-kind" id="emergKind"></div>
+    <div class="emerg-msg" id="emergMsg"></div>
+    <div class="emerg-detail" id="emergDetail"></div>
+  </div>
 </div></div>
 
 <script type="module">
@@ -180,6 +198,72 @@ const $ = id => document.getElementById(id);
 const desk = connect('trivia');
 
 fitStage($('stage'));
+
+/**
+ * The safety message, full frame, from every state frame the desk sends.
+ *
+ * The labels are the table surfaces/program/program.js paints, and an unknown
+ * kind falls back to "Announcement" the same way. Refitted when the words
+ * change and when the webfont lands, not on every frame.
+ */
+const EMERG_KIND = {
+  evacuate: 'Evacuate',
+  shelter: 'Shelter in place',
+  medical: 'Medical',
+  hold: 'Hold',
+  allclear: 'All clear',
+  custom: 'Announcement',
+};
+let emergKey = null;
+function paintEmergency(e) {
+  const el = $('emerg');
+  if (!e) {
+    el.hidden = true;
+    emergKey = null;
+    return;
+  }
+  const key = `${e.kind}|${e.message}|${e.detail ?? ''}`;
+  if (key === emergKey && !el.hidden) return;
+  emergKey = key;
+  $('emergKind').textContent = EMERG_KIND[e.kind] ?? EMERG_KIND.custom;
+  $('emergMsg').textContent = e.message;
+  $('emergDetail').textContent = e.detail ?? '';
+  $('emergDetail').hidden = !e.detail;
+  el.hidden = false;
+  fitEmergency();
+  // /s/watch reloads this page when the desk comes back, so the first paint
+  // can measure before Archivo has arrived, and Archivo is wider than the
+  // fallback. The measurement starts the font loading, so `ready` is pending
+  // here in exactly that case; loadingdone below catches a later load.
+  document.fonts?.ready.then(refitEmergency);
+}
+
+/**
+ * Step the message down until the plate holds it, 48px clear of the edges: a
+ * crowd monitor overscans like any other TV. Measured in layout px
+ * (offsetTop, offsetHeight), which fitStage()'s scale transform does not
+ * touch, so the margin is the same 48 stage px on every screen.
+ */
+function fitEmergency() {
+  const el = $('emerg');
+  const msg = $('emergMsg');
+  msg.removeAttribute('data-fit');
+  const fits = () => {
+    const shown = [...el.children].filter(c => !c.hidden);
+    const first = shown[0];
+    const last = shown[shown.length - 1];
+    return first.offsetTop >= 48
+      && last.offsetTop + last.offsetHeight <= el.clientHeight - 48
+      && msg.scrollWidth <= msg.clientWidth;
+  };
+  for (const step of ['1', '2']) {
+    if (fits()) break;
+    msg.dataset.fit = step;
+  }
+}
+const refitEmergency = () => { if (!$('emerg').hidden) fitEmergency(); };
+document.fonts?.addEventListener('loadingdone', refitEmergency);
+desk.on('state', s => paintEmergency(s?.emergency ?? null));
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 let snap = null;

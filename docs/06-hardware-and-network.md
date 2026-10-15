@@ -344,15 +344,15 @@ because that is who will be operating it.
 
 | Cue | Trigger | Action |
 | --- | --- | --- |
-| **On deck** | `match.loaded` | queueing graphic on side screens, alliance overview up |
+| **On deck** | `match.loaded` | queueing graphic on side screens, alliance overview up, cut to `CG_MATCH` |
 | **Intro** | `match.preview` | *planned, not built:* the 6-team intro card with the EPA form line is blocked behind the Statbotics feed ([03-brand.md](03-brand.md)), and no cue fires on `match.preview` yet. PxP reads teams off the overview instead |
 | **Armed** | `match.armed` (every robot linked, before the announcer's countdown) | switch to field wide, score bar in, lockdown motion |
 | **Live** | `match.start` | score bar live, hub indicator on, replay markers arm |
 | **Endgame** | `matchClock` 110 | endgame chip. The camera stays wherever the switcher has it: the wide-shot lock stops autopilot from cutting away from the field mid-match, so a tight tower shot is the switcher op's call |
 | **End** | `match.end` | hold field wide 4s for the celebration. Don't cut early |
 | **Result** | `match.score_posted` | score reveal, RP pips, ranking movement |
-| **Replay** | operator | gold wipe, clip, telestrate, back to desk |
-| **Gap** | 3 min after a posted score, no match running | auto-cut to arcade |
+| **Replay** | operator Take | OBS plays the clip in `CG Replay Clip`, cut to `CG_REPLAY`, cut back when it ends unless the switcher has cut away in OBS (back-to-back takes return to where the first came from); autopilot holds its cuts while it runs |
+| **Gap** | 3 min after a posted score with no next match loaded, nothing held | auto-cut to arcade |
 
 Every row except Intro maps to a cue in the engine, each with a manual override. The autopilot
 toggle is per-cue, not global, so the producer can trust the parts that work and drive the parts

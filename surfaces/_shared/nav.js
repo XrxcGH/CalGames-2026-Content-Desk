@@ -12,7 +12,7 @@
  * at. It writes the same `screen.change` event the desk console does.
  */
 
-import { SCREENS } from '/shared/desk-client.js';
+import { SCREENS, signInIfSignedOut } from '/shared/desk-client.js';
 
 const CONSOLES = [
   { id: 'desk', label: 'Desk' },
@@ -226,8 +226,14 @@ export function mountNav(current, opts = {}) {
           sayNote(msg.reason === 'PIN required'
             ? 'The desk restarted. Reload this page to sign back in.'
             : (msg.reason || 'The desk refused that.'));
+          if (msg.reason === 'PIN required') void signInIfSignedOut();
           return;
         }
+        // A snapshot follows every reconnect, and a reconnect is how a desk
+        // restart reaches this page. Some consoles (the trivia host) have no
+        // socket but this strip's, so the strip checks the session too rather
+        // than let them sit signed out behind working-looking buttons.
+        if (msg?.t === 'snapshot' && msg.needsPin) void signInIfSignedOut();
         const state = msg?.state;
         const screen = state?.screen ?? msg?.payload?.screen;
         if (!screen) return;

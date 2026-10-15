@@ -116,6 +116,10 @@ until you do.
    black page, and **100B** among the red teams. Outlined means "a guess",
    which is right: this is sample data. Everything sample says SAMPLE on it,
    nothing is saved, and it **clears itself the moment a real match loads**.
+   Two sample teams get a drawn SAMPLE robot in the photo slot; a real photo
+   already uploaded for either comes back when the sample clears. A team that
+   has said no to its photo gets no drawing either, and saying no on the Team
+   media page takes the drawing off at once.
 4. **Set up OBS.** Chapter 4, steps 1 to 4. About fifteen minutes the first
    time. This is the only part with a lot of clicking.
    **You should see** the score bar from step 3 inside OBS's preview.
@@ -152,7 +156,9 @@ same by hand.) With the field connected, watch one match and tick these off:
 - [ ] When the match starts, it switches to the score bar by itself, and the
       clock counts down.
 - [ ] The numbers are **solid** (not outlined) when the field is connected.
-- [ ] When the score posts, the program shows the final score by itself.
+- [ ] When the score posts, the program shows the final score by itself, and
+      the next match's overview follows once the field's own audience screen
+      moves off the score (about 20 seconds, never more than a minute).
 - [ ] The side screens show the next matches, without anyone touching them.
       On Friday those are the next **practice** matches; Saturday's matches
       take over once practice is done. If the field crew runs the field's Test
@@ -206,8 +212,12 @@ keep it plugged in.
 **If anything goes wrong mid-event**, double-click the exe again. If the desk
 is still running it just reopens it in the browser; if it stopped, it starts
 again and the day comes back exactly as it was: scores, cards, the run of
-show. Every screen in the building reconnects by itself. Chapter 11 has the
-rest.
+show. Every screen in the building reconnects by itself. Consoles that need the PIN (the desk, talent view, replay,
+telestrator pad, arcade, trivia host, ref review, cards and the music
+machine) go to the sign-in page by themselves after a restart: type the PIN
+and each comes back to the page it was on. The on-air overlays and the venue
+TVs never ask.
+Chapter 11 has the rest.
 
 ## Checking it works before the event
 
@@ -480,7 +490,7 @@ start works. Both take more than one careless click, which is the point.
 
 | What you see | What to do |
 | --- | --- |
-| "Port already in use" | An older copy is still running. The launcher offers to stop it. Say yes. |
+| "Port already in use" | An older copy is still running | Double-click the exe again: that reopens the running desk and stops nothing. For a genuinely fresh start, end it first (Task Manager, **CalGames 2026 Content Desk**, End task) and double-click again. The stop-or-open question only appears when you start it from a console window |
 | It prints a field-scan failure | Fine. The desk runs without the field; see chapter 9. |
 | Nothing happens at all | The file did not finish copying. Copy it again. |
 | A blue "Windows protected your PC" box | More info → Run anyway. See step 2. |
@@ -532,7 +542,7 @@ only appears once OBS is connected:
 | Check | What it means when it is not green | What to do |
 | --- | --- | --- |
 | **Field bridge** | The desk cannot see the scoring system | Chapter 9 |
-| **OBS** | The desk cannot drive the camera switching | Chapter 4 |
+| **OBS** | The desk cannot drive the camera switching. Gray means it is switched off | Chapter 4, step 7 turns it on in `config.json` |
 | **Stream health** | OBS is dropping frames on the way out: amber past one in a hundred, red past five | The uplink is struggling. Tell the content desk lead now, not when it gets worse |
 | **Recording** | Nothing is being recorded, so there will be no replays or videos | Check the capture device is plugged in |
 | **Disk** | Running out of room: amber under five hours of recording left, red under two | Free up space or change disks now, not at lunch |
@@ -540,7 +550,7 @@ only appears once OBS is connected:
 | **Microphones** | A mic is muted in OBS | Unmute it |
 | **House audio** | The music machine is not connected, or two machines are both armed | Chapter 10 |
 | **Coverage** | A match has been played and no video was ever queued for it | Tell the content desk lead before the recording rolls off the disk |
-| **Access codes** | At least one of the three codes is still the shipped default. It names which | Read the two paragraphs below. Do not skip this one |
+| **Access codes** | At least one of the three codes is still the shipped default (amber; it names which), or the desk PIN is empty (red, and it blocks: every control is open to anyone on the venue Wi-Fi; gray instead if the desk only listens on this laptop, 127.0.0.1, where nobody else can reach it) | Read the two paragraphs below. Do not skip this one. If it is red, restart the desk with a PIN |
 
 A row can also be **grayed out**, which means that part is switched off rather
 than broken: no field connection asked for, no recording running, no stream
@@ -640,6 +650,19 @@ overlay and doubles the load on the laptop. Instead:
 overlay showing in two places. A duplicate is two overlays, and they will drift
 out of step with each other.
 
+### Step 4b: The replay player
+
+Replays play through OBS itself, in the replay scene.
+
+1. Select `CG_REPLAY`.
+2. **+** → **Media Source**, name it exactly `CG Replay Clip`.
+3. Tick **Local File** and leave the file empty: the desk loads each clip into
+   it by name.
+4. Tick **Restart playback when source becomes active** and **Close file when
+   inactive**. Untick **Loop**. OK.
+5. Drag it **below** the Overlay in the Sources list (the Telestrator, if you
+   add one, goes above the Overlay).
+
 ### Step 5: The telestrator (optional)
 
 If your analyst is going to draw on replays:
@@ -663,12 +686,23 @@ reaching for OBS.
 3. Click **Show Connect Info** and note the **Server Password**.
 4. Click OK.
 
-Then tell the desk about it. Ask the content desk lead to start the desk with
-OBS enabled. This is one of the few things that needs a person who is
-comfortable with a command line, and it is a two-minute job.
+Then tell the desk about it, in `config.json` in the desk folder (chapter 2
+shows how to make that file), next to everything else in it:
+
+```
+"obs": { "enabled": true, "password": "THE SERVER PASSWORD" }
+```
+
+Save, and restart the desk (Task Manager, **CalGames 2026 Content Desk**, End
+task, double-click the exe). The **Doors check** on the desk console shows OBS
+green once it is connected. OBS has to be on this same laptop.
 
 You can run the entire show without this. The desk manager just switches scenes
-in OBS by hand instead. Everything else works identically.
+in OBS by hand instead, and everything else works identically, with one
+exception: **Take to program** on the replay console needs this. Without it the
+replay console says *NOT on air*, names the clip file, and tells you how to play
+it by hand (program screen on Blank, load the file into `CG Replay Clip`, cut to
+`CG_REPLAY`).
 
 ### Step 8: Check it
 
@@ -760,7 +794,8 @@ looks intentional and is fine.
 
 ## Chapter 6 · The desk console (desk manager)
 
-Open `/s/desk`. Enter the PIN once.
+Open `/s/desk`. Enter the PIN once (again only after a desk restart, when the
+console takes you to the sign-in page itself).
 
 This is the main control panel and it is built to be driven by keyboard. The
 buttons all say what they do; this chapter covers the order you use them in.
@@ -772,12 +807,12 @@ field connection is working, which is the normal case.
 
 | When | The desk does this by itself | You do this |
 | --- | --- | --- |
-| Match is queued | Shows the alliance overview with robot photos | Cut to `CG_MATCH` |
+| Next match is up (after the score has had its time) | Shows the alliance overview with robot photos | Cut to `CG_MATCH` |
 | Field arms the match | Score bar comes in | Nothing |
 | Match starts | Clock runs, scores update live | Watch the show, not the desk |
 | Buzzer | Clock stops | Cut to a wide, or to the desk |
 | Referees finish | Nothing | If a card was given, chapter 7 |
-| Score posts | Final score screen appears | Cut to `CG_SCORE` |
+| Score posts | Final score screen appears, and stays until the field's own audience screen moves off the score: about 20 s (30 s after a playoff match that is not a final), never more than a minute, and at once if the next match starts or the scorekeeper re-runs the match just played | Cut to `CG_SCORE` |
 | Gap before the next match | Nothing | Sponsor, trivia, arcade, or an interview |
 
 **If the field connection is down**, you press those beats yourself: the match
@@ -858,20 +893,31 @@ Press **Hide** when they get up.
 Two different things, deliberately.
 
 - **Status card**: "Field delay", "Back in ten minutes". Explains a pause. It
-  **stays up until you press Hide card**: only the automatic *Field timeout*
-  card clears itself. The Delay card section tells you on screen whenever one
+  **stays up until you press Hide card**: only the field's own break card
+  clears itself. That one names the break ("Awards Break", "Lunch", or "Field
+  timeout" for a plain timeout) with its end time, goes when the field comes
+  back or the next match starts, and on the stream steps aside while an award
+  or slide plate is up. The Delay card section tells you on screen whenever one
   is live, and the jump strip has a **Delay card** chip to get back to it.
   The five buttons cover almost everything. If you type your own, keep it
   short: the card holds about ninety characters, the box stops you at that,
   and it counts the last thirty down beside the field so you can see the end
   coming. Fill in **Back in** and the time appears on its own line under the
-  message, which is the part the hall actually wants.
+  message, which is the part the hall actually wants. Once any card's time
+  has passed (an Awards Break often runs over), every screen says "Back soon"
+  instead of a time that has gone, so update or hide the card if the pause
+  runs long.
 - **Safety message**: covers every screen in the building, and stays until you
   clear it. This is for an evacuation or a hold. It is not for a long queue.
 
-Both go to the program, the side screens and every phone at once. When you send
-a safety message the console goes red so that whoever walks up next can see one
-is live.
+Both go to the program, the side screens and every phone at once. The side
+screens show a safety message on their next frame; phone pages pick it up
+within 5 seconds (When do we play) or 8 (shout-outs, crowd trivia); the
+trivia and arcade screens show the same safety plate, so a trivia or arcade
+monitor and the `CG_ARCADE` scene carry it too. When you send a safety
+message the console goes red so that whoever walks up next can see one is
+live. A restart does not lose it: it comes back
+with the desk.
 
 ### Awards
 
@@ -1005,10 +1051,17 @@ prize for arming them all on Saturday morning.
 You can always take anything by hand afterwards. Autopilot never cuts away
 from the field in the middle of a match.
 
-If OBS is not connected, the cues that cut an OBS scene grey out their **Run
-now** and the panel says how many. The rest, the music cues and the end game
-chip, keep working: they never touch OBS. Arming works for all of them either
-way, and an armed cue starts working the moment OBS comes back.
+If OBS is not connected, every **Run now** still works: the graphics still
+switch, and only the camera cut is missing, which you take by hand in OBS.
+The panel says how many cues that applies to. The exception is **Take
+replay**: it runs whenever the replay console takes a clip, armed or not, and
+it needs OBS. With OBS down it refuses, and the replay console says why,
+instead of cutting to an empty replay scene. Autopilot never cuts away from a
+replay while it plays. **Fill the gap** fires only when a score has been up
+three minutes and no next match is loaded (the end of a session, or a stall),
+and never over an award, a slide, a held screen or a replay. The music cues and the end game
+chip never touch OBS anyway. Arming works for all of them either way, and an
+armed cue starts cutting cameras again the moment OBS comes back.
 
 If a cue fails, its row says so in words and keeps saying so until it next
 succeeds. That row is the only place a failed cue is reported, which is the
@@ -1080,6 +1133,17 @@ presses late.
 The replay console (`/s/replay`) lists the marks. The desk has also marked
 things on its own: scoring bursts, lead changes, the end of auto.
 
+To air one: click a mark (it frames 6 seconds before the moment and 4 after)
+or a spot on the timeline, then **Cut clip** (`Enter`). Half and quarter speed
+are ready in seconds. Then `T` or **Take to program**. *On program* means OBS
+is playing it, and the stream cuts back by itself when the clip ends: to
+where the show was before the first of any back-to-back replays, or to where
+autopilot wanted to go while the clip ran. If the switcher has already cut
+somewhere else in OBS during the clip, that cut stands and nothing cuts
+back. *NOT on air* says why, and how to air it by hand. While a
+replay plays, automatic cuts wait for it; the field arming takes the stream
+back at once. **Cut full match video** greys out while it cuts.
+
 ### Surrogates
 
 If a team is playing a surrogate match, one that does not count for their
@@ -1090,7 +1154,8 @@ audience is not told a team lost a match that was never theirs to lose.
 
 ## Chapter 8 · The talent view (on-air talent)
 
-Open `/s/talent` on a tablet. It asks for the PIN once.
+Open `/s/talent` on a tablet. It asks for the PIN once, and again only if the
+desk restarts; it takes you to the sign-in page by itself.
 
 Everything on this page is something you can say out loud. That is the design
 rule: no jargon, no raw numbers that need translating.
@@ -1148,8 +1213,13 @@ If it does not:
 1. Check the desk laptop is on the **same network** as the scoring system.
    Event Wi-Fi and the field network are often not the same thing.
 2. Check the scoring computer is on and its display is up.
-3. Restart the desk (close the window, double-click again). The scan runs at
-   start.
+3. Restart the desk: it has no window to close, so open Task Manager
+   (**Ctrl+Shift+Esc**), find **CalGames 2026 Content Desk**, **End task**,
+   then double-click the exe again. The scan only runs at start; double-clicking
+   while the desk is still running just opens the browser on it, and if you
+   passed an option such as `/cheesy-host` or `/pin`, a box says it was ignored.
+   If the FTA gave you an address, run `START-DESK.cmd /cheesy-host:ADDRESS:8080`
+   instead.
 
 ### If it stays down
 
@@ -1186,6 +1256,14 @@ The crowd joins on their phones from the QR code the trivia screen shows. There
 are more than thirty questions loaded already, in rounds, so you can play a
 round after one match and pick up a different round after the next. Scores
 carry across the day.
+
+**Pick the winner** asks the crowd who takes the match that is up. Queue it
+and open it before that match starts; once its score is posted it can no
+longer be queued. Reveal it any time after the score posts, even after the
+next match has loaded. In a playoff it pays the alliance the field declared
+the winner, tiebreaks included. If the field moves on without posting that
+match, the host console says so, and **Next** drops the round with nobody
+paid.
 
 A round that has been played through will refuse to replay: that is on
 purpose, because replaying one pays everybody twice and quietly corrupts the
@@ -1239,15 +1317,27 @@ Ordered by how often it happens.
 | Music is coming out of the stream | The house page is on the wrong machine | Chapter 10: this one matters |
 | No robot photos | None uploaded for those teams | Fine. It falls back to a gold team number |
 | A wrong name on screen | Somebody typed it | Forget that profile, add it again spelled right, tick it, press Put on air |
-| "Port already in use" on start | An old copy is still running | The launcher offers to stop it. Say yes |
+| "Port already in use" on start | An old copy is still running | Double-click the exe again: that reopens the running desk. For a fresh start, end it in Task Manager first |
+| The final score sits for a full minute after every match | The field's automatic audience display is off (Cheesy, `/setup/settings`, **Enabled automated audience display**), so the desk waits out its one-minute limit | Ask the scorekeeper to tick it, or to press Intro on their audience display |
+| The final score came off almost at once | The scorekeeper changed the field's audience screen, or started the next match | Nothing: the desk follows the field |
 
 ### The universal fix
 
 Double-click the exe again. If the desk is still running, that simply reopens
-it in the browser. If it really has stopped (the laptop restarted, or it
-crashed), that starts it, and it comes back in a few seconds remembering the
-day: cards, coverage, the run of show, sponsor counts. Every screen in the
-building reconnects on its own.
+it in the browser, at once (before it unpacks anything or looks for the
+field). If you added an option such as `/pin` or `/cheesy-host`, a box says it
+was ignored because a desk is already running. If it really has stopped (the
+laptop restarted, or it crashed), that starts it, and it comes back in a few
+seconds remembering the day: cards, coverage, the run of show, sponsor
+counts, the day video chapters, quiz scores, the match pace, and any safety
+message, delay card, countdown or announcement that was up (a countdown that
+ran out meanwhile stays gone). Every screen in the building reconnects on its
+own. Consoles that need the PIN (the desk, talent view, replay,
+telestrator pad, arcade, trivia host, ref review, cards and the music
+machine) go to the sign-in page by themselves after a restart: type the PIN
+and each comes back to the page it was on. The on-air overlays and the venue
+TVs never ask. The music machine needs the PIN again too, and the music
+stays stopped until it gets it.
 
 If the desk is running but misbehaving and you want a genuinely fresh start,
 end it first: Task Manager (Ctrl+Shift+Esc), find **CalGames 2026 Content
@@ -1330,6 +1420,8 @@ Print this. Tick it off.
 - [ ] Six scenes created, names checked twice (chapter 4, step 2)
 - [ ] Program overlay added to `CG_MATCH`, both boxes unticked
 - [ ] Overlay pasted *as reference* into `CG_SCORE` and `CG_REPLAY`
+- [ ] `CG Replay Clip` Media Source in `CG_REPLAY`, under the Overlay (chapter 4, step 4b)
+- [ ] `"obs"` set in `config.json` if anyone will take replays to program (chapter 4, step 7)
 - [ ] Stream key entered, test stream run and stopped
 - [ ] Recording tested: record thirty seconds and play it back
 

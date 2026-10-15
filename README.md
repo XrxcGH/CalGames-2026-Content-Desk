@@ -144,8 +144,8 @@ window, except the one firewall rule that says otherwise.
 
 Needs Node 22.6+ (the JavaScript runtime; uses native TypeScript type stripping, no build step)
 and **ffmpeg** (a command-line video tool) for recording and replay
-(`winget install Gyan.FFmpeg` and take the full build, which carries the `segment` muxer and
-`minterpolate`). Everything except recording runs without ffmpeg.
+(`winget install Gyan.FFmpeg` and take the full build, which carries the `segment` muxer).
+Everything except recording runs without ffmpeg.
 
 ```powershell
 npm install
@@ -256,8 +256,10 @@ screen. `GET /api/cheesy/audit?format=text` prints every request the bridge has 
 
 Show automation and OBS are separate flags. Cues start **disarmed** (nobody should discover
 automation by having it happen to them mid-match) and are armed individually from `/api/cues`.
-The OBS password comes from the environment, never a CLI argument, because `argv` is visible in
-`ps` and in shell history.
+OBS comes on with `--obs`, or with `"obs": { "enabled": true }` in config.json, which is the
+switch the packaged exe uses (its launcher has no command line). The password comes from
+`OBS_PASSWORD` or `obs.password` in config.json, never a CLI argument, because `argv` is visible
+in `ps`, Task Manager and shell history. A malformed `--obs-host` is refused at startup.
 
 ```powershell
 $env:OBS_PASSWORD = "..."; npm start -- --cheesy --obs --obs-host 127.0.0.1:4455

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from './bus.ts';
 import { CoverageLedger } from './coverage.ts';
+import { clearSampleState, seedSampleState } from './demo.ts';
 import type { PublishQueue } from './publish/queue.ts';
 
 /** Just the slice of the queue the ledger joins against. */
@@ -279,4 +280,56 @@ test('the open per-team view hands out no unlisted video and no error text', () 
 
   // The gated route is unchanged: the operator needs the whole picture.
   assert.equal(ledger.forTeam(846)[0]?.publish?.videoId, 'secret-unlisted');
+});
+
+test('the sample match is never counted as played, even when the clock ends it', () => {
+  // The sample loads and starts "Qualification 42" with six real teams, and
+  // the clock (source 'clock', not 'demo') fires match.end 160 s later. That
+  // marked it played: the doors check went amber over a match nobody played
+  // and the open team page told parents 846 had played it on Friday.
+  const bus = new EventBus();
+  const ledger = new CoverageLedger(fakeQueue([]));
+  ledger.attach(bus);
+
+  seedSampleState(bus);
+  bus.advance(Date.now() + 170_000);
+  assert.equal(ledger.report().played, 0, 'the sample is not history');
+  assert.deepEqual(ledger.forTeamPublic(846), []);
+
+  // And a real match after the clear is counted as normal.
+  clearSampleState(bus);
+  playMatch(bus, 'Practice 1', { red: [846, 254, 1678] });
+  assert.equal(ledger.report().played, 1);
+  assert.deepEqual(ledger.forTeamPublic(846).map(r => r.name), ['Practice 1']);
+});
+
+test('a real match hand-loaded before the sample is not marked played by the sample\'s buzzer', () => {
+  // Manual mode: the desk loads Qualification 3 by hand, then somebody presses
+  // Sample. The sample's own start runs the clock, and 160 s later the CLOCK's
+  // buzzer (no match name on it) was filed against the last match loaded,
+  // which was the real Qualification 3: played, on the report and on the
+  // public team page, before anybody had played it.
+  const bus = new EventBus();
+  const ledger = new CoverageLedger(fakeQueue([]));
+  ledger.attach(bus);
+  bus.emit({
+    type: 'match.loaded', source: 'manual',
+    payload: {
+      id: 'qualification3', displayName: 'Qualification 3',
+      red: [604, 8, 199].map(number => ({ number, name: '' })),
+      blue: [5, 670, 253].map(number => ({ number, name: '' })),
+    },
+  });
+
+  try {
+    seedSampleState(bus);
+    bus.advance(Date.now() + 170_000);
+    const row = ledger.report().rows.find(r => r.name === 'Qualification 3');
+    assert.equal(row?.playedAt ?? null, null, 'the real match is still unplayed');
+    assert.equal(ledger.report().played, 0);
+    assert.deepEqual(ledger.forTeamPublic(604).filter(r => r.playedAt !== null), []);
+    assert.deepEqual(ledger.forTeamPublic(846), [], 'and the sample match is nobody\'s history');
+  } finally {
+    clearSampleState(bus);
+  }
 });

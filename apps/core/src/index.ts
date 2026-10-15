@@ -29,7 +29,7 @@ import { createSpotify } from './audio/spotify.ts';
 import { loadRefreshToken, saveRefreshToken } from './audio/token-store.ts';
 import { TriviaStore } from './trivia/store.ts';
 import { DEFAULT_QUESTIONS } from './trivia/questions.ts';
-import { loadConfig, publishReadiness } from './config.ts';
+import { loadConfig, obsHost, obsPlan, publishReadiness } from './config.ts';
 import { EventContent } from './content.ts';
 import { arcadeLabel } from './publish/naming.ts';
 import { PublishQueue } from './publish/queue.ts';
@@ -41,13 +41,20 @@ import { CardLedger } from './cards.ts';
 import { Rundown } from './rundown.ts';
 import { Sponsors } from './sponsors.ts';
 import { rebuildFromLog } from './rebuild.ts';
+import { LatchedRestore } from './latched.ts';
+import type { DeskEvent } from './types.ts';
 import { Awards } from './awards.ts';
 import { Slides } from './slides.ts';
 import { Vitals } from './vitals.ts';
 import { createLanBase } from './lan.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, '..', '..', '..');
+// CG_DESK_ROOT is for the boot tests and nothing else: it lets them start this
+// very file against a scratch folder, because every other way of testing the
+// boot would read and write the event's real data/ and config.json.
+const ROOT = process.env['CG_DESK_ROOT']
+  ? resolve(process.env['CG_DESK_ROOT'])
+  : resolve(HERE, '..', '..', '..');
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -76,6 +83,27 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
     `got "${arg('port') ?? process.env['PORT']}". Try --port 8720.`);
   process.exit(1);
 }
+// Checked here with the other launch flags rather than where OBS is dialled:
+// an unparseable host makes new WebSocket() throw, which surfaced as a fatal
+// stack trace halfway through boot, and one with a path or a second scheme
+// dialled nothing, forever. One line at the door instead. See obsHost().
+const obsHostFlag = arg('obs-host') ? obsHost(arg('obs-host')) : undefined;
+if (obsHostFlag === null) {
+  console.error('[core] --obs-host needs a host:port like 127.0.0.1:4455.');
+  process.exit(1);
+}
+
+/*
+ * The desk tools/render-previews.mjs boots to photograph, and nothing else.
+ *
+ * It runs against the real ROOT, so the boot-time rebuild read the real
+ * day's log into it: today's safety message, delay card, countdown and
+ * announcement, real card marks, the crowd's trivia names, the arcade
+ * standings. Every shot then photographed those instead of the fixtures it
+ * posts, and previews/ is committed. So this desk starts from nothing, and it
+ * never dials OBS, because the operator's OBS may be on air with the show.
+ */
+const previewDesk = process.env['CG_PREVIEW_DESK'] === '1';
 
 // A stray rejected promise must not take the desk down mid-show. Every
 // subsystem here already degrades on its own; log loudly and keep going,
@@ -452,16 +480,22 @@ function lanAddress(): string | null {
 }
 
 // ---- show automation --------------------------------------------------------
-// OBS password comes from the environment, never a CLI arg: argv is visible
-// in `ps` and in the shell history of whoever launched it.
+// OBS comes on with --obs, or with "obs": { "enabled": true } in config.json,
+// which is the only switch the packaged exe has: its launcher passes no --obs.
+// The password comes from OBS_PASSWORD or config.json, never a CLI arg: argv
+// is visible in Task Manager, `ps` and the shell history of whoever launched it.
 //
 //   --obs [--obs-host 127.0.0.1:4455]   OBS_PASSWORD=...
 //   --autopilot                          arm every cue at boot (default: off)
 let obs: ObsClient | null = null;
-if (has('obs')) {
+const obsWanted = obsPlan(config, { flag: has('obs'), ...(obsHostFlag ? { host: obsHostFlag } : {}) });
+if (previewDesk) {
+  console.log('[obs] off on the preview desk, which must never touch the show\'s OBS');
+} else if (obsWanted.enabled) {
+  console.log(`[obs] ${obsWanted.summary}`);
   const client: ObsClient = new ObsClient({
-    host: arg('obs-host') || '127.0.0.1:4455',
-    ...(process.env['OBS_PASSWORD'] ? { password: process.env['OBS_PASSWORD'] } : {}),
+    host: obsWanted.host,
+    ...(obsWanted.password ? { password: obsWanted.password } : {}),
     onStatus: (up, detail) => {
       console.log(`[obs] ${up ? 'connected' : 'down'}: ${detail}`);
       if (up) void suppressCheesy(client);
@@ -485,6 +519,8 @@ if (has('obs')) {
     }
   };
   setInterval(() => { if (client.connected) void suppressCheesy(client); }, 60_000);
+} else {
+  console.log(`[obs] ${obsWanted.summary}`);
 }
 
 // Cues start disarmed. Nobody should discover automation by having it happen
@@ -647,6 +683,10 @@ cardLedger.attach(bus);
 const coverage = new CoverageLedger(publish);
 coverage.attach(bus);
 
+// Today's day-VOD chapter landmarks from before this restart, for the server's
+// chapter list. Filled by the rebuild below; see chapterSeed in server.ts.
+const chapterSeed: DeskEvent[] = [];
+
 /*
  * All four of the above are derived, in-memory, and empty at boot. And a desk
  * DOES restart at an event: a laptop sleeps, a power strip gets kicked,
@@ -660,8 +700,20 @@ coverage.attach(bus);
  * through the bus: re-emitting the morning would re-fire cues, re-cut clips
  * and take the program screen to whatever was up at 9am. Nothing here reaches
  * air. See rebuild.ts.
+ *
+ * Except on the preview desk (see previewDesk), which photographs only the
+ * fixtures it posts, never the real day.
  */
-{
+if (previewDesk) {
+  console.log('[rebuild] skipped on the preview desk: nothing from today\'s log is restored');
+} else {
+  // This run's own events are already in bus.recent (and so already live);
+  // the log may hold them too once it has flushed. Anything stamped from
+  // this run's first event on is not "before the restart".
+  const thisRun = bus.recent[0]?.ts ?? Number.POSITIVE_INFINITY;
+  const latched = new LatchedRestore(thisRun);
+  const CHAPTER_TYPES = new Set<DeskEvent['type']>(
+    ['match.loaded', 'match.start', 'award.presented', 'alliance_selection.update']);
   const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'), [
     cardLedger, coverage, rundown, sponsors, awards,
     // Trivia scores and played rounds, and the arcade's grand prix standings,
@@ -679,10 +731,25 @@ coverage.attach(bus);
     // so folding them back through the reducer rebuilds byTeam with the
     // right phase, and restore() touches nothing but the snapshot.
     { observe: ev => { if (ev.type === 'card.issued') bus.restore(ev); } },
+    // The safety message, the delay card, the event countdown and the live
+    // announcement are set once and left up on purpose, and a restart used
+    // to drop all four from every screen without a word. See latched.ts.
+    latched,
+    // The day VOD's chapters. A midday restart used to list only the matches
+    // after it, with the morning silently missing from the description.
+    {
+      observe: ev => {
+        if (CHAPTER_TYPES.has(ev.type) && ev.ts < thisRun) chapterSeed.push(ev);
+      },
+    },
   ]);
+  // After the rebuild, so the last word on each comes from the whole day.
+  const restored = latched.apply(bus);
   if (rebuilt.events) {
     console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log file(s): ` +
-      'cards, coverage, run of show, sponsor counts, trivia, arcade and match pace carried over'
+      'cards, coverage, run of show, sponsor counts, trivia, arcade, match pace and '
+      + 'chapters carried over'
+      + (restored.length ? `; still on screen: ${restored.join(', ')}` : '')
       + (rebuilt.skipped ? ` (${rebuilt.skipped} torn line(s) skipped)` : '')
       + (rebuilt.otherDay ? ` (${rebuilt.otherDay} from another day left alone)` : ''));
   }
@@ -694,6 +761,9 @@ coverage.attach(bus);
 const vitals = new Vitals({
   bus, config, root: ROOT, recorder, publish, obs, cheesy, audio, coverage,
   recordBytesPerSec: undefined,
+  // Whether an empty desk PIN leaves the controls open to the venue Wi-Fi
+  // depends on what the server is listening on.
+  host,
 });
 
 {
@@ -797,7 +867,11 @@ const sampleStores = { arcade, trivia, slides, profiles, media, cards: cardLedge
  */
 bus.subscribe(ev => {
   if (ev.type === 'match.loaded' && ev.source !== 'demo') {
-    clearSampleState(bus, sampleStores);
+    // The overlays hold the media map from their last snapshot, and no event
+    // carries it, so the sample's drawn robots stayed on an open program
+    // overlay for real teams until it reconnected. `server` is assigned just
+    // below and nothing can emit between the two statements.
+    if (clearSampleState(bus, sampleStores)) server.broadcastMedia();
   }
 });
 
@@ -809,6 +883,7 @@ const server = startServer({
   // while the field bridge is up; see the route.
   seedSample: () => seedSampleState(bus, sampleStores),
   clearSample: () => clearSampleState(bus, sampleStores),
+  chapterSeed,
 });
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).

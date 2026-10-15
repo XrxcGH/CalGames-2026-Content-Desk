@@ -37,6 +37,16 @@ const BURST = {
   cooldownMs: 6_000,
 };
 
+/**
+ * Cards inside this window of the last Card marker are the same moment. A
+ * playoff card is the alliance's, and the field bridge reports it once per
+ * member, so one yellow arrived as three or four card.issued events stamped
+ * a millisecond or two apart and dropped that many markers on one spot of
+ * the timeline. A referee carding two robots for one collision is one
+ * moment to replay as well.
+ */
+const CARD_SAME_MOMENT_MS = 2_000;
+
 export function attachMarkers(bus: EventBus): () => void {
   /** Recent fuel deltas per alliance, for the sliding burst window. */
   const recent: Record<Alliance, { ts: number; amount: number }[]> = { red: [], blue: [] };
@@ -47,8 +57,10 @@ export function attachMarkers(bus: EventBus): () => void {
   // survive a tie so that a later go-ahead by the OTHER alliance still reads
   // as a lead change instead of a second "first blood".
   let leader: Alliance | null = null;
+  /** When the last Card marker dropped. See CARD_SAME_MOMENT_MS. */
+  let lastCardAt = -Infinity;
 
-  const mark = (m: Omit<Marker, 'ts' | 'matchClock'>, ts: number): void => {
+  const mark =(m: Omit<Marker, 'ts' | 'matchClock'>, ts: number): void => {
     bus.emit({
       type: 'replay.marker',
       source: 'cue',
@@ -63,6 +75,7 @@ export function attachMarkers(bus: EventBus): () => void {
         recent.red = []; recent.blue = [];
         lastBurst.red = 0; lastBurst.blue = 0;
         leader = null;
+        lastCardAt = -Infinity;
         break;
       }
 
@@ -83,8 +96,15 @@ export function attachMarkers(bus: EventBus): () => void {
       }
 
       case 'foul.called':
+        mark({ kind: 'foul', label: 'Foul', priority: 3 }, ev.ts);
+        break;
+
       case 'card.issued':
-        mark({ kind: 'foul', label: ev.type === 'foul.called' ? 'Foul' : 'Card', priority: 3 }, ev.ts);
+        // Absolute distance: the members of one alliance card can reach
+        // the bus out of stamp order.
+        if (Math.abs(ev.ts - lastCardAt) <= CARD_SAME_MOMENT_MS) break;
+        lastCardAt = ev.ts;
+        mark({ kind: 'foul', label: 'Card', priority: 3 }, ev.ts);
         break;
 
       case 'score.delta': {
@@ -150,6 +170,14 @@ export function attachMarkers(bus: EventBus): () => void {
   });
 }
 
+/**
+ * How far before the press a manual mark lands: everybody presses late. The
+ * desk console and the phone remote take it off the match clock they send;
+ * the moment's wall time has to come back by the same amount, or a mark
+ * framed by its `ts` sits two seconds after the moment it was pressed for.
+ */
+export const MANUAL_LEAD_S = 2;
+
 /** Pull markers back out of the event log for the replay timeline. */
 export function markersSince(bus: EventBus, sinceMs: number): Marker[] {
   return bus.recent
@@ -160,13 +188,20 @@ export function markersSince(bus: EventBus, sinceMs: number): Marker[] {
       // operator Mark from the timeline. Backfill what is missing from the
       // event envelope instead of trusting the payload to be a full Marker.
       const p = (ev.payload ?? {}) as Partial<Marker>;
+      const kind = p.kind ?? 'manual';
+      // A manual mark's event is stamped when the press reached the desk.
+      // The consoles back-date only the clock; the Stream Deck's Mark sends
+      // neither, so both its clock and its time are taken back here, which is
+      // what its control-map entry ("now minus two seconds") promises.
+      const lead = kind === 'manual' ? MANUAL_LEAD_S : 0;
+      const clock = ev.matchClock === null ? null : ev.matchClock - lead;
       return {
         kind: 'manual',
         label: 'Manual',
         priority: 2,
-        matchClock: ev.matchClock,
+        matchClock: clock,
         ...p,
-        ts: typeof p.ts === 'number' ? p.ts : ev.ts,
+        ts: typeof p.ts === 'number' ? p.ts : ev.ts - lead * 1000,
       } as Marker;
     })
     .sort((a, b) => a.ts - b.ts);

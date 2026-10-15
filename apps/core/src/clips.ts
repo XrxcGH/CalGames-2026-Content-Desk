@@ -11,10 +11,27 @@
  * implementation. See docs/04 and docs/11.
  */
 
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import { join } from 'node:path';
 import { duration, run, type EncoderChoice, type FfmpegTools } from './ffmpeg.ts';
+
+/**
+ * Remove scratch files without ever failing the cut that made them.
+ *
+ * A cleanup error used to reject a cut that had already finished: on Windows
+ * an unlink of a list another ffmpeg still had open threw EBUSY out of the
+ * finally block, and the publish queue burned an attempt re-cutting a match
+ * it already had. A leftover text file is a nuisance; a finished clip
+ * reported as failed is a lost upload.
+ */
+async function sweep(files: string[]): Promise<void> {
+  await Promise.all(files.map(f => rm(f, { force: true }).catch(() => undefined)));
+}
+
+/** Windows' answers to "replace a file that something still has open". */
+const IN_USE = new Set(['EPERM', 'EBUSY', 'EACCES', 'EEXIST']);
 
 export interface Segment {
   file: string;
@@ -149,6 +166,15 @@ export class ClipStore {
   #probe: (file: string) => Promise<number | null>;
   /** file -> {size, seconds} for segments that had to be probed. */
   #durations = new Map<string, { size: number; seconds: number }>();
+  /**
+   * Output names a cut in this process is writing right now, lowercased
+   * because NTFS does not care about case. The publish queue's auto cut and
+   * the replay console's full-match cut of the same match asked for the same
+   * name, and a double press of one button does the same: two ffmpeg runs
+   * then shared every scratch file and the output. A second cut under a name
+   * that is taken gets the next free -2, -3 instead.
+   */
+  #writing = new Set<string>();
 
   constructor(tools: FfmpegTools, encoder: EncoderChoice, recRoot: string, opts: ClipStoreOptions = {}) {
     this.#tools = tools;
@@ -325,25 +351,34 @@ export class ClipStore {
     const offset = Math.max(0, (fromMs - segs[0]!.startMs) / 1000);
     const wanted = (toMs - fromMs) / 1000;
 
+    // Unique per call because outFile is: extract() names it with a token
+    // no other cut shares.
     const listFile = `${outFile}.concat.txt`;
     // ffmpeg's concat demuxer needs forward slashes and escaped quotes.
     await writeFile(listFile,
       segs.map(s => `file '${s.file.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
 
-    const filters: string[] = [];
-    if (speed !== 1) {
-      // setpts alone gives choppy slow-mo; minterpolate synthesizes frames.
-      // Too slow for live, fine for a 12s clip in the gap between matches.
-      filters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
-      filters.push('minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:vsbmc=1');
-    }
-
-    // Output-side -ss/-t measure the timeline AFTER the filter chain runs,
-    // where setpts has already stretched it by 1/speed. Seek and duration
-    // must stretch the same way, or a slow-mo clip seeks to the wrong
-    // footage and comes out at the realtime length.
-    const outSeek = offset / speed;
-    const outLen = wanted / speed;
+    /*
+     * Slow motion trims FIRST, then retimes, then fills in frames cheaply.
+     *
+     * It used to retime the whole input and motion-interpolate it
+     * (minterpolate mi_mode=mci), then throw away the pre-roll with an
+     * output-side seek. So every frame from the start of the first covering
+     * segment, up to six seconds before the in-point, was synthesized and
+     * discarded, at about five interpolated 1080p frames a second: the
+     * console's default ten-second window at half speed ran into the five
+     * minute kill and never aired. Trimming in the filter graph means only
+     * the wanted seconds are ever retimed, and `framerate` blends the gaps
+     * at hundreds of frames a second instead of estimating motion. The
+     * first frame and the length come out the same.
+     */
+    const slow = speed !== 1;
+    const filters: string[] = slow ? [
+      `trim=start=${offset.toFixed(3)}:duration=${wanted.toFixed(3)}`,
+      'setpts=PTS-STARTPTS',
+      `setpts=${(1 / speed).toFixed(4)}*PTS`,
+      'framerate=fps=60',
+    ] : [];
 
     try {
       const { code, stderr } = await run(this.#tools.ffmpeg, [
@@ -351,8 +386,9 @@ export class ClipStore {
         '-f', 'concat', '-safe', '0', '-i', listFile,
         // -ss AFTER -i is the accurate (decode-and-discard) seek. Before -i is
         // faster but keyframe-bound, which lands replays on the wrong moment.
-        '-ss', outSeek.toFixed(3),
-        '-t', outLen.toFixed(3),
+        // Realtime only: slow motion is bounded by its trim above, and an
+        // output-side seek there would measure the stretched timeline.
+        ...(slow ? [] : ['-ss', offset.toFixed(3), '-t', wanted.toFixed(3)]),
         ...(filters.length ? ['-vf', filters.join(',')] : []),
         '-c:v', this.#encoder.encoder, ...this.#encoder.args,
         // Audio rides along at realtime: match videos and segments upload with
@@ -373,7 +409,7 @@ export class ClipStore {
       // served directory on the recorder's own disk, and a text file left
       // beside every cut added up to hundreds of orphans over a weekend, so
       // it goes whether the cut worked or not.
-      await rm(listFile, { force: true });
+      await sweep([listFile]);
     }
   }
 
@@ -420,52 +456,103 @@ export class ClipStore {
     const first = ranges[0]!;
     const label = (req.label ?? `${sourceId}-${first.fromMs}`).replace(/[^\w.-]+/g, '_');
     const stamp = new Date(first.fromMs).toISOString().slice(11, 19).replace(/:/g, '');
-    const base = `${label}-${stamp}${speed !== 1 ? `-${String(speed).replace('.', '')}x` : ''}`;
-    const outFile = join(this.#outDir, `${base}.mp4`);
+    const asked = `${label}-${stamp}${speed !== 1 ? `-${String(speed).replace('.', '')}x` : ''}`;
 
-    if (ranges.length === 1) {
-      await this.#extractRange(sourceId, first, outFile, speed);
-    } else {
-      // Render each part separately with an accurate seek, then join. All parts
-      // share encoder settings, so the join is a stream copy: no re-encode,
-      // no generation loss, and the cut lands exactly where we asked.
-      const parts: string[] = [];
-      const joinList = join(this.#outDir, `${base}.join.txt`);
-      try {
-        for (const [i, range] of ranges.entries()) {
-          const part = join(this.#outDir, `${base}.part${i}.mp4`);
-          await this.#extractRange(sourceId, range, part, speed);
-          parts.push(part);
+    // Claim a name nobody in this process is writing. See #writing.
+    let base = asked;
+    for (let n = 2; this.#writing.has(base.toLowerCase()); n++) base = `${asked}-${n}`;
+    const claim = base.toLowerCase();
+    this.#writing.add(claim);
+
+    // Every file this call writes before the finished clip carries a token
+    // no other call shares, and the clip itself is rendered under it too and
+    // only moved to its name once it is whole. ffmpeg -y on the real name
+    // could truncate a clip the publish queue was halfway through uploading.
+    const work = join(this.#outDir, `${base}.${process.pid}-${randomBytes(4).toString('hex')}`);
+    const render = `${work}.mp4`;
+    let settled: { file: string; name: string };
+    try {
+      if (ranges.length === 1) {
+        await this.#extractRange(sourceId, first, render, speed);
+      } else {
+        // Render each part separately with an accurate seek, then join. All parts
+        // share encoder settings, so the join is a stream copy: no re-encode,
+        // no generation loss, and the cut lands exactly where we asked.
+        const parts: string[] = [];
+        const joinList = `${work}.join.txt`;
+        try {
+          for (const [i, range] of ranges.entries()) {
+            const part = `${work}.part${i}.mp4`;
+            // Listed before it is cut, so a part ffmpeg died halfway through
+            // writing is swept with the rest.
+            parts.push(part);
+            await this.#extractRange(sourceId, range, part, speed);
+          }
+
+          await writeFile(joinList,
+            parts.map(p => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
+
+          const { code, stderr } = await run(this.#tools.ffmpeg, [
+            '-hide_banner', '-loglevel', 'error', '-y',
+            '-f', 'concat', '-safe', '0', '-i', joinList,
+            '-c', 'copy', render,
+          ], 180_000);
+          if (code !== 0) throw new Error(`Joining clip parts failed: ${stderr.trim().split('\n').at(-1)}`);
+        } finally {
+          // The parts and the join list exist only to feed the join. Each part
+          // is a full re-encoded video and a normal match cut makes two of
+          // them, so leaving them behind parked two extra copies of every
+          // auto-queued match in a served directory on the disk vitals is
+          // already watching for recording headroom. Swept on failure too: the
+          // queue retries the same cut, and only the finished clip should ever
+          // remain in rec/clips.
+          await sweep([joinList, ...parts]);
         }
-
-        await writeFile(joinList,
-          parts.map(p => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
-
-        const { code, stderr } = await run(this.#tools.ffmpeg, [
-          '-hide_banner', '-loglevel', 'error', '-y',
-          '-f', 'concat', '-safe', '0', '-i', joinList,
-          '-c', 'copy', outFile,
-        ], 180_000);
-        if (code !== 0) throw new Error(`Joining clip parts failed: ${stderr.trim().split('\n').at(-1)}`);
-      } finally {
-        // The parts and the join list exist only to feed the join. Each part
-        // is a full re-encoded video and a normal match cut makes two of
-        // them, so leaving them behind parked two extra copies of every
-        // auto-queued match in a served directory on the disk vitals is
-        // already watching for recording headroom. Swept on failure too: the
-        // queue retries the same cut under the same base name, and only the
-        // finished clip should ever remain in rec/clips.
-        await Promise.all([joinList, ...parts].map(f => rm(f, { force: true })));
       }
+      settled = await this.#settle(render, base);
+    } catch (err) {
+      await sweep([render]);
+      throw err;
+    } finally {
+      this.#writing.delete(claim);
     }
 
     const wanted = ranges.reduce((n, r) => n + (r.toMs - r.fromMs) / 1000, 0) / speed;
-    const seconds = await duration(this.#tools.ffprobe, outFile) ?? wanted;
+    const seconds = await duration(this.#tools.ffprobe, settled.file) ?? wanted;
     return {
-      path: outFile,
-      url: `/clips/${base}.mp4`,
+      path: settled.file,
+      url: `/clips/${settled.name}`,
       sourceId, ranges, seconds, speed,
       label: req.label ?? base,
     };
+  }
+
+  /**
+   * Move a finished render to its name, and never over a clip in use.
+   *
+   * A re-cut under the same name replaces the old clip, which is what the
+   * queue's retries want. But Windows refuses to replace a file something
+   * still has open (the queue uploading it, OBS playing it, a console
+   * previewing it), and the old -y truncated it in place instead. A refused
+   * replace takes the next free -2, -3 rather than failing a cut that
+   * finished, and leaves the clip in use exactly as it was.
+   */
+  async #settle(render: string, base: string): Promise<{ file: string; name: string }> {
+    let last: unknown = null;
+    for (let n = 1; n <= 20; n++) {
+      const stem = n === 1 ? base : `${base}-${n}`;
+      // Another cut in flight has claimed this one; it is not ours to take.
+      if (n > 1 && this.#writing.has(stem.toLowerCase())) continue;
+      const name = `${stem}.mp4`;
+      const file = join(this.#outDir, name);
+      try {
+        await rename(render, file);
+        return { file, name };
+      } catch (err) {
+        if (!IN_USE.has((err as NodeJS.ErrnoException).code ?? '')) throw err;
+        last = err;
+      }
+    }
+    throw new Error(`Every name for this clip is in use: ${(last as Error | null)?.message ?? 'unknown'}`);
   }
 }

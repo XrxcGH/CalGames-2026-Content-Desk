@@ -132,6 +132,10 @@ export type DeskEventType =
   // switcher cutting cameras. Different layers, deliberately different events.
   | 'screen.change' | 'scene.change' | 'sound.play'
   | 'replay.marker' | 'replay.clip_ready' | 'replay.play'
+  // What became of a replay.play, from the cue that runs it, so the console
+  // that pressed Take can say "on program" only when OBS took the clip, and
+  // the overlay can stand aside for exactly as long as the clip runs.
+  | 'replay.on_air' | 'replay.failed'
   | 'telestrator.stroke' | 'telestrator.undo' | 'telestrator.clear'
   | 'telestrator.frame' | 'telestrator.hide'
   // arcade
@@ -552,6 +556,13 @@ export interface StatusCard {
   message: string;
   /** Optional "back at" estimate, wall clock ms. */
   backAt: number | null;
+  /**
+   * Raised by the field (a break or timeout), not by a person. Only these
+   * are retired when the field comes back; an operator's card carries the
+   * producer's wording and stays until they clear it. status.show never sets
+   * this, whatever its payload says.
+   */
+  auto?: true;
 }
 
 /**
@@ -606,6 +617,23 @@ export interface DeskState {
    * map match clock onto wall clock.
    */
   lastMatchStartedAt: number | null;
+  /**
+   * Where match clock -20 sits on the TELEOP axis: `matchStartedAt` after
+   * the field's auto-to-teleop pause re-anchored it, and the same as the true
+   * start when there was no pause (desk-only, or no teleop yet). Survives the
+   * buzzer like `lastMatchStartedAt`, because the replay console maps a
+   * teleop clock back to wall time after the match is over, and the true
+   * start puts every teleop moment early by the length of the pause.
+   * Cleared only by the next load or an unload.
+   */
+  teleopAnchorAt: number | null;
+  /**
+   * A replay clip OBS is playing on program right now, as the replay cue
+   * reported it. The overlay stands aside (the Final screen is full-frame and
+   * would hide the clip) until `at + seconds`, or until the switcher cuts
+   * somewhere else. Never set from anywhere but that cue.
+   */
+  replayOnAir: { label: string; seconds: number; at: number; scene: string } | null;
   /**
    * When the CURRENT match was loaded. The marker feed cuts on this: markers
    * from before it belong to the previous match, and serving them once put
@@ -803,6 +831,8 @@ export const initialState = (): DeskState => ({
   phase: 'pre',
   matchStartedAt: null,
   lastMatchStartedAt: null,
+  teleopAnchorAt: null,
+  replayOnAir: null,
   matchLoadedAt: null,
   matchEndedAt: null,
   scorePostedAt: null,

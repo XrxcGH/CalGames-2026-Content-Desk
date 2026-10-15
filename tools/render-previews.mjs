@@ -484,6 +484,13 @@ async function main() {
       // empty REMOTE_PIN collapses the desk gate: this desk exists only to
       // be photographed, and the award shot has to be able to drive a reveal.
       JA_PIN: '', SETUP_PIN: '',
+      // The photographed desk starts from nothing. Booted against the real
+      // ROOT, its rebuild put today's real safety message, delay card,
+      // countdown, announcement, card marks and the crowd's trivia names
+      // into every shot until the fixtures replaced them, and previews/ is
+      // committed. It also keeps this desk off the show's OBS when
+      // config.json has OBS switched on. See previewDesk in index.ts.
+      CG_PREVIEW_DESK: '1',
     },
   });
   desk.stdout.on('data', () => {});

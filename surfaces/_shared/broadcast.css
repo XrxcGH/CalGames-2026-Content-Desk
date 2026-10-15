@@ -1324,3 +1324,15 @@
 .sl-lines[data-kind="shoutout"] div:last-child:not(:only-child) {
   font-size: 30px; color: var(--cg-white-dim);
 }
+
+/* ==========================================================================
+   Replay: the overlay standing aside while OBS plays a clip underneath it.
+   Transparent but for one chip in the title-safe corner, which is all a
+   viewer needs to know the picture is not live and nothing that hides the
+   play. The Gold Sweep into and out of it is the replay wipe.
+   ========================================================================== */
+.rp-bug {
+  position: absolute; top: var(--safe-y); left: var(--safe-x);
+  padding: 8px 24px;
+  letter-spacing: .2em; text-indent: .2em; font-weight: 700;
+}

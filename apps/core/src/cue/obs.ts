@@ -12,6 +12,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import { WebSocket } from 'ws';
 
 const OP = { Hello: 0, Identify: 1, Identified: 2, Event: 5, Request: 6, RequestResponse: 7 } as const;
@@ -21,7 +22,10 @@ interface Pending { resolve: (data: unknown) => void; reject: (err: Error) => vo
 export interface ObsOpts {
   /** e.g. "127.0.0.1:4455" */
   host: string;
-  /** Read from the environment, never a CLI arg (argv is visible in `ps`). */
+  /**
+   * From OBS_PASSWORD or config.json's obs.password, never a CLI arg (argv is
+   * visible in `ps`, Task Manager and shell history).
+   */
   password?: string;
   onStatus?: (connected: boolean, detail: string) => void;
 }
@@ -53,6 +57,15 @@ export class ObsClient {
 
   get connected(): boolean { return this.#ready; }
 
+  /**
+   * Whether OBS runs on this machine, so a path on the desk's disk is a path
+   * OBS can open too. The replay take hands OBS the clip as a local file:
+   * pointed at another machine, the same path names nothing there, and OBS
+   * plays an empty source over a scene the desk has just cut the stream to.
+   * Better to refuse the take and say so than to air black.
+   */
+  get local(): boolean { return isLocalHost(this.#opts.host); }
+
   connect(): void {
     if (this.#stopping) return;
     const ws = new WebSocket(`ws://${this.#opts.host}`);
@@ -70,7 +83,7 @@ export class ObsClient {
         };
         if (auth) {
           if (!this.#opts.password) {
-            this.#opts.onStatus?.(false, 'OBS requires a password, set OBS_PASSWORD');
+            this.#opts.onStatus?.(false, 'OBS asks for a password: put it in "obs": { "password": ... } in config.json (or set OBS_PASSWORD)');
             ws.close();
             return;
           }
@@ -163,6 +176,45 @@ export class ObsClient {
     return this.request('SetCurrentProgramScene', { sceneName });
   }
 
+  /**
+   * The scene OBS has on program right now. Asked rather than remembered:
+   * the handbook has the switcher operator cut in OBS by hand, so the last
+   * scene the desk itself cut to is often not what is on the stream.
+   */
+  async programScene(): Promise<string | null> {
+    const r = await this.request<{ currentProgramSceneName?: unknown; sceneName?: unknown } | undefined>(
+      'GetCurrentProgramScene');
+    const name = r?.currentProgramSceneName ?? r?.sceneName;
+    return typeof name === 'string' && name ? name : null;
+  }
+
+  /**
+   * Load a file into an existing Media Source and play it from the top.
+   *
+   * The source has to exist already (the handbook has the operator make it):
+   * creating inputs remotely would mean guessing at a scene layout nobody
+   * here can see. `overlay: true` merges, so the operator's own settings on
+   * the source survive. close_when_inactive lets go of the file as soon as
+   * the scene is cut away from, so a later cut is never blocked by OBS still
+   * holding the previous clip open; restart_on_activate plays it from the
+   * start when the replay scene comes up. The explicit restart covers the
+   * second take of the day, when the scene is already live and activation
+   * never happens.
+   */
+  async playMedia(inputName: string, file: string): Promise<void> {
+    await this.request('SetInputSettings', {
+      inputName,
+      inputSettings: {
+        is_local_file: true, local_file: file,
+        restart_on_activate: true, close_when_inactive: true,
+      },
+      overlay: true,
+    });
+    await this.request('TriggerMediaInputAction', {
+      inputName, mediaAction: 'OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART',
+    });
+  }
+
   /** Start the configured stream output (OBS holds the RTMP URL and key). */
   startStream(): Promise<unknown> {
     return this.request('StartStream');
@@ -231,6 +283,27 @@ export class ObsClient {
     this.#ws?.close();
     this.#ready = false;
   }
+}
+
+/**
+ * "127.0.0.1:4455", "localhost:4455", "[::1]:4455", or this machine's own
+ * LAN address: anything that reaches OBS without leaving the box. The last
+ * case matters because a volunteer copying the address off the desk's own
+ * front page types the LAN IP, not the loopback one.
+ */
+export function isLocalHost(hostPort: string): boolean {
+  const raw = hostPort.trim().toLowerCase();
+  const host = raw.startsWith('[') ? raw.slice(1, raw.indexOf(']'))   // [::1]:4455
+    : (raw.match(/:/g) ?? []).length > 1 ? raw                         // bare IPv6
+      : raw.replace(/:\d*$/, '');                                      // name or v4, :port
+  if (!host) return false;
+  if (host === 'localhost' || host === '::1' || /^127\./.test(host)) return true;
+  for (const list of Object.values(networkInterfaces())) {
+    for (const nic of list ?? []) {
+      if (nic.address.toLowerCase() === host) return true;
+    }
+  }
+  return false;
 }
 
 /** base64(sha256(base64(sha256(password + salt)) + challenge)) */

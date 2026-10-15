@@ -11,7 +11,7 @@
 import type { EventBus } from '../bus.ts';
 import type { DeskEvent } from '../types.ts';
 import {
-  award, pickQuestion, publicStandings, resolvePick, standings,
+  award, pickQuestion, publicStandings, resolvePick, standings, PICK_BLUE, PICK_RED, PICK_TIE,
   type PublicStanding, type TriviaAnswer, type TriviaPhase, type TriviaPlayer, type TriviaQuestion,
 } from './model.ts';
 import { DEFAULT_QUESTIONS } from './questions.ts';
@@ -118,9 +118,24 @@ export class TriviaStore {
   #sample = false;
   #beforeSample: { index: number; asked: number; askedIds: Set<string> } | null = null;
   #askedAfterSample = 0;
+  /**
+   * The winning pick option of every match this store has seen posted, by
+   * match id.
+   *
+   * reveal() used to read the result off the live state, which only holds
+   * the LOADED match's. The field loads the next match 20 to 60 seconds after
+   * a post, and that load clears it, so a host who revealed after the next
+   * match came up was told "The score is not posted yet", which was false
+   * and sent them looking for a scorekeeper problem. Memory only, like the
+   * picks themselves: neither survives a restart.
+   */
+  #results = new Map<string, 0 | 1 | 2>();
+  /** The match each pick was made on, by question id, for the host's messages. */
+  #pickNames = new Map<string, string>();
 
   constructor(bus: EventBus, questions: TriviaQuestion[] = DEFAULT_QUESTIONS) {
     this.#bus = bus;
+    bus.subscribe(ev => this.#watchField(ev));
     // Pick-the-winner rounds are session-scoped and must not arrive from
     // disk. Every bank edit persists the whole array, picks included, so a
     // pick queued in the morning rode data/trivia.json into the next boot:
@@ -499,6 +514,49 @@ export class TriviaStore {
     return { locked: true };
   }
 
+  // ---- the field's results ------------------------------------------------
+
+  /**
+   * Remember each posted result as it happens. Subscribers run after the
+   * reducer, so the state read here is the one the post produced, with the
+   * winner the reducer adopted from the field.
+   */
+  #watchField(ev: DeskEvent): void {
+    if (ev.type === 'match.loaded') {
+      // A match loaded again after its post is the arena REPLAYING it, and
+      // the first run's result is void. Dropped, so a pick on it waits for
+      // the re-run's post instead of paying on a score the field threw away.
+      const id = (ev.payload as { id?: unknown } | null)?.id;
+      if (typeof id === 'string') this.#results.delete(id);
+      return;
+    }
+    if (ev.type !== 'match.score_posted') return;
+    const id = this.#bus.state.match?.id;
+    if (id) this.#results.set(id, this.#liveResult());
+  }
+
+  /**
+   * The loaded match's result as a pick option. The field's own verdict
+   * first: a playoff level on points is decided on tiebreakers, and a
+   * disqualified alliance can hold the higher score, so the totals alone
+   * would pay "Tie" or the losing side. The totals decide only when the
+   * field gave no verdict.
+   */
+  #liveResult(): 0 | 1 | 2 {
+    const s = this.#bus.state;
+    if (s.officialWinner === 'red') return PICK_RED;
+    if (s.officialWinner === 'blue') return PICK_BLUE;
+    if (s.officialWinner === 'tie') return PICK_TIE;
+    return resolvePick(s.score.red.total, s.score.blue.total);
+  }
+
+  /** The result a pick resolves against, or null when its match has none. */
+  #resultFor(q: TriviaQuestion): 0 | 1 | 2 | null {
+    if (q.matchId != null) return this.#results.get(q.matchId) ?? null;
+    // A pick made on a match the field gave no id can only be judged live.
+    return this.#bus.state.scorePostedAt !== null ? this.#liveResult() : null;
+  }
+
   /**
    * Queue a pick-the-winner round on the match that is loaded.
    *
@@ -516,11 +574,19 @@ export class TriviaStore {
     const match = this.#bus.state.match;
     const name = match?.displayName;
     if (!name) throw new Error('No match is loaded, so there is nothing to pick.');
+    // The loaded match stays loaded for up to a minute after its post, with
+    // the result on every screen in the room. A prediction opened then pays
+    // whoever reads the scoreboard fastest.
+    if (this.#bus.state.scorePostedAt !== null) {
+      throw new Error(`${name} has already been scored, so there is nothing left to predict. `
+        + 'Pick again once the next match loads.');
+    }
 
     const q = pickQuestion(name, match?.id ?? null);
     if (this.#questions.some(existing => existing.id === q.id)) {
       throw new Error(`${name} has already been picked.`);
     }
+    this.#pickNames.set(q.id, name);
     // It joins the round it lands in rather than carrying its own name.
     // Splicing a differently-named question into the middle of a round SPLIT
     // that round in two: the picker listed it twice, and resuming it after the
@@ -694,23 +760,15 @@ export class TriviaStore {
     // A prediction round has no answer until the field produces one. Reading
     // it here, at reveal, is also what makes it unleakable: there is nothing
     // to leak while the question is open.
+    //
+    // Read from the results kept per match id, never from whatever the live
+    // state holds now: the field loads the next match within a minute of a
+    // post, and the host may sit on the prediction past that, or past the
+    // next match's own post, which must never be taken for this one's.
     if (q.kind === 'match') {
-      if (this.#bus.state.scorePostedAt === null) {
-        throw new Error('The score is not posted yet, so there is no winner to reveal.');
-      }
-      // The host can sit on an open prediction while the field moves on to a
-      // later match, whose own score_posted would otherwise look like a valid
-      // answer. Refuse rather than resolve a match's prediction against a
-      // different match's score; next() is the way out, and discards the
-      // round unscored.
-      if (q.matchId != null && this.#bus.state.match?.id !== q.matchId) {
-        throw new Error(
-          'The field has moved on to a different match, so this prediction cannot be '
-          + 'revealed against it.',
-        );
-      }
-      const { red, blue } = this.#bus.state.score;
-      q.answer = resolvePick(red.total, blue.total);
+      const result = this.#resultFor(q);
+      if (result === null) throw new Error(this.#noResult(q));
+      q.answer = result;
     }
     for (const [playerId, a] of this.#answers) {
       if (a.choice !== q.answer) continue;
@@ -730,17 +788,31 @@ export class TriviaStore {
     return this.snapshot();
   }
 
+  /**
+   * Why a pick cannot be revealed, saying exactly what is missing, so the
+   * host is not sent to the scorekeeper over a score that was never coming.
+   */
+  #noResult(q: TriviaQuestion): string {
+    if (q.matchId == null || q.matchId === this.#bus.state.match?.id) {
+      return 'The score is not posted yet, so there is no winner to reveal.';
+    }
+    const name = this.#pickNames.get(q.id) ?? 'The match this prediction is about';
+    return `${name} is no longer loaded and this desk never saw its score posted, so there `
+      + 'is no winner to reveal. Next discards this round unscored.';
+  }
+
   /** Advance to the next question and drop back to idle (leaderboard beat). */
   next(): TriviaSnapshot {
     if (this.#phase === 'open') {
-      // reveal() rightly refuses to resolve a prediction against a different
-      // match's score, but that once trapped the host: with the field moved
-      // on, every action threw and the only exit was a reset that wiped the
-      // room's scores. Next is the release: a prediction whose match the
-      // field has abandoned is discarded unscored, and nobody pays for it.
+      // A prediction whose match has gone without a posted score can never
+      // be revealed, and that once trapped the host: every action threw and
+      // the only exit was a reset that wiped the room's scores. Next is the
+      // release: it is discarded unscored, and nobody pays for it. One whose
+      // match WAS posted is revealed like any other question, even after the
+      // field has moved on.
       const q = this.#current();
       const stale = q?.kind === 'match' && q.matchId != null
-        && this.#bus.state.match?.id !== q.matchId;
+        && this.#bus.state.match?.id !== q.matchId && !this.#results.has(q.matchId);
       if (!stale) throw new Error('Reveal before moving on.');
       this.#questions.splice(this.#index, 1);
       this.#answers.clear();

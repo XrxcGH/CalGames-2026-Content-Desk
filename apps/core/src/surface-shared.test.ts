@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * The rules the program overlay and the talent view share, driven for real.
@@ -259,4 +261,125 @@ test('drawCard prints 100B, never the 9999 it is registered under', () => {
   assert.ok(printed.includes('100B'), `100B was drawn (drew: ${printed.join(' | ')})`);
   assert.ok(!printed.includes('9999'), 'the placeholder number never reaches the card');
   assert.ok(printed.includes('200'), 'other teams are untouched');
+});
+
+// The safety message on every venue screen and phone page is driven for real
+// in venue-safety.test.ts, which runs each page's script against a stand-in DOM.
+
+const SURFACES = join(import.meta.dirname, '..', '..', '..', 'surfaces');
+
+/** Everything a surface page is made of: its html and any script beside it. */
+function surfaceSource(name: string): string {
+  const dir = join(SURFACES, name);
+  return readdirSync(dir)
+    .filter(f => f.endsWith('.html') || f.endsWith('.js'))
+    .map(f => readFileSync(join(dir, f), 'utf8'))
+    .join('\n');
+}
+
+// ---- the shout-out headline on the side screen ----------------------------------
+
+/**
+ * fitHeadline() from the side screen's page, run against a stand-in for the
+ * headline element. The stand-in lays text out at 0.526em per character, which
+ * is what the real condensed, tracked, upper-case face measured at 72px in the
+ * 1228px the title has (35 characters took 1325px), and wraps greedily. It
+ * sits on a stage scaled by `scale`, as fitStage() scales the real one: the
+ * bounding box is in screen px, offsetHeight and the line height in layout px.
+ */
+function headlineFitter() {
+  const html = surfaceSource('side');
+  const src = /function fitHeadline\(el\) \{[\s\S]*?\n\}/.exec(html)?.[0];
+  assert.ok(src, 'the side screen has fitHeadline()');
+  const factory = new Function('getComputedStyle', `${src}; return fitHeadline;`) as unknown as
+    (gcs: (el: Headline) => { lineHeight: string }) => (el: Headline) => void;
+  return factory(el => ({ lineHeight: `${px(el) * 1.1}px` }));
+}
+interface Headline {
+  text: string;
+  style: { fontSize: string; maxHeight: string };
+  dataset: Record<string, string>;
+  clientWidth: number;
+  removeAttribute: (name: string) => void;
+  readonly scrollWidth: number;
+  readonly offsetHeight: number;
+  getBoundingClientRect: () => { height: number };
+}
+const px = (el: Headline): number => parseFloat(el.style.fontSize);
+const lineCount = (el: Headline): number =>
+  Math.ceil((el.text.length * px(el) * 0.526) / el.clientWidth);
+function headline(text: string, scale = 1): Headline {
+  const tall = (): number => ('wrap' in el.dataset ? lineCount(el) : 1) * px(el) * 1.1;
+  const el: Headline = {
+    text,
+    style: { fontSize: '', maxHeight: '' },
+    dataset: {},
+    clientWidth: 1228,
+    removeAttribute(name) { if (name === 'data-wrap') delete el.dataset['wrap']; },
+    // Wrapped text never overflows sideways; one line overflows by its length.
+    get scrollWidth() {
+      return 'wrap' in el.dataset ? el.clientWidth : el.text.length * px(el) * 0.526;
+    },
+    get offsetHeight() { return Math.round(tall()); },
+    getBoundingClientRect() { return { height: tall() * scale }; },
+  };
+  return el;
+}
+
+test('a shout-out headline is never cut off, however long the recipient', () => {
+  const fit = headlineFitter();
+  const recipients = [
+    'The queuing volunteers',                                   // the form's own example
+    'The queuing volunteers and the field crew of 4 teams',
+    'The head referee and the entire volunteer scorekeeping crew',
+    'x'.repeat(60),                                             // the cap, no spaces to break at
+  ];
+  for (const to of recipients) {
+    const el = headline(`Shout-out to ${to}`);
+    fit(el);
+    const wrapped = 'wrap' in el.dataset;
+    assert.ok(el.scrollWidth <= el.clientWidth, `"${to}" does not run past the title box`);
+    assert.ok(!wrapped || lineCount(el) <= 2, `"${to}" takes at most two lines`);
+    assert.ok(px(el) >= 48, `"${to}" stays at a size the room can read (${px(el)}px)`);
+  }
+});
+
+test('a short headline keeps the full 72px on one line, and a long one does not leak into the next', () => {
+  const fit = headlineFitter();
+  const el = headline('Thank you, volunteers');
+  fit(el);
+  assert.equal(px(el), 72);
+  assert.ok(!('wrap' in el.dataset));
+
+  // The same element, reused for the next slide, as showSlide() does.
+  el.text = `Shout-out to ${'x'.repeat(60)}`;
+  fit(el);
+  assert.ok('wrap' in el.dataset, 'the long one wrapped');
+  el.text = 'Thank you, volunteers';
+  fit(el);
+  assert.equal(px(el), 72, 'the next short one is back at full size');
+  assert.ok(!('wrap' in el.dataset), 'and back on one line');
+});
+
+test('a headline takes the same size on a 720p TV, a 1080p one and a 4K one', () => {
+  // The line count used to divide the bounding box, which the stage's scale
+  // transform has already multiplied, by a line height in layout px: on a
+  // 1440p or 4K screen every two-line headline counted as three and dropped
+  // to 48px, and on a small one a three-line headline passed as two.
+  const fit = headlineFitter();
+  const recipients = [
+    'The queuing volunteers',
+    'The head referee and the entire volunteer scorekeeping crew',
+    'x'.repeat(60),
+  ];
+  for (const to of recipients) {
+    const at1080 = headline(`Shout-out to ${to}`);
+    fit(at1080);
+    for (const scale of [2 / 3, 4 / 3, 2]) {
+      const el = headline(`Shout-out to ${to}`, scale);
+      fit(el);
+      assert.equal(px(el), px(at1080), `"${to}" at scale ${scale.toFixed(2)}`);
+      assert.equal('wrap' in el.dataset, 'wrap' in at1080.dataset, `"${to}" wraps the same at ${scale.toFixed(2)}`);
+    }
+  }
 });

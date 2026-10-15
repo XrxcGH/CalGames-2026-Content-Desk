@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MediaLibrary, readPngHeader } from './media.ts';
@@ -142,6 +142,140 @@ test('a cutout too small to render is not put on air', async () => {
     // to show the operator what is there and why it is not airing.
     assert.equal(lib.manifest[1678] !== undefined, true,
       'the record survives; only its airing does not');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A real cut-out PNG: an opaque block on a transparent ground, so ingest()
+ * accepts it whether or not sharp is installed. Built with sharp here only
+ * because it is already a dependency; the bytes are what an upload carries.
+ */
+async function cutoutPng(w = 1000, h = 800): Promise<Buffer> {
+  const raw = Buffer.alloc(w * h * 4);
+  for (let y = Math.floor(h * 0.2); y < h; y++) {
+    for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x++) {
+      const i = (y * w + x) * 4;
+      raw[i] = 150; raw[i + 1] = 150; raw[i + 2] = 160; raw[i + 3] = 255;
+    }
+  }
+  const sharp = (await import('sharp')).default;
+  return sharp(raw, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+}
+
+test('the sample placeholder stands in front of a real photo and gives it back', async () => {
+  /*
+   * The sample teams are real teams. 846 may already have a real upload, and
+   * the seed used to overwrite it in memory while clearing the sample deleted
+   * the slot outright: the real photo was gone from the overview until a
+   * restart. And a consent change made while the sample was up wrote the
+   * PLACEHOLDER into media/teams/846/meta.json, so after the next restart the
+   * team's photo was the drawing for good.
+   */
+  const { lib, dir } = await libraryWith([{ team: 846, consent: 'granted' }]);
+  try {
+    lib.seedSample([846, 100]);
+    assert.match(lib.airable[846]!.src, /^\/sample\//, 'the placeholder is on show');
+
+    // The team asks to come off screen while the sample is still up.
+    const saved = await lib.setConsent(846, 'declined');
+    assert.equal(saved.src, '/media/teams/846/robot.v1.png', 'the REAL record was changed');
+    assert.equal(lib.airable[846], undefined, 'and they are off screen at once, drawing included');
+    const onDisk = JSON.parse(await readFile(join(dir, 'teams', '846', 'meta.json'), 'utf8'));
+    assert.equal(onDisk.src, '/media/teams/846/robot.v1.png', 'no placeholder ever reaches disk');
+    assert.equal(onDisk.consent, 'declined');
+
+    assert.equal(lib.clearSample(), true, 'clearing reports a change to push');
+    assert.equal(lib.manifest[846]?.src, '/media/teams/846/robot.v1.png', 'the real record is back');
+    assert.equal(lib.manifest[846]?.consent, 'declined');
+    assert.equal(lib.manifest[100], undefined, 'a team with no real photo is simply gone');
+    assert.equal(lib.clearSample(), false, 'and a second clear has nothing to do');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('declining a team that only has the sample drawing takes it off air and writes nothing', async () => {
+  /*
+   * This used to throw "only has the sample placeholder... upload their
+   * photo", which the media page showed as advice to upload the photo of a
+   * team that had just asked to come OFF the screen, and to try again. The
+   * drawing, labelled with their number, stayed on the overview.
+   */
+  const { lib, dir } = await libraryWith([]);
+  try {
+    lib.seedSample([846, 100]);
+    const saved = await lib.setConsent(846, 'declined');
+    assert.equal(saved.consent, 'declined');
+    assert.equal(lib.airable[846], undefined, 'the drawing is off air at once');
+    assert.ok(lib.airable[100], 'and only that team\'s');
+    await assert.rejects(readFile(join(dir, 'teams', '846', 'meta.json'), 'utf8'),
+      'nothing was written for that team: the placeholder never reaches disk');
+
+    // Taking the sample down and putting it back up does not undo the no.
+    lib.clearSample();
+    lib.seedSample([846, 100]);
+    assert.equal(lib.airable[846], undefined, 'a re-seed keeps the decline');
+
+    // Nor does their first real photo: the no carries over to it, on disk.
+    const up = await lib.ingest(846, await cutoutPng());
+    assert.equal(up.consent, 'declined');
+    assert.equal(lib.airable[846], undefined);
+    const onDisk = JSON.parse(await readFile(join(dir, 'teams', '846', 'meta.json'), 'utf8'));
+    assert.equal(onDisk.consent, 'declined');
+    assert.equal(onDisk.src, '/media/teams/846/robot.v1.png');
+
+    // And a yes on the drawing puts it back.
+    await lib.setConsent(100, 'declined');
+    await lib.setConsent(100, 'granted');
+    assert.ok(lib.airable[100]);
+  } finally {
+    lib.clearSample();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the sample drawing never airs for a team that has declined on disk', async () => {
+  // The placeholder was hard-coded "granted", so seeding the sample put a
+  // drawing labelled with a declined team's number on the overview.
+  const { lib, dir } = await libraryWith([{ team: 846, consent: 'declined' }]);
+  try {
+    lib.seedSample([846, 100]);
+    assert.equal(lib.airable[846], undefined, 'their no holds for the drawing too');
+    assert.ok(lib.airable[100], 'a team with nothing on disk still gets the drawing');
+    lib.clearSample();
+    assert.equal(lib.manifest[846]?.src, '/media/teams/846/robot.v1.png', 'the real record is back');
+    assert.equal(lib.manifest[846]?.consent, 'declined');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('setting consent for a team with neither a photo nor a drawing still says so', async () => {
+  const { lib, dir } = await libraryWith([]);
+  try {
+    lib.seedSample([846]);
+    await assert.rejects(() => lib.setConsent(254, 'declined'),
+      /No robot photo has been uploaded for team 254/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a real upload made while the sample is up builds on the real record, not the drawing', async () => {
+  // The placeholder says version 1 and consent granted. A team that had said
+  // no must not be put back on air by somebody re-uploading their photo while
+  // the sample happened to be showing, and the version must keep counting up
+  // from the real history rather than overwrite robot.v2.png.
+  const { lib, dir } = await libraryWith([{ team: 846, consent: 'declined' }]);
+  try {
+    lib.seedSample([846]);
+    const up = await lib.ingest(846, await cutoutPng());
+    assert.equal(up.version, 2);
+    assert.equal(up.consent, 'declined', 'the real refusal carries over');
+    lib.clearSample();
+    assert.equal(lib.manifest[846]?.version, 2, 'clearing the sample keeps the new upload');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

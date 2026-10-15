@@ -401,7 +401,8 @@ link never leaves an orphan video with no context.
 
 - One OBS/vMix output to YouTube RTMP (`rtmp://a.rtmp.youtube.com/live2`, stream key from YouTube
   Studio).
-- The desk starts and stops that output itself when launched with `--obs`:
+- The desk starts and stops that output itself when OBS is enabled (`"obs": { "enabled": true }`
+  in config.json, or `--obs`):
   `POST /api/stream/start` and `POST /api/stream/stop` (PIN-gated like every control, 409 when
   OBS is not connected, and idempotent, so starting an already-live stream is just a 200).
   `GET /api/stream` reports whether OBS is reachable, whether it is streaming, and the running

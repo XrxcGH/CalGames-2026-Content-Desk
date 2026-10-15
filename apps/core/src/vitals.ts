@@ -78,6 +78,24 @@ export interface VitalsDeps {
    * code under test.
    */
   freeBytes?: (root: string) => Promise<number>;
+  /**
+   * The address the server listens on (HOST, or --host). Unset means the
+   * server's own default, 0.0.0.0: reachable from every network it is on.
+   */
+  host?: string;
+}
+
+/**
+ * Whether a listen address only takes connections from this machine.
+ *
+ * An empty desk PIN is an open door only if somebody else can reach it. The
+ * preview renderer runs a desk with no PIN on 127.0.0.1 on purpose, and the
+ * doors check painted its console red over a door that leads nowhere.
+ */
+export function loopbackOnly(host: string | undefined): boolean {
+  if (!host) return false;
+  const h = host.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  return h === 'localhost' || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h);
 }
 
 /** What the operating system says is free for an ordinary process on `root`'s drive. */
@@ -250,6 +268,32 @@ export class Vitals {
     // report down rather than just this row.
     const ja = String(process.env['JA_PIN'] ?? cfg.awards?.pin ?? '1357').trim();
     const setup = String(process.env['SETUP_PIN'] ?? cfg.setup?.pin ?? '4567').trim();
+    // An explicitly EMPTY desk PIN is not a "changed" code: it is the gate
+    // switched off (the server lets every request through), the kitchen-table
+    // escape hatch. It used to read as changed, so with the other two codes
+    // set the row said OK while every control surface was open to the gym's
+    // Wi-Fi. Unlike a default code this is a blocker: the doors check is the
+    // one place a from-source start that kept the override gets caught.
+    if (desk === '') {
+      // Off, not ok and not a blocker: nothing on the venue Wi-Fi can reach
+      // a desk that only listens on this machine, so there is no door to hold
+      // shut. Said plainly anyway, because the same setting on any other
+      // address is the worst row on this report.
+      if (loopbackOnly(this.#d.host)) {
+        return [{
+          id: 'codes', label: 'Access codes', level: 'off',
+          detail: `The desk PIN is empty, but the desk only answers on this machine (${this.#d.host}), `
+            + 'so nobody on the venue Wi-Fi can reach it.',
+        }];
+      }
+      return [{
+        id: 'codes', label: 'Access codes', level: 'fail', blocking: true,
+        detail: 'The desk PIN is empty, so every control surface is open to anyone '
+          + 'on the venue Wi-Fi.',
+        fix: 'Set REMOTE_PIN to a code chosen for this event (or drop the empty '
+          + 'override) and restart the desk.',
+      }];
+    }
     const onDefault: string[] = [];
     if (desk === '0864') onDefault.push('desk PIN');
     if (ja === '1357') onDefault.push('awards code');
@@ -278,13 +322,21 @@ export class Vitals {
   async #obs(): Promise<Vital[]> {
     const obs = this.#d.obs;
     if (!obs) {
-      return [{ id: 'obs', label: 'OBS', level: 'off', detail: 'not connected (no --obs)' }];
+      // Named by the switch the exe actually has: the launcher passes no
+      // --obs, so pointing at the flag sent a first-time crew to a command
+      // line they never see.
+      return [{
+        id: 'obs', label: 'OBS', level: 'off',
+        detail: 'not connected. To let the desk drive OBS, set "obs": { "enabled": true } '
+          + 'in config.json and restart the desk.',
+      }];
     }
     if (!obs.connected) {
       return [{
         id: 'obs', label: 'OBS', level: 'fail', blocking: true,
         detail: 'not answering',
-        fix: 'Open OBS, then Tools > obs-websocket Settings and check the server is enabled.',
+        fix: 'Open OBS, then Tools > WebSocket Server Settings: check the server is '
+          + 'enabled, and that its password matches obs.password in config.json.',
       }];
     }
     try {

@@ -199,6 +199,28 @@ export interface Config {
     eventSlug: string;
   };
   /**
+   * The OBS WebSocket connection: automatic camera cuts, Take to program on
+   * the replay console, the stream button and the doors check's OBS rows.
+   *
+   * Here as well as the --obs flag because the packaged exe has no command
+   * line: its launcher passes no --obs, so a desk deployed exactly the way the
+   * handbook says could never drive OBS, and every replay Take answered NOT on
+   * air. Unlike the field bridge there is no FTA sign-off to protect: OBS is
+   * the desk's own software on the desk's own laptop, so config alone may
+   * switch it on, the way it does for Nexus.
+   *
+   * `password` is the WebSocket server password. It lives here with the other
+   * credentials and nowhere else: never argv (visible in Task Manager and the
+   * shell history), never a query string, never redacted() or the settings
+   * page. The OBS_PASSWORD environment variable overrides it.
+   */
+  obs: {
+    enabled: boolean;
+    /** host:port of the WebSocket server. OBS on this laptop is 127.0.0.1:4455. */
+    host: string;
+    password: string;
+  };
+  /**
    * Rolling-record inputs, used when the desk is launched with --record.
    * Each entry mirrors recorder.ts's SourceConfig: { id, label, role, input },
    * where role is 'program' (the composited broadcast, what uploads are cut
@@ -303,6 +325,10 @@ export const DEFAULTS: Config = {
   // never starts, so this default cannot reach out on its own.
   nexus: { apiKey: '', eventKey: '2026cacg' },
   startgg: { token: '', eventSlug: '' },
+  // Off until somebody says otherwise: a desk that dials OBS on a laptop with
+  // no OBS just logs reconnects all day, and the doors check would read it as
+  // a broken OBS rather than an absent one.
+  obs: { enabled: false, host: '127.0.0.1:4455', password: '' },
   youtube: { clientId: '', clientSecret: '', refreshToken: '' },
   tba: { authId: '', authSecret: '', readKey: '' },
   stream: { webcastUrl: '' },
@@ -365,9 +391,30 @@ function usableSections(parsed: unknown, expected: unknown = DEFAULTS, path = ''
 /** The three the queue actually implements. Anything else silently meant "live". */
 const PUBLISH_MODES = ['deferred', 'trickle', 'live'] as const;
 
+/**
+ * Where in config.json a parse error is, as a line number, without ever
+ * printing the parser's message.
+ *
+ * V8's JSON errors quote up to ten characters either side of the mistake, and
+ * the commonest mistake in this file is a password typed without quotes, or
+ * pasted with curly ones: the message carried most of the OBS password into
+ * the launcher window and desk-log.txt, the file a radio call asks for first.
+ */
+export function jsonErrorLine(message: string, raw: string): number | null {
+  const line = /\(line (\d+) column \d+\)/.exec(message);
+  if (line) return Number(line[1]);
+  const pos = /at position (\d+)/.exec(message);
+  const at = pos ? Number(pos[1]) : (() => {
+    const ctx = /\.\.\."(.+)"\.\.\./.exec(message)?.[1] ?? /"(.+)" is not valid JSON/.exec(message)?.[1];
+    return ctx ? raw.indexOf(ctx) : -1;
+  })();
+  return at >= 0 ? raw.slice(0, at).split('\n').length : null;
+}
+
 export async function loadConfig(root: string): Promise<Config> {
+  let raw = '';
   try {
-    const raw = await readFile(join(root, 'config.json'), 'utf8');
+    raw = await readFile(join(root, 'config.json'), 'utf8');
     const cfg = merge(DEFAULTS, usableSections(JSON.parse(raw))) as Config;
 
     // A typo here used to behave as 'live': uploads starting mid-match and
@@ -378,17 +425,134 @@ export async function loadConfig(root: string): Promise<Config> {
         `${PUBLISH_MODES.join(', ')}. Using deferred, which uploads after the event.`);
       cfg.publish.mode = 'deferred';
     }
+    cfg.obs = usableObs(cfg.obs);
     return cfg;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       // First run on a fresh machine. Say so now, or the missing publish
       // credentials get discovered at upload time.
       console.log('[config] no config.json, using defaults. Copy config.example.json to configure publishing.');
+    } else if (err instanceof SyntaxError) {
+      const line = jsonErrorLine(err.message, raw);
+      console.warn(`[config] config.json is not valid JSON${line ? ` near line ${line}` : ''}: `
+        + 'check the quotes and commas there (text values need straight "double quotes"). '
+        + 'Using defaults, so nothing in it is in effect.');
     } else {
-      console.warn(`[config] config.json could not be read (${(err as Error).message}), using defaults.`);
+      console.warn(`[config] config.json could not be read (${(err as NodeJS.ErrnoException).code ?? 'unknown error'}), using defaults.`);
     }
     return structuredClone(DEFAULTS);
   }
+}
+
+/** OBS's own default WebSocket port, which its Connect Info dialog shows. */
+const OBS_PORT = 4455;
+
+/**
+ * "host:port" for the OBS WebSocket, or null when it cannot be one.
+ *
+ * ObsClient dials `ws://${host}`. new WebSocket() THROWS on a URL it cannot
+ * parse (a stray space, a port past 65535), synchronously, at boot, which
+ * took the whole desk down before a single screen came up. A host pasted as
+ * "ws://127.0.0.1:4455/" does not throw: it dials a machine called "ws",
+ * forever, and OBS just reads as down. So a leading ws:// and a trailing
+ * slash are forgiven, a bare host gets OBS's own port (a URL parser would
+ * otherwise hand it port 80, where OBS never listens), and anything else
+ * that is not a plain host:port is refused.
+ */
+export function obsHost(raw: unknown): string | null {
+  const s = String(raw ?? '').trim().replace(/^wss?:\/\//i, '').replace(/\/+$/, '');
+  if (!s) return null;
+  // A URL parser forgives these and quietly changes the address: an empty
+  // "?" or "#" swallows the port, and a host of bare digits ("4455", the
+  // port typed into the host box) is read as an IPv4 number, 0.0.17.103.
+  if (/[?#@]/.test(s) || /^\d+(:\d*)?$/.test(s)) return null;
+  let url: URL;
+  try { url = new URL(`ws://${s}`); } catch { return null; }
+  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) return null;
+  const port = /:(\d{1,5})$/.exec(s)?.[1];
+  if (port === undefined) return `${url.hostname}:${OBS_PORT}`;
+  const n = Number(port);
+  return n >= 1 && n <= 65535 ? `${url.hostname}:${n}` : null;
+}
+
+/**
+ * The obs section, checked field by field like every hand-edited section.
+ *
+ * No warning here ever prints the password, whatever shape it arrived in:
+ * these lines go to the launcher window, which is on screen at the desk.
+ */
+function usableObs(raw: Config['obs']): Config['obs'] {
+  const o = raw as unknown as Record<string, unknown>;
+  const out = { ...DEFAULTS.obs };
+
+  // "true" in quotes is a slip anybody makes in a JSON file, and what it
+  // means is not in doubt. Anything else unclear leaves OBS off and says so.
+  const on = o['enabled'];
+  if (typeof on === 'boolean') out.enabled = on;
+  else if (typeof on === 'string' && /^(true|false)$/i.test(on.trim())) {
+    out.enabled = on.trim().toLowerCase() === 'true';
+  } else if (on !== undefined) {
+    console.warn('[config] obs.enabled should be true or false. Leaving the OBS connection off.');
+  }
+
+  // The bad value is not echoed: somebody who tried ws://:secret@host has
+  // put the password in it.
+  const host = obsHost(o['host']);
+  if (host) out.host = host;
+  else if (o['host'] !== undefined && o['host'] !== '') {
+    console.warn(`[config] obs.host is not a host:port like ${DEFAULTS.obs.host}. ` +
+      `Using ${DEFAULTS.obs.host}, which is OBS on this laptop.`);
+  }
+
+  // Digits typed without quotes arrive as a number; that is still the
+  // password somebody meant.
+  const pw = o['password'];
+  if (typeof pw === 'string') out.password = pw;
+  else if (typeof pw === 'number' && Number.isFinite(pw)) out.password = String(pw);
+  else if (pw !== undefined && pw !== null) {
+    console.warn('[config] obs.password should be the text from OBS\'s Connect Info, in quotes. ' +
+      'Ignoring it, so OBS will refuse the desk if it has a password set.');
+  }
+  return out;
+}
+
+export interface ObsPlan {
+  /** Whether to dial OBS at all. */
+  enabled: boolean;
+  host: string;
+  /** Absent when neither OBS_PASSWORD nor config.json has one. */
+  password?: string;
+  /** One line for the boot log, saying where each setting came from. Never the password. */
+  summary: string;
+}
+
+/**
+ * Whether and how to reach OBS, from the launch flags, config.json and the
+ * environment, decided in one place so the boot log can say where each part
+ * came from. The --obs flag still works for a from-source start; the config
+ * switch is the one the exe has. The password never arrives as a flag.
+ */
+export function obsPlan(
+  cfg: Config,
+  opts: { flag?: boolean; host?: string; env?: Record<string, string | undefined> } = {},
+): ObsPlan {
+  const env = opts.env ?? process.env;
+  const enabled = !!opts.flag || cfg.obs.enabled === true;
+  const host = opts.host || cfg.obs.host || DEFAULTS.obs.host;
+  const fromEnv = env['OBS_PASSWORD'] || '';
+  const password = fromEnv || cfg.obs.password || '';
+  const why = [
+    opts.flag ? 'turned on by --obs' : 'turned on in config.json',
+    `host from ${opts.host ? '--obs-host' : 'config.json'}`,
+    fromEnv ? 'password from OBS_PASSWORD' : password ? 'password from config.json' : 'no password',
+  ].join(', ');
+  return {
+    enabled, host,
+    ...(password ? { password } : {}),
+    summary: enabled
+      ? `connecting to ${host} (${why})`
+      : 'off, set "obs": { "enabled": true } in config.json to let the desk drive OBS',
+  };
 }
 
 /** Safe to log, and safe to send to a browser surface. */

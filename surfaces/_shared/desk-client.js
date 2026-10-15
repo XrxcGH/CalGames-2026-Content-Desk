@@ -135,6 +135,9 @@ class DeskClient extends EventTarget {
         if (this.needsPin && this.#pin) this.authenticate(this.#pin);
         this.#apply(msg.state);
         this.dispatchEvent(new CustomEvent('ready'));
+        // A snapshot follows every reconnect, which is how a desk restart
+        // (a new session) reaches this page. See signInIfSignedOut.
+        void this.checkSignIn();
       } else if (msg.t === 'auth') {
         this.authed = !!msg.ok;
         if (!msg.ok) this.#pin = null;
@@ -233,6 +236,20 @@ class DeskClient extends EventTarget {
     return (Date.now() + this.#skew - started) / 1000 + REBUILT.AUTO_START;
   }
 
+  /**
+   * Send this console to sign in if its session is gone. See signInIfSignedOut
+   * below; a page holding a typed PIN (the phone remote) re-authenticates its
+   * socket by itself instead.
+   */
+  async checkSignIn() {
+    if (!this.needsPin || this.#pin) return;
+    if (!(await signInIfSignedOut())) return;
+    // The navigation is under way; pages that latch a "signed out" state
+    // (the desk) paint it in the moment before the sign-in page arrives.
+    this.authed = false;
+    this.dispatchEvent(new CustomEvent('denied', { detail: 'PIN required' }));
+  }
+
   /** Send the shared PIN. Kept in memory only, never written to storage. */
   authenticate(pin) {
     this.#pin = pin;
@@ -262,6 +279,44 @@ class DeskClient extends EventTarget {
 
   /** Robot cutout for a team, or null so callers hit the fallback plinth. */
   mediaFor(team) { return this.media[team] ?? null; }
+}
+
+/** Latched once a sign-in redirect is under way, so it happens once per page. */
+let signingOut = false;
+
+/**
+ * Send a signed-out console to sign in, instead of leaving it green.
+ *
+ * A desk restart rotates the session, and the socket's read path is open by
+ * design, so a console reconnected, showed "linked", and then failed every
+ * gated read in silence: the announcer's card flags froze on the ledger from
+ * before, and the desk's panels went stale behind a green dot. Pages that
+ * signed in with the cookie hold no PIN to re-send.
+ *
+ * The server is asked about THIS page rather than told which pages are gated,
+ * so the answer cannot drift from access.ts: it redirects a signed-out request
+ * for a gated page to /signin and never redirects an open one. An overlay, a
+ * venue TV or a phone page can never be sent to a sign-in form by this, which
+ * on air would be the worst possible outcome.
+ *
+ * Called on every snapshot (one follows each reconnect, which is how a desk
+ * restart reaches a page) and by pages whose gated read answered 401, which is
+ * how a console notices without waiting for a reconnect.
+ */
+export async function signInIfSignedOut() {
+  if (signingOut || !location.pathname.startsWith('/s/')) return false;
+  const here = location.pathname + location.search;
+  let landed;
+  try {
+    // Followed, so the answer is WHERE the server sent us, not merely that it
+    // sent us somewhere: only a redirect to the sign-in page counts.
+    const res = await fetch(here, { method: 'HEAD', cache: 'no-store' });
+    landed = res.redirected ? new URL(res.url).pathname : null;
+  } catch { return false; /* the desk is unreachable: the link dot already says so */ }
+  if (landed !== '/signin' || signingOut) return false;
+  signingOut = true;
+  location.replace(`/signin?next=${encodeURIComponent(here)}`);
+  return true;
 }
 
 /**

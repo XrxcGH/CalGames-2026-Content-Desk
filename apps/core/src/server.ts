@@ -170,6 +170,13 @@ export interface ServerOpts {
   /** Undo seedSample. Returns false when there was no sample to clear. */
   clearSample?: (() => boolean) | null;
   /**
+   * Today's chapter landmarks from before this process started, oldest first,
+   * as index.ts's boot-time log rebuild found them (sample events already
+   * left out). Without it a midday restart dropped the morning from the day
+   * VOD's chapter list, and 0:00 defaulted to the restart.
+   */
+  chapterSeed?: readonly DeskEvent[] | null;
+  /**
    * How long the first brute-force lockout lasts, in milliseconds.
    *
    * Injected rather than read from the environment on purpose: a security
@@ -200,7 +207,7 @@ export function startServer(opts: ServerOpts) {
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
           lanBase = null, content = null, seedSample = null, clearSample = null,
-          lockoutBaseMs, lockoutClock } = opts;
+          chapterSeed = null, lockoutBaseMs, lockoutClock } = opts;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -383,16 +390,23 @@ export function startServer(opts: ServerOpts) {
    * overflows it by mid-afternoon, which silently dropped the morning's
    * matches from /api/chapters. The moments a chapter can point at number a
    * few hundred a day, so every one of them is kept here instead. A restart
-   * still loses the earlier landmarks; the NDJSON log replay recovers them.
+   * starts from chapterSeed: today's landmarks from before it, out of the log.
+   *
+   * Sample events are never landmarks: the Sample data button would have put
+   * a "Qualification 42" chapter in Friday's VOD that nobody played.
    */
   const CHAPTER_EVENTS = new Set<DeskEventType>(
     ['match.loaded', 'match.start', 'award.presented', 'alliance_selection.update']);
-  const chapterLog: DeskEvent[] = bus.recent.filter(ev => CHAPTER_EVENTS.has(ev.type));
-  // Fallback for "when did the recording begin": the oldest event held at
-  // boot, captured once. The oldest event still in the ring drifts all day.
-  const firstSeenTs = bus.recent[0]?.ts ?? Date.now();
+  const isLandmark = (ev: DeskEvent): boolean =>
+    CHAPTER_EVENTS.has(ev.type) && ev.source !== 'demo';
+  const seeded = (chapterSeed ?? []).filter(isLandmark);
+  const chapterLog: DeskEvent[] = [...seeded, ...bus.recent.filter(isLandmark)];
+  // Fallback for "when did the recording begin": the oldest event known at
+  // boot, the seed's first if a restart brought one, captured once. The
+  // oldest event still in the ring drifts all day.
+  const firstSeenTs = seeded[0]?.ts ?? bus.recent[0]?.ts ?? Date.now();
   const unsubChapters = bus.subscribe(ev => {
-    if (CHAPTER_EVENTS.has(ev.type)) chapterLog.push(ev);
+    if (isLandmark(ev)) chapterLog.push(ev);
   });
 
   /**
@@ -584,6 +598,8 @@ export function startServer(opts: ServerOpts) {
    */
   const SESSION = randomUUID();
   const AUTH_COOKIE = 'desk_auth';
+  /** The desk cookie's browser lifetime: the whole event weekend. See /api/auth. */
+  const DESK_COOKIE_MAX_AGE_S = 4 * 24 * 60 * 60;
 
   /**
    * The hardware door, and why there are two.
@@ -733,8 +749,14 @@ export function startServer(opts: ServerOpts) {
           return json(res, 401, { error: 'That PIN was not accepted.' });
         }
         noteAuthPass(addr);
+        // Four days: Thursday load-in to Sunday teardown. It was 16 hours, so
+        // a tablet signed in for Friday's 6 PM practice lost its session at
+        // 10 AM Saturday, as qualifications started, with the socket still
+        // reading "linked" while every gated read quietly failed. The session
+        // still dies with the process, so a cookie never outlives the desk
+        // run that issued it; a restart is caught by desk-client.js instead.
         res.setHeader('Set-Cookie',
-          `${AUTH_COOKIE}=${SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
+          `${AUTH_COOKIE}=${SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${DESK_COOKIE_MAX_AGE_S}`);
         return json(res, 200, { ok: true });
       }
 
@@ -890,7 +912,13 @@ export function startServer(opts: ServerOpts) {
           const clip = await clips.extract({
             sourceId: body.sourceId ?? 'program',
             ranges,
-            label: st.match?.displayName ?? 'match',
+            // Its own label, never the bare match name. The publish queue
+            // cuts the same match under the same name from the same ranges,
+            // and the file names come from label plus start time, so the two
+            // cuts shared every scratch file and the output: one cut failed
+            // on a locked file, and ffmpeg -y could rewrite the very .mp4 the
+            // queue was uploading.
+            label: `${st.match?.displayName ?? 'match'} review`,
           });
           bus.emit({ type: 'replay.clip_ready', source: 'replay', payload: { ...clip, kind: 'match' } });
           return json(res, 200, { ...clip, parts: ranges.length });
@@ -1719,6 +1747,10 @@ export function startServer(opts: ServerOpts) {
 
       if (path === '/api/sample/clear' && req.method === 'POST') {
         const cleared = clearSample ? clearSample() : false;
+        // The overlays hold the media map from their last snapshot, and no
+        // event carries it: without a push, an open program overlay kept
+        // drawing the SAMPLE robot for a real team all weekend.
+        if (cleared) broadcastMedia();
         return json(res, 200, {
           ok: true, cleared,
           note: cleared ? 'Sample data cleared from every screen.'
@@ -1739,6 +1771,9 @@ export function startServer(opts: ServerOpts) {
         }
         console.warn('[sample] sample data requested from the desk');
         seedSample();
+        // Same reason as the clear: screens already open would otherwise
+        // never see the sample photos the overview exists to prove.
+        broadcastMedia();
         return json(res, 200, {
           ok: true,
           note: 'Every screen now has sample data. It is tagged as demo, so '
@@ -1973,7 +2008,8 @@ export function startServer(opts: ServerOpts) {
       if ((path === '/api/stream/start' || path === '/api/stream/stop') && req.method === 'POST') {
         if (!obs?.connected) {
           return json(res, 409, { error: 'OBS is not connected. Start OBS on this machine, ' +
-            'then launch the desk with --obs (and OBS_PASSWORD if OBS has one set).' });
+            'set "obs": { "enabled": true } in config.json (with the OBS password if it has one) ' +
+            'and restart the desk (handbook chapter 4, step 7).' });
         }
         try {
           const starting = path.endsWith('/start');
@@ -2195,7 +2231,13 @@ export function startServer(opts: ServerOpts) {
           return json(res, 400, { error: 'Bad team number' });
         }
         try {
-          return json(res, 200, await media.ingest(team, await readBody(req)));
+          const saved = await media.ingest(team, await readBody(req));
+          // Photos arrive all weekend, after OBS is up. The overlay only
+          // learns the media map from a snapshot, so without this push the
+          // photographer saw "saved" while the stream kept the gold-number
+          // plinth until somebody reloaded a Browser Source.
+          broadcastMedia();
+          return json(res, 200, saved);
         } catch (err) {
           return json(res, 422, { error: (err as Error).message });
         }
@@ -2528,11 +2570,10 @@ ${sections}</body></html>`;
   /**
    * Re-send the media set to every surface.
    *
-   * Surfaces normally get media once, in their opening snapshot, because robot
-   * photos do not change mid-show. A consent change is the exception and the
-   * one that cannot wait: a team asking for their robot to come off the screen
-   * should not have to wait for a reload of a Browser Source nobody is looking
-   * at.
+   * Surfaces get media only in a snapshot, and no event carries it, so every
+   * change to the map has to be pushed or an open Browser Source never sees
+   * it: a consent change (a team asking to come off the screen must not wait
+   * for a reload nobody will do), an upload, and the sample's seed and clear.
    */
   function broadcastMedia(): void {
     for (const ws of wss.clients) {
@@ -2553,6 +2594,12 @@ ${sections}</body></html>`;
     // it is never asked twice. The phone remote, which can be opened straight
     // to its own page, still authenticates over the socket below.
     if (cookie(req.headers.cookie, AUTH_COOKIE) === SESSION) authed.add(ws);
+    // The server's clock first, then the snapshot. A surface that has never
+    // heard a beat derives its clock skew from state.updatedAt, the last
+    // EVENT's time, and after a restart that can be a state restored from
+    // this morning's log: a freshly loaded venue screen then counted down
+    // against a clock hours out until the first beat, up to 10 s later.
+    send(ws, { t: 'hb', now: Date.now() });
     send(ws, { t: 'snapshot', state: bus.state, media: media.airable, needsPin: !!REMOTE_PIN });
 
     // Guesses on this one socket. The per-address damper already counts them;
@@ -2725,6 +2772,9 @@ ${sections}</body></html>`;
   return {
     close: () => { clearInterval(heartbeat); unsubscribe(); unsubChapters(); wss.close(); http.close(); },
     broadcastCount: () => wss.clients.size,
+    /** For index.ts, whose automatic sample clear (a real match loading)
+     *  changes the media map with no route of this server involved. */
+    broadcastMedia,
     listening,
   };
 }

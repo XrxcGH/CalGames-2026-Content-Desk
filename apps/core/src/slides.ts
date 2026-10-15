@@ -84,6 +84,14 @@ export class Slides {
   #queue: GpSubmission[] = [];
   #cursor = 0;
   #live: string | null = null;
+  /**
+   * Whether any slide has aired since boot. next() used to infer "first
+   * press" from #live === null, but Hide also nulls #live, so the first Next
+   * after every Hide re-aired the slide that was just taken down and the
+   * button looked dead. Only the very first press should show deck[cursor]
+   * without advancing.
+   */
+  #started = false;
   #seq = 0;
   #recent = new Map<string, number[]>();
 
@@ -158,8 +166,13 @@ export class Slides {
       });
       this.#queue = (Array.isArray(raw.queue) ? raw.queue : []).flatMap(item => {
         const q = item as GpSubmission;
+        // The recipient is in the file; dropping it here meant a shout-out
+        // approved after a restart aired as a generic "Gracious
+        // Professionalism" slide, its message cut loose from who it thanks.
+        const to = clean(q?.to, 60);
         return q?.id && q?.message
           ? [{ id: String(q.id), name: clean(q.name, 40), team: q.team ?? null,
+            ...(to ? { to } : {}),
             message: clean(q.message, 200), at: Number(q.at) || 0 }]
           : [];
       });
@@ -219,6 +232,7 @@ export class Slides {
     const slide = this.deck.find(s => s.id === id);
     if (!slide) throw new Error(`There is no slide "${id}".`);
     this.#live = slide.id;
+    this.#started = true;
     this.#cursor = this.deck.findIndex(s => s.id === id);
     this.#bus.emit({ type: 'slide.show', source: 'manual', payload: { ...slide } });
     return slide;
@@ -228,7 +242,7 @@ export class Slides {
   next(): Slide {
     const deck = this.deck;
     if (!deck.length) throw new Error('There are no slides yet.');
-    this.#cursor = (this.#live === null ? this.#cursor : this.#cursor + 1) % deck.length;
+    this.#cursor = (this.#started ? this.#cursor + 1 : this.#cursor) % deck.length;
     return this.show(deck[this.#cursor]!.id);
   }
 

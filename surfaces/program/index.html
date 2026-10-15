@@ -223,6 +223,14 @@
     <div class="sl-lines" id="slLines"></div>
   </section>
 
+  <!-- A replay on program. OBS plays the clip in a Media Source UNDER this
+       overlay, so the screen is transparent but for one chip: the Final
+       screen is full-frame and used to hide the clip completely. Never a
+       state.screen of its own; it shows only while state.replayOnAir runs. -->
+  <section class="screen" id="scr-replay">
+    <span class="chip chip--accent rp-bug">Replay</span>
+  </section>
+
   <section class="screen" id="scr-blank"></section>
 
   <div class="lower-third" id="third">

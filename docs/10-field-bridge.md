@@ -137,8 +137,12 @@ Registering as a display was the blocker on live data, and it's now in scope. Th
   climbs (see [02-architecture.md](02-architecture.md)). This was the single highest-value derived
   signal in the design and it's back.
 - **`arenaStatus`**: "robot dropped" markers and a station-health strip on the desk console.
-- **`playSound` / `audienceDisplayMode`**: our cue engine can follow the scorekeeper's screen
-  changes instead of guessing at them.
+- **`audienceDisplayMode`**: used. Cheesy loads the next match in the same handler that posts a
+  score, so the bridge holds that load back and keeps the result on the desk until the arena's own
+  audience screen leaves `score`, a match starts, or a minute passes. A match the scorekeeper
+  loads by hand in that window waits the same way; a re-run of the match just played (the arena
+  flags it IsReplay) is loaded at once, because its result no longer stands. `playSound` is still
+  unused.
 
 It also means the rest of the stack is unconstrained: OBS, vMix, NodeCG, Companion, ffmpeg,
 whatever fits. The only line is the allowlist above.
@@ -230,7 +234,9 @@ to inference when running desk-only.
 `harness.mjs` needs a real `cheesy-arena -dev` build. When one isn't at hand, `npm run fake-arena`
 serves the real wire protocol instead: the same allowed display websockets, the same `{type, data}`
 frames, the same GET-only REST paths, looping a scripted match (robots linking, auto decided on
-fuel, alternating hub shifts, endgame climbs, score posting). `npm run validate:offline` drives the
+fuel, alternating hub shifts, endgame climbs, score posting, the next match loaded in the same
+breath as the commit and the audience screen moving on 20 s later, exactly as a real arena does).
+`npm run validate:offline` drives the
 whole bridge against it headless and prints a PASS/FAIL checkpoint table. It's the same hardened
 client, the same allowlist, and the same adapter as the real thing; nothing on our side is stubbed.
 Good for catching a regression in September without waiting on the next chance at an actual field.
@@ -253,6 +259,9 @@ Good for catching a regression in September without waiting on the next chance a
 - [ ] Wireshark the field NIC for five minutes; confirm nothing but allowlisted traffic. Bring the
       capture to the FTA conversation (more persuasive than any promise).
 - [ ] Agree the reserved `displayId` prefix with the scorekeeper, in writing.
+- [ ] Ask the scorekeeper to tick **Enabled automated audience display** on `/setup/settings`.
+      The desk keeps the final score up until the field's audience screen leaves it. With the box
+      ticked that is 20 s; without it, until the scorekeeper changes the screen, or one minute.
 - [ ] **Ask the scorekeeper to set Selection Round 3 Order on `/setup/settings` before alliance
       selection.** Cheesy only creates a fourth alliance slot when that field is non-empty, and the
       shipped default is empty. If nobody sets it, alliances are three teams, selection will not

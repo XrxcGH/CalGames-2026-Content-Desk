@@ -141,7 +141,9 @@ desk. The high-leverage items are built:
   queue cuts them from the program recording. Teams ask for these and nobody records them
 - Done: **Pick the winner**: a trivia round on the match that is up. The answer is unleakable by
   construction, since at the moment the question opens the match has not been played and no
-  answer exists on the server either. It resolves from the posted score
+  answer exists on the server either. It resolves from that match's own posted result (the
+  field's declared winner, so a playoff tiebreak pays the alliance that advanced), and can be
+  revealed after the next match has loaded; a match already scored cannot be picked
 
 - Done: **Alliance size is data, not a constant**: every surface that lists teams sizes itself off
   the array it is given. The overview grid takes its row count from the alliance, the score

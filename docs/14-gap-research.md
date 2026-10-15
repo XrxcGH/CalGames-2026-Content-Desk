@@ -744,7 +744,7 @@ Beyond B1 (licence and governance) and B2 (envelope versioning), which are liste
 
 **Effort.** Small. **Serves.** Standard, critical.
 
-**Caveat.** Carry two settled constraints into the design: no secrets in argv or query strings (the PIN is already POST-body-only for exactly this reason, and `OBS_PASSWORD` is env-only), and the field-bridge endpoints stay receive-only and GET-only regardless of what token is presented. A token must never widen the Cheesy allowlist. Keep the API deliberately narrow: it becomes a public contract constraining refactors of a codebase that is still moving.
+**Caveat.** Carry two settled constraints into the design: no secrets in argv or query strings (the PIN is already POST-body-only for exactly this reason, and the OBS password comes only from `OBS_PASSWORD` or config.json), and the field-bridge endpoints stay receive-only and GET-only regardless of what token is presented. A token must never widen the Cheesy allowlist. Keep the API deliberately narrow: it becomes a public contract constraining refactors of a codebase that is still moving.
 
 #### 50. FMS scene vocabulary and sanctioned-event compliance mode
 

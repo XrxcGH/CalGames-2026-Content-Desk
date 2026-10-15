@@ -299,6 +299,14 @@
 }
 .ffa-tab span { position: relative; }
 [hidden] { display: none !important; }
+/* The safety message is the program overlay's own plate (.emerg in
+   broadcast.css), drawn by this page over everything on it. Not a page that
+   steps aside for the overlay: CG_ARCADE carries no program overlay, and
+   /s/watch?screen=arcade puts this page alone over the game capture, so a
+   page that hid itself left the bare game on screen through an evacuation.
+   Drawn here, the plate is right wherever this page is. One long word (a
+   message with no spaces) wraps rather than leaving the plate. */
+#emerg .emerg-msg, #emerg .emerg-detail { max-width: 100%; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -337,6 +345,15 @@
   </div>
 
   <div id="sweep"></div>
+
+  <!-- Last in the stage and z-index 90, so it covers the strips, the panels
+       and the sweep. Hidden whenever state.emergency is null, which is also
+       how it clears: the desk's clear sends null on the next frame. -->
+  <div class="emerg" id="emerg" hidden role="alert">
+    <div class="emerg-kind" id="emergKind"></div>
+    <div class="emerg-msg" id="emergMsg"></div>
+    <div class="emerg-detail" id="emergDetail"></div>
+  </div>
 </div></div>
 
 <script type="module">
@@ -347,6 +364,73 @@ const $ = id => document.getElementById(id);
 const desk = connect('arcade');
 
 fitStage($('stage'));
+
+/**
+ * The safety message, full frame, from every state frame the desk sends.
+ *
+ * The labels are the table surfaces/program/program.js paints, and an unknown
+ * kind falls back to "Announcement" the same way. Refitted when the words
+ * change and when the webfont lands, not on every frame.
+ */
+const EMERG_KIND = {
+  evacuate: 'Evacuate',
+  shelter: 'Shelter in place',
+  medical: 'Medical',
+  hold: 'Hold',
+  allclear: 'All clear',
+  custom: 'Announcement',
+};
+let emergKey = null;
+function paintEmergency(e) {
+  const el = $('emerg');
+  if (!e) {
+    el.hidden = true;
+    emergKey = null;
+    return;
+  }
+  const key = `${e.kind}|${e.message}|${e.detail ?? ''}`;
+  if (key === emergKey && !el.hidden) return;
+  emergKey = key;
+  $('emergKind').textContent = EMERG_KIND[e.kind] ?? EMERG_KIND.custom;
+  $('emergMsg').textContent = e.message;
+  $('emergDetail').textContent = e.detail ?? '';
+  $('emergDetail').hidden = !e.detail;
+  el.hidden = false;
+  fitEmergency();
+  // A source OBS has just (re)loaded, or a pit TV just switched on, can
+  // measure before Archivo has arrived, and Archivo is wider than the
+  // fallback. The measurement starts the font loading, so `ready` is pending
+  // here in exactly that case; loadingdone below catches a later load.
+  document.fonts?.ready.then(refitEmergency);
+}
+
+/**
+ * Step the message down until the plate holds it, 48px clear of the edges:
+ * /s/watch?screen=arcade is a pit TV, and the 3.5% crop the strip above is
+ * built around takes 38px off each edge of a 1080 frame. Measured in layout
+ * px (offsetTop, offsetHeight), which fitStage()'s scale transform does not
+ * touch, so the margin is the same 48 stage px on every screen.
+ */
+function fitEmergency() {
+  const el = $('emerg');
+  const msg = $('emergMsg');
+  msg.removeAttribute('data-fit');
+  const fits = () => {
+    const shown = [...el.children].filter(c => !c.hidden);
+    const first = shown[0];
+    const last = shown[shown.length - 1];
+    return first.offsetTop >= 48
+      && last.offsetTop + last.offsetHeight <= el.clientHeight - 48
+      && msg.scrollWidth <= msg.clientWidth;
+  };
+  for (const step of ['1', '2']) {
+    if (fits()) break;
+    msg.dataset.fit = step;
+  }
+}
+const refitEmergency = () => { if (!$('emerg').hidden) fitEmergency(); };
+document.fonts?.addEventListener('loadingdone', refitEmergency);
+desk.on('state', s => paintEmergency(s?.emergency ?? null));
 
 const GAME_LABEL = {
   smash: 'Super Smash Bros.', mariokart: 'Mario Kart',

@@ -649,3 +649,147 @@ test('a restart rebuilds the day without swallowing the second yellow', () => {
   assert.deepEqual(s.cards.thisMatch, [],
     'and none of the day lands on the next match’s final-score chips');
 });
+
+// ---- the teleop anchor, for clips cut after the buzzer ----------------------
+
+test('the teleop re-anchor outlives the buzzer, and only a load or an unload clears it', () => {
+  /*
+   * The field pauses between auto and teleop, and the clock re-anchors at
+   * teleop so a teleop clock reads the field's own numbers. The buzzer
+   * clears matchStartedAt, and the replay console, which does most of its
+   * cutting in the minute after, then had only the TRUE start to map a
+   * teleop clock with: every teleop moment came out early by the pause, and
+   * a climb framed six before and four after lost its result.
+   */
+  let s = started();
+  assert.equal(s.teleopAnchorAt, T0, 'before teleop it is the true start');
+
+  // Auto runs 20s, the field pauses 3s, teleop begins.
+  s = reduce(s, ev('match.teleop_start', T0 + 23_000));
+  assert.equal(s.teleopAnchorAt, T0 + 3_000);
+  assert.equal(s.matchStartedAt, T0 + 3_000, 'the live clock moved with it');
+
+  s = reduce(s, ev('match.end', T0 + 163_000));
+  assert.equal(s.matchStartedAt, null, 'the clock stops at the buzzer');
+  assert.equal(s.teleopAnchorAt, T0 + 3_000, 'the anchor does not');
+  assert.equal(s.lastMatchStartedAt, T0, 'and the true start is still there for auto');
+
+  s = reduce(s, ev('match.score_posted', T0 + 200_000));
+  assert.equal(s.teleopAnchorAt, T0 + 3_000, 'through the score reveal too');
+
+  s = reduce(s, ev('match.loaded', T0 + 210_000, { id: 'q2', displayName: 'Q2', red: [], blue: [] }));
+  assert.equal(s.teleopAnchorAt, null, 'a new match has no anchor until it starts');
+
+  s = reduce(s, ev('match.start', T0 + 300_000));
+  s = reduce(s, ev('match.unloaded', T0 + 310_000));
+  assert.equal(s.teleopAnchorAt, null, 'nor does nothing at all');
+});
+
+// ---- the field's break card ---------------------------------------------------
+
+test('a scheduled break says what it is and when it ends, and retires with the field', () => {
+  // Cheesy's eight-alliance bracket starts a 900s "Awards Break" before M13
+  // and each final. The card used to read "Field delay: Field timeout" with
+  // no clock, over the award presentations, for fifteen minutes.
+  let s = reduce(initialState(), ev('break.started', T0,
+    { kind: 'timeout', label: 'Awards Break', nextMatch: 'Final 1', seconds: 900 }));
+  assert.deepEqual(s.status,
+    { kind: 'custom', message: 'Awards Break', backAt: T0 + 900_000, auto: true });
+
+  s = reduce(s, ev('match.prestart', T0 + 900_000));
+  assert.equal(s.status, null, 'the field coming back takes its own card down');
+
+  // The bracket marks the break before the deciding final "Awards Break *",
+  // its own note that the match may not be needed. The room reads the name.
+  s = reduce(s, ev('break.started', T0 + 1_000_000,
+    { kind: 'timeout', label: 'Awards Break *', nextMatch: 'Final 3', seconds: 900 }));
+  assert.equal(s.status?.message, 'Awards Break');
+});
+
+test("the arena's bare Timeout is still the delay card, now with its clock", () => {
+  const s = reduce(initialState(), ev('break.started', T0,
+    { kind: 'timeout', label: 'Timeout', seconds: 120 }));
+  assert.deepEqual(s.status,
+    { kind: 'delay', message: 'Field timeout', backAt: T0 + 120_000, auto: true });
+});
+
+test('the field never retires an operator card, even one with the same words', () => {
+  // prestart used to retire any card that READ "Field timeout", so an
+  // operator who typed exactly that lost it to the next field reset.
+  let s = reduce(initialState(), ev('status.show', T0,
+    { kind: 'delay', message: 'Field timeout', backAt: null, auto: true }));
+  assert.equal(s.status?.auto, undefined, 'status.show never carries the mark, whatever it is sent');
+
+  s = reduce(s, ev('match.prestart', T0 + 1000));
+  assert.equal(s.status?.message, 'Field timeout', 'a field reset leaves it up');
+  s = reduce(s, ev('match.start', T0 + 2000));
+  assert.equal(s.status?.message, 'Field timeout', 'and so does a match start');
+
+  s = reduce(s, ev('break.started', T0 + 3000, { kind: 'timeout', label: 'Lunch', seconds: 1800 }));
+  assert.equal(s.status?.message, 'Field timeout', 'and a break never writes over it');
+});
+
+test('a break card the field forgot to retire comes down when the match starts', () => {
+  // The arena's notifier channels drop when full; a lost prestart must not
+  // leave "Lunch, back at 1:00" over a live match.
+  let s = reduce(initialState(), ev('match.loaded', T0, { id: 'q1', displayName: 'Q1', red: [], blue: [] }));
+  s = reduce(s, ev('break.started', T0 + 1000, { kind: 'timeout', label: 'Lunch', seconds: 1800 }));
+  assert.equal(s.status?.auto, true);
+
+  // A second break replaces the field's own card rather than being ignored.
+  s = reduce(s, ev('break.started', T0 + 2000, { kind: 'timeout', label: 'Field Break', seconds: 300 }));
+  assert.equal(s.status?.message, 'Field Break');
+  assert.equal(s.status?.backAt, T0 + 2000 + 300_000);
+
+  s = reduce(s, ev('match.start', T0 + 400_000));
+  assert.equal(s.status, null);
+});
+
+// ---- a replay on program --------------------------------------------------------
+
+test('only the replay cue can make the overlay stand aside, and a cut away ends it', () => {
+  const fromCue = (type: DeskEvent['type'], ts: number, payload: unknown): DeskEvent =>
+    ({ ...ev(type, ts, payload), source: 'cue' });
+  const onAir = { label: 'Q1 climb', seconds: 8, scene: 'CG_REPLAY' };
+
+  let s = started();
+  s = reduce(s, ev('match.end', T0 + 160_000));
+
+  // Any PIN holder's surface can emit events; one that could claim a replay
+  // was on air could blank the overlay over a live picture.
+  s = reduce(s, ev('replay.on_air', T0 + 170_000, onAir));
+  assert.equal(s.replayOnAir, null, 'not from a surface');
+
+  s = reduce(s, fromCue('replay.on_air', T0 + 170_000, onAir));
+  assert.deepEqual(s.replayOnAir, { ...onAir, at: T0 + 170_000 });
+
+  s = reduce(s, fromCue('scene.change', T0 + 171_000, { scene: 'CG_REPLAY' }));
+  assert.ok(s.replayOnAir, 'the replay scene itself does not end it');
+  s = reduce(s, ev('scene.change', T0 + 172_000, { scene: 'CG_DESK' }));
+  assert.equal(s.replayOnAir, null, 'a cut anywhere else hands the overlay back');
+
+  // The next load does not cut a clip off: the field sends it 20 to 60
+  // seconds after a post, exactly when a replay is likely to be up. The
+  // overview waits the few seconds the clip has left.
+  s = reduce(s, fromCue('replay.on_air', T0 + 190_000, onAir));
+  const taken = s.replayOnAir;
+  s = reduce(s, ev('match.loaded', T0 + 191_000, { id: 'q2', displayName: 'Q2', red: [], blue: [] }));
+  assert.equal(s.replayOnAir, taken, 'a load leaves the running clip alone');
+  assert.equal(s.screen, 'overview', 'with the overview next in line');
+  s = reduce(s, ev('match.unloaded', T0 + 192_000));
+  assert.equal(s.replayOnAir, taken, 'and so does an unload');
+
+  // The field arming or starting takes it back at once: the score bar is up
+  // before the countdown, whatever the switcher is showing.
+  s = reduce(s, ev('match.armed', T0 + 193_000));
+  assert.equal(s.replayOnAir, null, 'the field arming');
+  s = reduce(s, fromCue('replay.on_air', T0 + 194_000, onAir));
+  s = reduce(s, ev('match.start', T0 + 195_000));
+  assert.equal(s.replayOnAir, null, 'the field starting');
+
+  // No length, or a match video's worth, is not a replay to stand aside for.
+  for (const seconds of [0, -5, 'x', 3600]) {
+    s = reduce(s, fromCue('replay.on_air', T0 + 200_000, { ...onAir, seconds }));
+    assert.equal(s.replayOnAir, null, `seconds ${String(seconds)}`);
+  }
+});

@@ -279,6 +279,16 @@
     "eventSlug": ""
   },
 
+  "obs": {
+    "//": "Lets the desk drive OBS: automatic camera cuts, Take to program on the replay console, and the OBS rows on the doors check. The whole show runs without it, except Take to program. This is the switch the exe uses; it has no command line. Restart the desk after changing it.",
+    "//enabled": "true to connect. In OBS: Tools > WebSocket Server Settings, tick Enable WebSocket server.",
+    "//host": "Where OBS listens. 127.0.0.1:4455 is OBS on this same laptop, which replays need: the desk hands OBS the clip as a file on this disk.",
+    "//password": "The Server Password from Show Connect Info in that same OBS dialog. Stays in this file: no screen or settings page ever shows it. The OBS_PASSWORD environment variable overrides it.",
+    "enabled": false,
+    "host": "127.0.0.1:4455",
+    "password": ""
+  },
+
   "youtube": {
     "//": "Google Cloud project -> OAuth 2.0 Client ID (Desktop app), with the YouTube Data API v3 enabled. Scopes needed: https://www.googleapis.com/auth/youtube.upload and https://www.googleapis.com/auth/youtube. The second covers the flip-to-public after TBA linking, and playlists. `npm run auth:youtube` requests both.",
     "//refreshToken": "Obtained once via the OAuth consent flow. Run `npm run auth:youtube` for the walkthrough.",

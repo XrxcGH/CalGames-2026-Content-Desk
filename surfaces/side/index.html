@@ -190,6 +190,30 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
   background-size: var(--tex-perf-size), var(--geo-size);
 }
 #timerOver[hidden] { display: none; }
+
+/* The safety message. A takeover like the timer, one layer above it and above
+   the QR box and every pane: the TVs the crowd actually looks at are the one
+   place an evacuation has to be read from across the room, and until this
+   existed they kept rotating the schedule through it. The plate itself
+   (.emerg, .emerg-kind, .emerg-msg, .emerg-detail) is the program overlay's own
+   from broadcast.css, so the two screens cannot drift apart; only the sizes
+   are re-set here, because this surface is read from 20-60ft and the overlay's
+   44px chip and 42px detail line are built for a video frame. */
+#emerg { z-index: 90; }
+#emerg .emerg-kind { font-size: 72px; padding: 14px 56px; --ch: 24px; }
+#emerg .emerg-msg { font-size: 116px; }
+#emerg .emerg-msg[data-fit="1"] { font-size: 92px; }
+#emerg .emerg-msg[data-fit="2"] { font-size: 74px; }
+#emerg .emerg-msg[data-fit="3"] { font-size: 60px; }
+#emerg .emerg-detail { font-size: 60px; line-height: 1.15; }
+/* One long word (a 200-character message with no spaces) must wrap rather
+   than run off the plate. */
+#emerg .emerg-msg, #emerg .emerg-detail { max-width: 100%; overflow-wrap: anywhere; }
+
+/* A shout-out headline is the recipient, up to 73 characters, and the nowrap
+   .sub rule cut it off on an ellipsis. fitHeadline() steps the size down on one
+   line first, and only then lets this one line wrap to two. */
+#slideTitle[data-wrap] { white-space: normal; overflow-wrap: anywhere; max-height: 2.2em; }
 .t-label {
   font-family: var(--font-cond); font-weight: 700; font-size: 64px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--cg-gold);
@@ -397,6 +421,15 @@ h1, .sub { max-width: calc(100% - var(--qr-zone)); }
     <div id="qrImg"></div>
   </div>
 
+  <!-- Last in the stage and z-index 90, so it covers the timer, the QR box and
+       whatever pane is rotating. Hidden whenever state.emergency is null, which
+       is also how it clears: the desk's clear sends null on the next frame. -->
+  <div class="emerg" id="emerg" hidden role="alert">
+    <div class="emerg-kind" id="emergKind"></div>
+    <div class="emerg-msg" id="emergMsg"></div>
+    <div class="emerg-detail" id="emergDetail"></div>
+  </div>
+
 </div></div>
 
 <script type="module">
@@ -515,7 +548,43 @@ function showSlide() {
     div.textContent = line;
     return div;
   }));
+  // Headline first, body second: a two-line headline takes height from the
+  // body, and fitSlide() has to measure what is left.
+  fitHeadline($('slideTitle'));
   fitSlide();
+}
+
+/**
+ * Fit a slide headline without ever cutting its words off.
+ *
+ * A shout-out's headline is "Shout-out to <recipient>", and the recipient is
+ * the point: it is how somebody across the gym learns the screen is about
+ * them. It can run to 73 characters, and at 72px the form's own example
+ * ("The queuing volunteers") already overflowed and ended on an ellipsis.
+ * So: one line at 72, 64 and 56px; and past that, two lines at 56 and 48px
+ * rather than a smaller and smaller single line nobody can read.
+ */
+function fitHeadline(el) {
+  el.removeAttribute('data-wrap');
+  for (const px of [72, 64, 56]) {
+    el.style.fontSize = `${px}px`;
+    if (el.scrollWidth <= el.clientWidth) return;
+  }
+  el.dataset.wrap = '';
+  for (const px of [56, 48]) {
+    el.style.fontSize = `${px}px`;
+    // Counted with the two-line cap lifted. scrollHeight cannot be the test:
+    // it includes the glyphs' overhang, so it reads taller than the box even
+    // for one line (96 against 79 at 72px, measured). offsetHeight, not
+    // getBoundingClientRect: the line height is in layout px, and the
+    // bounding box is scaled by fitStage()'s transform, so on a 1440p screen
+    // every two-line headline counted as three and on 720p a three-line one
+    // as two.
+    el.style.maxHeight = 'none';
+    const lines = el.offsetHeight / parseFloat(getComputedStyle(el).lineHeight);
+    el.style.maxHeight = '';
+    if (lines < 2.5) return;
+  }
 }
 
 /**
@@ -655,6 +724,10 @@ function paint(s) {
   if (!s) return;
   lastState = s;
 
+  // First, before anything below can throw: the safety message outranks every
+  // other thing this function draws.
+  paintEmergency(s.emergency);
+
   // ---- now queuing ----
   // From Nexus: a human called this match, minutes before the field will know
   // about it. Absent (desk-only, or an event not queueing on Nexus) the banner
@@ -704,7 +777,7 @@ function paint(s) {
   // already the first row below, and the drift is the part nobody else tells
   // them. Both forms are short enough to hold the 72px room-only floor.
   $('deckSub').textContent = s.status
-    ? `${s.status.message}${s.status.backAt ? ` · back ~${clock(s.status.backAt)}` : ''}`
+    ? statusLine(s.status)
     : (s.match?.displayName
         ? (behindText
             ? `${s.match.displayName} · ${behindText}`
@@ -735,6 +808,112 @@ function paint(s) {
 
   renderRank();
 }
+
+/**
+ * The header line while a status card is up.
+ *
+ * "Back ~2:15" is a promise with a time on it, and the field's own break card
+ * stamps that time from the break's scheduled length: an Awards Break
+ * routinely runs over, and the card stays until the scorekeeper starts the
+ * next match. A time already gone by reads as a screen that has frozen, so
+ * once the desk's clock passes it the line keeps the message and says
+ * "back soon" instead.
+ */
+function statusLine(st) {
+  if (!st.backAt) return st.message;
+  if (desk.serverNow >= st.backAt) return `${st.message} · back soon`;
+  const at = new Date(st.backAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `${st.message} · back ~${at}`;
+}
+// Nothing else repaints the header when that time passes: a desk waiting out
+// a break sends no frames, which is the whole of the case.
+setInterval(() => {
+  const st = lastState?.status;
+  if (!st?.backAt) return;
+  const line = statusLine(st);
+  if ($('deckSub').textContent === line) return;
+  $('deckSub').textContent = line;
+  fitLine($('deckSub'));
+}, 5_000);
+
+/**
+ * The safety message, full screen.
+ *
+ * The labels are the same table surfaces/program/program.js paints, and an
+ * unknown kind falls back to "Announcement" the same way. The desk sends null
+ * the moment a human clears it, which hides the plate on the next frame.
+ *
+ * Refitted when the words change and when the webfont lands, not on every
+ * state frame: this runs on all of them, and a layout measurement per frame
+ * is wasted work on a stick PC.
+ */
+const EMERG_KIND = {
+  evacuate: 'Evacuate',
+  shelter: 'Shelter in place',
+  medical: 'Medical',
+  hold: 'Hold',
+  allclear: 'All clear',
+  custom: 'Announcement',
+};
+let emergKey = null;
+function paintEmergency(e) {
+  const el = $('emerg');
+  if (!e) {
+    el.hidden = true;
+    emergKey = null;
+    return;
+  }
+  const key = `${e.kind}|${e.message}|${e.detail ?? ''}`;
+  if (key === emergKey && !el.hidden) return;
+  emergKey = key;
+  $('emergKind').textContent = EMERG_KIND[e.kind] ?? EMERG_KIND.custom;
+  $('emergMsg').textContent = e.message;
+  $('emergDetail').textContent = e.detail ?? '';
+  $('emergDetail').hidden = !e.detail;
+  el.hidden = false;
+  fitEmergency();
+  // A freshly loaded TV (power-cycled, or reloaded by /s/watch when the desk
+  // comes back) gets here before Archivo has arrived, and Archivo is wider
+  // than the fallback: the size that fit the fallback could put EVACUATE off
+  // the top of the screen once the real face drew. The measurement above is what
+  // starts the font loading, so `ready` is still pending here in exactly that
+  // case; the loadingdone listener below catches a load that starts later.
+  document.fonts?.ready.then(refitEmergency);
+}
+
+/**
+ * Step the message down until the plate holds it, 48px clear of the edges.
+ *
+ * Same measurement the program plate makes: the centred flex column overflows
+ * in both directions, so the first and last children are compared with the
+ * plate's own edges rather than trusting scrollHeight. In layout px
+ * (offsetTop, offsetHeight), not getBoundingClientRect: fitStage() scales the
+ * stage with a transform, and in viewport px the 48px margin was 96 stage px
+ * in a 960x540 window and 24 on a 4K TV, so the same message took a
+ * different size on each.
+ */
+function fitEmergency() {
+  const el = $('emerg');
+  const msg = $('emergMsg');
+  msg.removeAttribute('data-fit');
+  const fits = () => {
+    const shown = [...el.children].filter(c => !c.hidden);
+    const first = shown[0];
+    const last = shown[shown.length - 1];
+    // 48px of margin, not the plate's bare edge: a pit TV with overscan
+    // crops the outer few percent of the frame, and this is the one screen
+    // where a cropped word is not acceptable.
+    return first.offsetTop >= 48
+      && last.offsetTop + last.offsetHeight <= el.clientHeight - 48
+      && msg.scrollWidth <= msg.clientWidth;
+  };
+  for (const step of ['1', '2', '3']) {
+    if (fits()) break;
+    msg.dataset.fit = step;
+  }
+}
+const refitEmergency = () => { if (!$('emerg').hidden) fitEmergency(); };
+document.fonts?.addEventListener('loadingdone', refitEmergency);
 
 // Deck fit passes, split out so show() can re-run them at reveal time: a
 // paint that lands during the rankings dwell measures a hidden deck.
