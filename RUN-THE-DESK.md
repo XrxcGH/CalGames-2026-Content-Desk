@@ -451,8 +451,9 @@ on the whiteboard:
 | Settings code | The content lead | `/s/setup`, the event's content | `4567` |
 
 The defaults exist so a practice run works out of the box. **Change all three
-before the event.** Anyone holding this handbook knows them, and the desk
-prints a warning in its own window about every one still in use.
+before the event.** Anyone holding this handbook knows them. The **Start
+here** box on this laptop and the doors check's **Access codes** row name
+every one still in use.
 
 Changing them is the content desk lead's job on Friday, not the field tech's
 on Saturday morning. The desk PIN has a launcher option; the other two do

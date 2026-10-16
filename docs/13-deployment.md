@@ -190,9 +190,11 @@ does not do that; it keeps the shipped default.
 
 The launcher has no option for either code. The exe unpacks `config.example.json` into the desk
 folder and never overwrites an existing `config.json`, so the deployment path is: copy the
-example to `config.json` on that machine, set the two pins, restart. The desk prints a warning
-in the launcher window for every code still on its default, and the doors check shows the same
-thing as an amber **Access codes** row.
+example to `config.json` on that machine, set the two pins, restart. The **Start here** box on
+the desk laptop names every code still on its default, and the doors check shows the same thing
+as an amber **Access codes** row. Neither the launcher nor `desk-log.txt` says which codes are
+defaults: the log is the file a crew sends to whoever is helping, and the awards code opens the
+staged winners.
 
 ---
 
