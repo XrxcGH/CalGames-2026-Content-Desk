@@ -107,8 +107,11 @@ Either one stops the desk properly: the event log is flushed and the port is rel
 double-click starts cleanly. A double-click on a desk that is already running is answered before
 anything is unpacked or the field is scanned: it opens the running desk in the browser, and if
 start-only options were given (`/pin`, `/cheesy-host`, `/display-id`, `/no-cheesy`, `/demo`,
-`/rehearsal`) a message box says they were ignored and how to stop the desk first. Running the launcher FROM a PowerShell or cmd window still attaches to
-that window and prints everything, and Ctrl-C there works as it always did.
+`/rehearsal`) a message box says they were ignored and how to stop the desk first. A running desk
+in practice or replay mode also raises a warning box naming the mode and the Task Manager way
+out (the launcher reads the mode from the desk's open `GET /api/info`). Running the launcher FROM
+a PowerShell or cmd window still attaches to that window and prints everything, and Ctrl-C there
+works as it always did.
 
 The teardown is worth stating because it used to be false. Closing the window with the X button left
 the desk running with no window attached, still holding port 8720, and the next launch died with
@@ -246,9 +249,10 @@ is no flag to remember and none to forget: listing the cameras is how you say yo
 recorded. That matters because everything downstream needs the recording. No recording means no
 replays, no post-match clips, no match videos, and a publish queue with nothing to publish.
 
-Two ways to check it is working. The launcher window prints `recording N source(s)` a moment
-after it starts, and files appear under `rec/` within a few seconds. If neither happens, the
-window says why: usually ffmpeg is missing, or a camera in the list could not be opened.
+Two ways to check it is working. The Doors check's **Recording** row reads the sources rolling,
+and files appear under `rec/` within a few seconds. If not, that row says which part is missing
+(ffmpeg not installed, or no cameras listed), and `desk-log.txt` says why a listed camera could
+not be opened.
 
 There is no launcher option to turn recording off, and that follows from the paragraph above: the
 camera list is the switch. For a laptop that should not fill its disk, set `"sources": []` under
@@ -301,7 +305,10 @@ calls for on 5GHz clear of the field AP. A phone hotspot works for testing.
 ## What the launcher deliberately does not do
 
 It does not install a service, add a startup entry, write to the registry beyond reading where
-Downloads lives, or change anything outside the desk folder and its own Node directory. Uninstall
+Downloads lives, or change anything outside the desk folder and its own Node directory. While the
+desk runs it asks Windows to stay awake with SetThreadExecutionState (ES_CONTINUOUS and
+ES_SYSTEM_REQUIRED), which needs no elevation, writes no setting, and is released when the desk
+exits. Uninstall
 is deleting two folders:
 
 ```

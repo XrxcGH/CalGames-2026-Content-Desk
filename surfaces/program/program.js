@@ -649,7 +649,11 @@ function hideThird() {
   thirdTimer = setTimeout(() => el.removeAttribute('data-show'), out);
 }
 
-function showThird(lt) {
+const thirdDwell = () => parseFloat(getComputedStyle(document.documentElement)
+  .getPropertyValue('--dwell')) || 8000;
+
+/** On air now, for `dwell` ms when unpinned (a whole dwell unless told). */
+function showThird(lt, dwell = thirdDwell()) {
   const el = $('third');
   clearTimeout(thirdTimer);
   thirdKey = JSON.stringify(lt);
@@ -662,8 +666,6 @@ function showThird(lt) {
 
   // Nothing stays up forever waiting on an operator who is busy.
   if (!lt.pinned) {
-    const dwell = parseFloat(getComputedStyle(document.documentElement)
-      .getPropertyValue('--dwell')) || 8000;
     thirdTimer = setTimeout(() => { thirdExpired = true; hideThird(); }, dwell);
   }
 }
@@ -678,7 +680,24 @@ function paintThird(lt) {
   // Seen already: either on air (leave the dwell alone) or retired (stay
   // retired until a fresh show event or a different payload).
   if (JSON.stringify(lt) === thirdKey) return;
-  // Unseen with no show event: the snapshot after a (re)connect.
+  // Unseen with no show event: the snapshot after a (re)connect, or this
+  // page loading at all. The reducer keeps an unpinned third until somebody
+  // hides it, so it can have gone up hours ago, and this used to air it
+  // again for a full dwell: the morning's name strip over the afternoon,
+  // whenever OBS or a pit kiosk reloaded. It gets what is left of its dwell
+  // on the desk's clock, and one whose dwell has run stays retired, as it
+  // would had this page been up to watch it go.
+  if (!lt.pinned && Number.isFinite(lt.at)) {
+    const left = thirdDwell() - (desk.serverNow - lt.at);
+    if (left <= 0) {
+      hideThird();
+      thirdKey = JSON.stringify(lt);
+      thirdExpired = true;
+      return;
+    }
+    showThird(lt, left);
+    return;
+  }
   showThird(lt);
 }
 

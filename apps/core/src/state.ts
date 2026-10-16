@@ -142,8 +142,17 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
          * Released rather than repainted, the same way clearing an award or a
          * slide releases a hold on those screens a few cases below: the thing
          * being held no longer exists, so the hold cannot.
+         *
+         * The selection board likewise. A real match loading after alliance
+         * selection is the first playoff match, and the board is finished.
+         * Put up by hand (the Selection button is a take, so it holds), it
+         * stayed full-frame over Match 1 through the countdown and the whole
+         * match, with no score bar, until somebody found Auto. An automatic
+         * switch to the board holds nothing, so this load already moved it
+         * to the overview; now a board taken by hand goes the same way.
          */
-        const heldOnAResult = state.screenHold && state.screen === 'score';
+        const heldOnAResult = state.screenHold
+          && (state.screen === 'score' || state.screen === 'selection');
         return {
           ...state,
           match: p,
@@ -305,8 +314,23 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         return { ...state, matchStartedAt: anchor, teleopAnchorAt: anchor };
       }
 
+      /*
+       * A stopped match is not a played one, and the program says so by
+       * going back to that match's overview: the alliances that are about
+       * to play it again. The usual next word from the field is a Discard,
+       * which reloads the same match onto that same screen; a commit of the
+       * partial result instead posts it, and the score case takes it from
+       * there.
+       *
+       * It used to put the score bar up, and since the field's abort is
+       * really detected now, that bar sat on the stream until the reload
+       * reading "Pre-match 0:20" (no buzzer, so nothing marks the match
+       * over) over the stopped match's partial score. The score itself is
+       * kept, under the overview, for that commit. An automatic change like
+       * the load's: a screen an operator is holding stays held.
+       */
       case 'match.aborted':
-        return { ...state, matchStartedAt: null, screen: auto(state, 'match') };
+        return { ...state, matchStartedAt: null, screen: auto(state, 'overview') };
 
       // Clearing matchStartedAt is what stops the clock; matchEndedAt
       // disambiguates the post-match display. The clip cutter still maps the
@@ -435,8 +459,17 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         };
       }
 
-      case 'lower_third.show':
-        return { ...state, lowerThird: ev.payload as DeskState['lowerThird'] };
+      // Stamped with when it went up. Nothing here retires an unpinned third
+      // (the overlay does, on its dwell), so it stays in state until an
+      // explicit hide, and an overlay that loaded hours later (OBS restarted,
+      // the Browser Source refreshed, a pit kiosk reloading) aired the
+      // morning's name strip again over whatever was on. The stamp is what
+      // lets a fresh page tell a third still within its dwell from one that
+      // has long since gone. See paintThird in surfaces/program.
+      case 'lower_third.show': {
+        const p = ev.payload as DeskState['lowerThird'];
+        return { ...state, lowerThird: p ? { ...p, at: ev.ts } : null };
+      }
 
       case 'lower_third.hide':
         return { ...state, lowerThird: null };
@@ -579,6 +612,13 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
         // from an OLDER phase starts over rather than accumulating: the
         // manual's rule is that no card crosses a phase boundary.
         const phase = phaseOf(cardMatch);
+        // A card from a phase other than the loaded match's marks nothing
+        // now: no card crosses a phase. Only the boot restore sends one, and
+        // it can: the field's first load can beat the rebuild, which also
+        // carries yesterday's cards (Saturday's quals continue on Sunday), so
+        // a Sunday-afternoon restart put Saturday's qual yellows on the
+        // playoff graphics until the next load swept them off.
+        if (state.match && phaseOf(state.match.displayName ?? '') !== phase) return state;
         const prior0 = state.cards.byTeam[team];
         const prior = prior0 && prior0.phase === phase ? prior0 : { yellows: 0, reds: 0, phase };
         return {
@@ -670,9 +710,9 @@ export function reduce(state: DeskState, ev: DeskEvent): DeskState {
           // "Show the award" is the same intent as taking a screen by hand,
           // and during a ceremony they have usually just held one; an award
           // that silently loses to that hold is a button that does nothing.
-          // The hold (and the award itself) also keeps the gap-filler cue
-          // from cutting the camera to the arcade mid-ceremony: see its
-          // when() in cue/engine.ts.
+          // The hold (and the plate being on screen) also keeps automation
+          // from cutting the camera mid-ceremony: see deskHolding in
+          // cue/engine.ts.
           screen: 'award',
           screenHold: true,
         };

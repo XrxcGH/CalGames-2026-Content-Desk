@@ -104,7 +104,7 @@ test('a matches block shrinks as it is played', () => {
   // test depend on clock resolution rather than on the behaviour.
   const t = Date.now();
   for (let i = 0; i < 5; i++) {
-    bus.emit({ type: 'match.score_posted', source: 'cheesy', payload: {}, ts: t + (i + 1) * 1000 });
+    bus.emit({ type: 'match.score_posted', source: 'cheesy', payload: {}, ts: t + (i + 1) * 7 * 60_000 });
   }
 
   const after = r.snapshot.segments.find(s => s.id === 'lunch')!.projectedAt!;
@@ -123,7 +123,7 @@ test('a block that starts later does not inherit the morning count', () => {
   // the whole thing being tested: they must not be counted against it.
   const t = Date.now();
   for (let i = 0; i < 20; i++) {
-    bus.emit({ type: 'match.score_posted', source: 'cheesy', payload: {}, ts: t - (20 - i) * 1000 });
+    bus.emit({ type: 'match.score_posted', source: 'cheesy', payload: {}, ts: t - (20 - i) * 7 * 60_000 });
   }
 
   r.start('quals-pm');
@@ -134,6 +134,24 @@ test('a block that starts later does not inherit the morning count', () => {
   assert.ok(mins(awards.projectedAt!, Date.now()) >= 120,
     'the afternoon block still has its full 20 matches to play');
   assert.equal(pm.state, 'live');
+});
+
+test("Post score held down counts one match, not thirty", () => {
+  // The desk console's number keys auto-repeat about thirty times a second.
+  const bus = new EventBus();
+  const r = new Rundown(bus, PLAN);
+  r.attach();
+  bus.emit({ type: 'pace.updated', source: 'manual', payload: {
+    cycleSec: 6 * 60, nextStartAt: null, behindMin: 0, lastStartAt: Date.now(),
+  } });
+  r.start('quals-am');
+  const before = r.snapshot.segments.find(s => s.id === 'lunch')!.projectedAt!;
+  const t = Date.now();
+  for (let i = 0; i < 30; i++) {
+    bus.emit({ type: 'match.score_posted', source: 'manual', payload: {}, ts: t + 1000 + i * 33 });
+  }
+  const after = r.snapshot.segments.find(s => s.id === 'lunch')!.projectedAt!;
+  assert.equal(mins(before, after), 6, 'one match nearer, not thirty');
 });
 
 test('a mis-tap can be put back', () => {

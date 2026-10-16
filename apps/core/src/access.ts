@@ -52,6 +52,9 @@ export const OPEN_SURFACES: ReadonlySet<string> = new Set([
  */
 const OPEN_GET = new Set([
   '/api/state',        // every overlay renders from this
+  // Practice or the show. The launcher reads it to warn a double-click that
+  // the desk it found is still in rehearsal; it holds no PIN to ask with.
+  '/api/info',
   '/api/urls',         // the LAN base a QR code has to encode
   '/api/media/manifest',
   '/api/trivia',       // the overlay's snapshot: never carries an unrevealed answer

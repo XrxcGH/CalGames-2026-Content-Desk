@@ -75,7 +75,11 @@ $('form').addEventListener('submit', async e => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ pin: $('pin').value }),
     });
-    if (res.ok) { location.replace(next); return; }
+    // With the fragment the browser carried through the redirect here: the
+    // Start here box links to /s/desk#sec-sample, and without it a first-timer
+    // landed at the top of the console instead of on the button they clicked
+    // for. A fragment never leaves the page, so it cannot point anywhere else.
+    if (res.ok) { location.replace(next + location.hash); return; }
     const body = await res.json().catch(() => ({}));
     // Same message whichever way it failed, so a wrong PIN and a missing one
     // are not distinguishable from out here.

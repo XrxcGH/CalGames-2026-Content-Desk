@@ -289,3 +289,31 @@ test('ingest refuses a file that is not audio, and stores one that is', async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("the poll publishes only when something on a screen would change", async () => {
+  // It published every five seconds regardless: the whole snapshot, logged
+  // and sent to every socket, about 64 MB of event log over a day.
+  const { lib, dir } = await libraryWith(['254.mp3']);
+  try {
+    const bus = new EventBus();
+    const seen: unknown[] = [];
+    bus.subscribe(ev => { if (ev.type === 'audio.updated') seen.push(ev.payload); });
+    const fake = new FakeMusic();
+    const house = new HouseAudio(bus, { controller: fake, library: lib });
+    await house.refresh();
+    const first = seen.length;
+    await house.refresh();
+    await house.refresh();
+    assert.equal(seen.length, first, 'an idle poll is not news');
+    fake.playing = true;
+    await house.refresh();
+    assert.equal(seen.length, first + 1, 'starting to play is');
+    await house.refresh();
+    assert.equal(seen.length, first + 1, 'playing on is not: the bar runs by itself');
+    fake.volume = 40;
+    await house.refresh();
+    assert.equal(seen.length, first + 2, 'a volume change is');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -55,6 +55,8 @@ const ROUTES: Record<string, readonly string[]> = {
     '/displays/bracket/websocket'],
   matchTime: ['/api/arena/websocket', '/displays/audience/websocket',
     '/displays/field_monitor/websocket', '/displays/queueing/websocket'],
+  matchTiming: ['/api/arena/websocket', '/displays/audience/websocket',
+    '/displays/field_monitor/websocket', '/displays/queueing/websocket'],
   realtimeScore: ['/displays/audience/websocket', '/displays/field_monitor/websocket'],
   scorePosted: ['/displays/audience/websocket'],
   audienceDisplayMode: ['/displays/audience/websocket'],
@@ -163,12 +165,22 @@ export function startFakeArena(opts: FakeArenaOpts) {
   // the next one loaded, and has to know that is not news. Seeded as a
   // freshly started arena has them: a blank screen, and a "result" for the
   // empty match it boots with, which is a test match.
+  //
+  // The match timing too, first, as every real endpoint sends it. The desk
+  // judges an abort against the field's own match length, and this script's
+  // pause is 2 s where the arena ships 3, so it says so rather than leave a
+  // rehearsal judged on a length it does not run.
   const latest = new Map<string, unknown>([
+    ['matchTiming', {
+      AutoDurationSec: 20, PauseDurationSec: 2, TransitionShiftDurationSec: 10,
+      ShiftDurationSec: 25, EndgameDurationSec: 30, TimeoutDurationSec: 0,
+    }],
     ['audienceDisplayMode', 'blank'],
     ['scorePosted', { Match: { Id: 0, Type: 0 }, RedScoreSummary: { Score: 0 }, BlueScoreSummary: { Score: 0 } }],
   ]);
   const REPLAY_ORDER = [
-    'audienceDisplayMode', 'arenaStatus', 'matchLoad', 'matchTime', 'realtimeScore', 'scorePosted',
+    'matchTiming', 'audienceDisplayMode', 'arenaStatus', 'matchLoad', 'matchTime', 'realtimeScore',
+    'scorePosted',
   ];
 
   const wss = new WebSocketServer({ noServer: true });
@@ -324,6 +336,21 @@ export function startFakeArena(opts: FakeArenaOpts) {
     at(T0 + 20_500, () => send('matchTime', { MatchState: MatchState.PausePeriod, MatchTimeSec: 20 }));
     at(T_TELE, () => send('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 22 }));
 
+    /*
+     * And a tick every second of match time between them, because the arena
+     * sends one (field/arena.go Update: a matchTime notify whenever the whole
+     * second changes). The desk reads how far a match got off the last of
+     * these: the PostMatch frame cannot say, since MatchTimeSec() is zero in
+     * PostMatch. Sent only at the transitions, a full match here looked like
+     * one aborted 22 s in.
+     */
+    for (let sec = 1; sec < 162; sec++) {
+      if (sec === 20 || sec === 22) continue;   // the transitions above
+      const state = sec < 20 ? MatchState.AutoPeriod
+        : sec < 22 ? MatchState.PausePeriod : MatchState.TeleopPeriod;
+      at(T0 + sec * 1000, () => send('matchTime', { MatchState: state, MatchTimeSec: sec }));
+    }
+
     let redFuel = 4, blueFuel = 9;
     let redTower = 15, blueTower = 0;
     // Shift plan: [shift index, hub owner]. 10s of transition, then 4x25s,
@@ -369,7 +396,10 @@ export function startFakeArena(opts: FakeArenaOpts) {
     const T_END = T_TELE + 140_000;
     at(T_END, () => {
       log('match end');
-      send('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+      // Zero, as on a real arena: MatchTimeSec() returns 0 in PostMatch. This
+      // used to send 160, which no field ever does, and so it hid that the
+      // desk judged an abort on this frame and never saw one.
+      send('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
       send('realtimeScore', {
         MatchState: MatchState.PostMatch,
         Red: { ScoreSummary: summary(4, redFuel - 4, 15, redTower - 15, 0), ActiveRemainingSec: 0 },

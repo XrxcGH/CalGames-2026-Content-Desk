@@ -21,14 +21,18 @@
 
 import { readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { EventBus } from './bus.ts';
+import { EventBus } from './bus.ts';
 import type { CoverageLedger } from './coverage.ts';
 import type { HouseAudio } from './audio/store.ts';
 import type { ObsClient } from './cue/obs.ts';
 import type { PublishQueue } from './publish/queue.ts';
 import type { Recorder } from './recorder.ts';
 import type { CheesyAdapter } from './ingest/cheesy/adapter.ts';
-import { publishReadiness, type Config } from './config.ts';
+import {
+  configFileReport, launchMode, publishReadiness,
+  type Config, type ConfigFileReport, type LaunchMode,
+} from './config.ts';
+import { findFfmpeg } from './ffmpeg.ts';
 import { matchUnderway } from './publish/queue.ts';
 
 export type VitalLevel = 'ok' | 'warn' | 'fail' | 'unknown' | 'off';
@@ -83,6 +87,111 @@ export interface VitalsDeps {
    * server's own default, 0.0.0.0: reachable from every network it is on.
    */
   host?: string;
+  /**
+   * How config.json loaded. Defaults to what loadConfig found, which is what
+   * the running desk wants and passes nothing for; a test says instead.
+   */
+  configFile?: () => ConfigFileReport;
+  /** The practice session this is, or null for the show. Defaults to the launch flags. */
+  mode?: LaunchMode | null;
+  /**
+   * Whether ffmpeg is where the desk looks for it. Defaults to looking, so the
+   * Recording row can say which half of its setup is missing; injectable so a
+   * test does not inherit the answer from the machine running it.
+   */
+  ffmpegFound?: () => Promise<boolean>;
+}
+
+/**
+ * The Settings file row: whether config.json is actually in use.
+ *
+ * Exported because the Start here box says the same thing in the same words,
+ * on the screen a first-timer reads before any other. Null before loadConfig
+ * has run, which is only ever a test or a tool. Never quotes the file: a line
+ * number and the desk's own section names, nothing typed into it.
+ */
+export function configFileVital(r: ConfigFileReport): Vital | null {
+  const base = { id: 'config-file', label: 'Settings file' };
+  if (r.state === 'unread') return null;
+  if (r.state === 'missing') {
+    return { ...base, level: 'off',
+      detail: 'no config.json in the desk folder, so every setting is the shipped default '
+        + '(handbook chapter 2, step 3)' };
+  }
+  const lost = 'so none of it is in use: the awards and settings codes are back to the shipped '
+    + 'defaults, OBS is off, and every other setting in it is ignored';
+  if (r.state === 'unusable') {
+    const near = r.line ? ` near line ${r.line}` : '';
+    const around = r.line ? ` around line ${r.line}` : '';
+    return { ...base, level: 'fail', blocking: true,
+      detail: r.reason === 'not-an-object'
+        ? `config.json is not a group of settings (it has to start with { and end with }), ${lost}.`
+        : r.reason === 'unreadable'
+          ? `config.json is there but could not be read, ${lost}.`
+          : `config.json has a typo${near}, ${lost}.`,
+      fix: r.reason === 'unreadable'
+        ? 'Close any program that has config.json open, check this Windows account can read '
+          + 'the desk folder, then restart the desk.'
+        : `Open config.json in Notepad and check the quotes and commas${around}: text needs `
+          + 'straight "double quotes", and every setting in a group except the last ends with '
+          + 'a comma. Save, then restart the desk.',
+    };
+  }
+  // Warnings, not blockers: the file is in use, and only a section or two of
+  // it is not what somebody wrote. Usually that section is OBS.
+  const said: string[] = [];
+  const todo: string[] = [];
+  if (r.duplicates.length) {
+    const where = r.duplicates.map(d => `"${d.section}" on lines ${
+      d.lines.length === 2 ? d.lines.join(' and ') : d.lines.join(', ')}`).join('; ');
+    said.push(`config.json has the same section more than once: ${where}. The desk uses only `
+      + 'the last of each, so anything in the earlier ones is ignored.');
+    todo.push('merge each repeated section into one with the settings you want');
+  }
+  const ignored = r.ignored ?? [];
+  if (ignored.length) {
+    // The names only: what was written there ("obs": true, a pasted
+    // password) is never repeated back.
+    const names = ignored.map(p => `"${p}"`);
+    const list = names.length === 1 ? names[0]
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    const one = names.length === 1;
+    said.push(`config.json gives ${list} something other than a group of settings in { }, so `
+      + `the desk ignores ${one ? 'it' : 'them'} and uses the shipped defaults there`
+      + `${ignored.includes('obs') ? ' (so OBS is off)' : ''}.`);
+    todo.push(`write ${one ? 'it' : 'each'} as a group in { } (copy the block from `
+      + 'config.example.json and change the values)');
+  }
+  if (said.length) {
+    return { ...base, level: 'warn', detail: said.join(' '),
+      fix: `Open config.json in Notepad, ${todo.join(', and ')}, save, and restart the desk.` };
+  }
+  return { ...base, level: 'ok', detail: 'config.json read and in use' };
+}
+
+/**
+ * The Desk mode row. Practice is a warning that holds the doors, not a
+ * failure: nothing is broken, but a show run in practice keeps none of the
+ * day (no rebuild after a restart, no match videos, and the Judge Advisor's
+ * staged winners in a practice file). Exported for the Start here box.
+ */
+export function modeVital(mode: LaunchMode | null): Vital {
+  const base = { id: 'mode', label: 'Desk mode' };
+  if (!mode) {
+    return { ...base, level: 'ok', detail: "the real show: everything done now is the day's history" };
+  }
+  const what = mode === 'demo'
+    ? 'PRACTICE: started in practice mode (START-PRACTICE.cmd or /demo), running a pretend '
+      + 'match on a loop.'
+    : mode === 'replay'
+      ? 'REPLAY: playing back a saved event log.'
+      : 'PRACTICE: started with /rehearsal.';
+  return { ...base, level: 'warn', blocking: true,
+    detail: `${what} Nothing done now becomes the day's history, no match video is queued, `
+      + "and the Judge Advisor's staged winners go to a practice file.",
+    fix: 'Before doors, end the desk in Task Manager (Ctrl+Shift+Esc, CalGames 2026 Content Desk, '
+      + 'End task), then double-click the exe. A double-click while it is still running only '
+      + 'reopens this practice desk.' };
 }
 
 /**
@@ -103,6 +212,9 @@ const driveFreeBytes = async (root: string): Promise<number> => {
   const fs = await statfs(root);
   return fs.bavail * fs.bsize;
 };
+
+/** Whether ffmpeg is where the desk's own boot would look for it. */
+const hasFfmpeg = async (): Promise<boolean> => (await findFfmpeg()) !== null;
 
 /** 12Mbps video plus audio, per source, which is the launcher's default. */
 const DEFAULT_BYTES_PER_SEC = (12_000_000 / 8) * 1.05;
@@ -129,7 +241,7 @@ export class Vitals {
     // Run them together: a check that has to talk to OBS should not make the
     // disk check wait, and the whole report is polled from a browser.
     const results = await Promise.allSettled([
-      this.#disk(), this.#recorder(), this.#obs(), this.#audioInputs(),
+      this.#settings(), this.#disk(), this.#eventLog(), this.#recorder(), this.#obs(), this.#audioInputs(),
       this.#field(), this.#publish(), this.#house(), this.#coverage(),
       this.#codes(),
     ]);
@@ -148,6 +260,58 @@ export class Vitals {
       blockers: checks.filter(c => c.blocking && c.level !== 'ok' && c.level !== 'off'),
       updatedAt: Date.now(),
     };
+  }
+
+  /**
+   * The practice mode, and whether config.json is in use. First in the list,
+   * because each one changes what every row after it means.
+   */
+  async #settings(): Promise<Vital[]> {
+    const file = configFileVital((this.#d.configFile ?? configFileReport)());
+    return file ? [modeVital(this.#mode()), file] : [modeVital(this.#mode())];
+  }
+
+  #mode(): LaunchMode | null {
+    return this.#d.mode === undefined ? launchMode() : this.#d.mode;
+  }
+
+  /**
+   * The event log, which is what a restart rebuilds the day from: cards,
+   * coverage, trivia scores, the run of show, the safety message.
+   *
+   * A write error (the disk the recorder filled, an antivirus or sync client
+   * holding the file) stops it, and the bus now tries a fresh file by itself
+   * every LOG_RETRY_MS. Until one works the day is going unwritten, and the
+   * only sign was a line in desk-log.txt. Blocking, because a restart in that
+   * state quietly loses everything since the failure. No row at all when
+   * logging was never asked for (a test, a tool).
+   */
+  async #eventLog(): Promise<Vital[]> {
+    const base = { id: 'event-log', label: 'Event log' };
+    const { bus } = this.#d;
+    const problem = bus.logProblem;
+    if (problem) {
+      // The error's own words up to its first comma: "ENOSPC: no space left
+      // on device". After the comma Node names the call and the file's full
+      // path, which says nothing an operator can use.
+      const why = problem.split(', ')[0]!.trim() || 'an unknown error';
+      return [{ ...base, level: 'fail', blocking: true,
+        detail: `not being written (${why}). Until it is, a restart would rebuild the day only `
+          + 'up to the moment it stopped.',
+        fix: `The desk tries again by itself every ${Math.round(EventBus.LOG_RETRY_MS / 1000)} `
+          + 'seconds, and this row clears once it works. Usually the disk is full: free space now '
+          + '(see the Disk row). Otherwise close whatever has the data folder open (a sync '
+          + 'program, an antivirus scan). Do not restart the desk until this row is green.' }];
+    }
+    if (bus.logPath) {
+      // A practice or replay desk writes a practice file that the next boot
+      // leaves out, so the show's promise would contradict the Desk mode row
+      // directly above it.
+      return [{ ...base, level: 'ok', detail: this.#mode() === null
+        ? 'being written, so a restart rebuilds the day from it'
+        : 'being written to a practice file that the next start of the desk ignores (see Desk mode)' }];
+    }
+    return [];
   }
 
   /**
@@ -185,9 +349,16 @@ export class Vitals {
         level,
         blocking: true,
         detail: `${gb}GB free, about ${hours.toFixed(1)} hours of recording`,
+        // In the words of the exe, which cannot take a flag: "point --record
+        // at a bigger drive" named one, and nothing a first-time crew can do.
+        // Nothing prunes rec, so its oldest camera files are where the room
+        // is; its clips folder is the cut match videos, which must stay.
         ...(level === 'ok' ? {} : {
-          fix: 'Clear old segments from rec/, or point --record at a bigger drive. ' +
-            'A full disk during playoffs loses the matches people most want.',
+          fix: 'Free space on this drive now: empty the Recycle Bin and move anything that is '
+            + 'not the desk to another drive. If that is still not enough, move the oldest camera '
+            + 'files (named by date and time, practice first) out of the camera folders in the '
+            + 'rec folder inside the desk folder, and leave its clips folder alone: that holds '
+            + 'the cut match videos. A full disk during playoffs loses the matches people most want.',
         }),
       }];
     } catch (err) {
@@ -201,9 +372,31 @@ export class Vitals {
   async #recorder(): Promise<Vital[]> {
     const rec = this.#d.recorder;
     if (!rec) {
+      /*
+       * Which half is missing, in the words of the exe. "Started without
+       * --record" named a flag the exe has no way to pass (recording turns on
+       * by itself once cameras are listed), so a replay operator with neither
+       * ffmpeg nor a camera list had nothing to act on. Still 'off', never a
+       * blocker: the show runs without recording.
+       */
+      const sources = this.#d.config.recording?.sources;
+      const listed = Array.isArray(sources) && sources.some(s => s && s.enabled !== false);
+      let ffmpeg = false;
+      try { ffmpeg = await (this.#d.ffmpegFound ?? hasFfmpeg)(); } catch { /* unknown: say missing */ }
+      const step = '(handbook chapter 4, step 9)';
       return [{
         id: 'recorder', label: 'Recording', level: 'off',
-        detail: 'not running (started without --record, or ffmpeg is missing)',
+        detail: !ffmpeg && !listed
+          ? 'not running: ffmpeg is not installed on this laptop, and no cameras are listed '
+            + `under "recording" in config.json, so there are no replays or match videos ${step}`
+          : !ffmpeg
+            ? `not running: ffmpeg is not installed on this laptop, so there are no replays or match videos ${step}`
+            : !listed
+              ? 'not running: no cameras are listed under "recording" in config.json, so there are '
+                + `no replays or match videos ${step}`
+              : 'not running, though ffmpeg is installed and config.json lists cameras: desk-log.txt '
+                + 'says why (a camera entry it could not use, a recorder that failed to start, or '
+                + 'ffmpeg installed after the desk started). Fix that, then restart the desk.',
       }];
     }
     const sources = rec.status;
@@ -453,9 +646,17 @@ export class Vitals {
 
   async #field(): Promise<Vital[]> {
     if (!this.#d.cheesy) {
+      // In the words of the exe, which scans for the field once at start and
+      // has no --cheesy to pass. The old "started without --cheesy" sent a
+      // first-time crew looking for a command line they never see.
       return [{
         id: 'field', label: 'Field bridge', level: 'off',
-        detail: 'not connected (started without --cheesy)',
+        detail: this.#mode() === 'demo'
+          ? 'not connected: practice mode runs without the field'
+          : 'not connected: the desk did not find the field when it started. Once the field '
+            + 'is up, restart the desk (Task Manager, End task, double-click the exe), or start '
+            + 'it with START-DESK.cmd /cheesy-host:ADDRESS:8080 using the address the FTA '
+            + 'gives you (handbook chapter 9).',
       }];
     }
     const up = this.#d.bus.state.connected.cheesy;

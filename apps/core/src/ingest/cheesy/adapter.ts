@@ -62,6 +62,15 @@ export function mapRankings(res: RankingsResponse): {
  */
 export const MAX_MATCH_GAP_MIN = 20;
 
+/**
+ * How overdue the next practice match has to be, with the field sitting on
+ * its test match, before practice counts as over for the day. An hour, not
+ * MAX_MATCH_GAP_MIN: practice running twenty minutes behind is an ordinary
+ * Friday, and the FTA loading the test match to check a robot then is too,
+ * and neither should put Saturday's quals on the pit monitors for a while.
+ */
+export const PRACTICE_ABANDONED_MIN = 60;
+
 export interface UpcomingOpts {
   /**
    * TypeOrder of the match the field currently has loaded, when it is of the
@@ -335,6 +344,14 @@ export const POSTED_HOLD_MS = 60_000;
  */
 export const POST_RACE_MS = 5_000;
 
+/**
+ * The pause between auto and teleop, game.MatchTiming's PauseDurationSec as
+ * the arena ships it. REBUILT has no constant for it because the desk's clock
+ * never models the pause, but the field's own match time runs through it, so
+ * it is part of how long a match lasts on the field. See #matchLengthSec.
+ */
+const PAUSE_SEC = 3;
+
 /** The field is running a match: the moment a held next match must be loaded. */
 const running = (state: unknown): boolean =>
   state === MatchState.StartMatch || state === MatchState.AutoPeriod
@@ -471,6 +488,11 @@ export class CheesyAdapter {
   #loadedType: number | string | null = null;
   #loadedTypeOrder: number | null = null;
   /**
+   * When a practice match last started on this desk, the test match never
+   * counting. Zero until one has. See #practiceAbandoned.
+   */
+  #practiceStartedAt = 0;
+  /**
    * Committed score per match, as last seen on the schedule poll.
    *
    * Cheesy guards its score-posted notifier with `if !isMatchReviewEdit`, so
@@ -487,6 +509,12 @@ export class CheesyAdapter {
   /** Non-null while the field's period lengths disagree with REBUILT. */
   #timingMismatch: string[] | null = null;
   #timingWarned = false;
+  /**
+   * The field's period lengths as it last said them, null until it has. Not
+   * adopted for the clock (see #onMatchTiming), only for judging how far
+   * short of its own buzzer a match stopped.
+   */
+  #timing: MatchTimingMessage | null = null;
   /**
    * Which run of each match has been loaded. Cheesy re-runs a committed match
    * under the SAME Match.Id, and both commits fire the score-posted notifier,
@@ -534,6 +562,53 @@ export class CheesyAdapter {
   #breakNextMatch = '';
   /** The break's length, from matchTiming. Zero when the arena has not said. */
   #timeoutSec = 0;
+  /**
+   * When the field's current break began, on this machine's clock. Taken
+   * from the TimeoutActive frame's MatchTimeSec, which in a timeout is the
+   * time since it started: a desk that comes back halfway through lunch is
+   * told the break began half an hour ago, not now.
+   */
+  #breakStartAt = 0;
+  /** What the last break.started said, so it is said again only when that changes. */
+  #breakKey = '';
+  /**
+   * Whether the field has said what a break is (any matchLoad carries the
+   * words) and how long it is (matchTiming), in this desk's lifetime. Both
+   * arrive in every socket's opening burst, so these are false only in the
+   * first moments after a (re)start.
+   */
+  #heardBreakWords = false;
+  #heardBreakLength = false;
+  /**
+   * The field is on a break the desk has not announced yet, because the card
+   * the desk came back with is better than what it has heard so far. See
+   * the TimeoutActive case in #onMatchTime.
+   */
+  #breakPending = false;
+  /**
+   * When the running match started, as this adapter announced it in
+   * match.start (back-dated on a late join). A load that lands behind the
+   * start puts it back from here, and the abort test uses it as the desk's
+   * own witness to how long the match ran.
+   */
+  #startTs: number | null = null;
+  /**
+   * #startTs was stamped off a frame carrying the field's own match time,
+   * so the desk's clock since then is the field's. See #ranFor.
+   */
+  #startOnFieldTime = false;
+  /** MatchTimeSec on the latest running frame of this run. See #ranFor. */
+  #runningSec: number | null = null;
+  /**
+   * A load of the match already loaded, heard while the field read PostMatch
+   * after an end nothing was posted for: a Discard, or a reconnect echo,
+   * which look the same. The field's next word on its state tells them
+   * apart. See #onMatchLoad.
+   */
+  #reload: MatchLoadMessage | null = null;
+  #reloadAt = 0;
+  /** The arena's audience display mode, as last heard. Null until it says. */
+  #audienceMode: string | null = null;
 
   constructor(opts: CheesyAdapterOpts) {
     this.#bus = opts.bus;
@@ -700,12 +775,22 @@ export class CheesyAdapter {
          * practice match still the last one loaded, and the next thing
          * anyone will play is Qualification 1, which is what the screens
          * should say until the scorekeeper loads it on Saturday.
+         *
+         * And back to quals once practice has been ABANDONED, which is the
+         * usual way it ends. Friday's session stops at 7:45 whether or not
+         * the schedule is done, and the arena has already loaded the next
+         * unplayed practice match (or the FTA has loaded the test match over
+         * it), so practice never runs out: P21 to P28 stayed on every screen
+         * through Saturday morning, and Qualification 1 appeared nowhere
+         * until the scorekeeper loaded it after opening ceremonies. See
+         * #practiceAbandoned for what counts.
          */
         let practice: MatchWithResult[] = [];
         let upcoming: UpcomingMatch[] = [];
         if (this.#loadedType === MatchType.Practice) {
           practice = await this.#client.get<MatchWithResult[]>('/api/matches/practice');
           upcoming = mapUpcoming(practice, { fromTypeOrder: floor(MatchType.Practice) });
+          if (this.#practiceAbandoned(upcoming[0]?.time ?? null)) upcoming = [];
         }
 
         let qual: MatchWithResult[] = [];
@@ -782,6 +867,39 @@ export class CheesyAdapter {
     } finally {
       this.#polling = false;
     }
+  }
+
+  /**
+   * Practice is over for the day although the arena still has rows for it.
+   *
+   * Judged on the next unplayed practice match's published time, the only
+   * thing in the list that says when it was meant to be played. From an
+   * earlier day than today, it will never be played: that is Saturday
+   * morning after an unfinished Friday, whatever the field has loaded. On
+   * the same day, only once it is long overdue AND the field has gone to its
+   * test match, which is how the field is left at the end of a session; the
+   * next practice match still loaded is the arena's own LoadNextMatch and
+   * says nothing either way. A row with no time decides nothing.
+   *
+   * A practice match this desk has seen start is the field's own word on
+   * when practice was last being played, and it outranks the rows: a
+   * schedule generated with the wrong date (one keystroke on the
+   * scorekeeper's setup page) put every row on an earlier day, and the live
+   * practice list vanished from the venue screens on Friday while the
+   * arena's own queueing display, which never reads the dates, still showed
+   * it. Practice is over only once both the rows and the last start say so.
+   * A start from an earlier day says nothing for today, so a desk left
+   * running overnight still hands Saturday morning to quals.
+   */
+  #practiceAbandoned(time: string | null): boolean {
+    const due = time ? Date.parse(time) : NaN;
+    if (!Number.isFinite(due)) return false;
+    const at = Math.max(due, this.#practiceStartedAt);
+    const now = Date.now();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    if (at < today.getTime()) return true;
+    return this.#testLoaded && now - at > PRACTICE_ABANDONED_MIN * 60_000;
   }
 
   /**
@@ -901,9 +1019,19 @@ export class CheesyAdapter {
     // PauseDurationSec has no REBUILT counterpart: the desk's clock treats
     // teleop start as zero and never models the pause, so a change there
     // moves nothing on air.
+    // Kept whole all the same, because the abort test is about the field's
+    // match, not the desk's clock: a field with shortened shifts reaches its
+    // own buzzer short of REBUILT's, and judged against REBUILT's every
+    // match it played to the end was called an abort. See #matchLengthSec.
+    this.#timing = msg;
     // Not a mismatch, a fact: the arena sets this when a timeout begins, and
     // it is the countdown the break card needs.
     this.#timeoutSec = Math.max(0, msg.TimeoutDurationSec ?? 0);
+    this.#heardBreakLength = true;
+    // Live, this lands before the timeout starts. In the middle of one it is
+    // a desk that has just come back, hearing the break's length after the
+    // clock frame that started it: the card went up with no return time.
+    this.#breakChanged();
 
     this.#timingMismatch = off.length ? off : null;
     if (off.length && !this.#timingWarned) {
@@ -985,6 +1113,12 @@ export class CheesyAdapter {
     // read after the guards would never see a break at all.
     this.#breakDescription = (msg.BreakDescription ?? '').trim();
     this.#breakNextMatch = (msg.BreakNextMatchName ?? '').trim();
+    this.#heardBreakWords = true;
+    // The scorekeeper retitling a break under way, or a desk that has just
+    // come back hearing what the break is after the frame that started it.
+    this.#breakChanged();
+    // Whatever this is, it is newer than a reload still waiting on the field.
+    this.#reload = null;
 
     /*
      * A TEST match is the arena saying there is nothing loaded.
@@ -1045,6 +1179,7 @@ export class CheesyAdapter {
        */
       if (this.#started && this.#loadedMatchId === null && this.#bus.state.match === null) {
         this.#started = false;
+        this.#startTs = null;
         this.#emit({ type: 'match.unloaded' });
       }
       return;
@@ -1082,12 +1217,29 @@ export class CheesyAdapter {
     // frame lost #matchState still read PostMatch, the re-run's load was
     // swallowed here, and its start released the held match instead: the
     // re-run was filed against the next match and its result dropped.
+    //
+    // Except that after an ABORT, or any end nothing was posted for, a
+    // genuine reload of the same match also arrives while #matchState reads
+    // PostMatch. The scorekeeper's Discard is ResetMatch, which moves the
+    // field to PreMatch without a word, then LoadNextMatch, which loads the
+    // first unplayed match: the one just aborted, under the same id and with
+    // no result to set IsReplay. Its load lands a loop tick ahead of the
+    // PreMatch frame. Swallowed here, the re-run had no load, no overview and
+    // no arming, and the aborted run's cards and auto winner stayed latched.
+    // An echo and a Discard are the same bytes; what differs is where the
+    // field is, and its next frame says (see #settleReload).
     const inProgress = this.#matchState === MatchState.StartMatch
       || this.#matchState === MatchState.AutoPeriod
       || this.#matchState === MatchState.PausePeriod
       || this.#matchState === MatchState.TeleopPeriod
       || this.#matchState === MatchState.PostMatch;
-    if (!afterTest && !this.#held && inProgress && match.id === this.#loadedMatchId) return;
+    if (!afterTest && !this.#held && inProgress && match.id === this.#loadedMatchId) {
+      if (this.#matchState === MatchState.PostMatch && this.#endedUnposted) {
+        this.#reload = msg;
+        this.#reloadAt = Date.now();
+      }
+      return;
+    }
     // The same match again, with its score posted and no replay flag. A real
     // Cheesy never sends this: a commit loads the NEXT match in the same
     // handler (see #held), and a load of a committed match always carries
@@ -1206,17 +1358,80 @@ export class CheesyAdapter {
    */
   #onAudienceDisplayMode(mode: AudienceDisplayModeMessage): void {
     // Checked anyway: it is off a socket, and anything else is not a move.
-    if (typeof mode !== 'string' || mode === 'score') return;
+    if (typeof mode !== 'string') return;
+    const was = this.#audienceMode;
+    this.#audienceMode = mode;
+    if (mode === 'score') return;
     if (this.#held && this.#postedId !== null && this.#postedId === this.#loadedMatchId) {
       this.#releaseHeld();
+    }
+    /*
+     * The scorekeeper putting the selection board up on the arena's screen
+     * is the desk's cue to put its own up. Nothing else ever did: the board
+     * arrived as alliance_selection.update, which only stores the picks, so
+     * program sat on the last qual's Final for the whole of selection while
+     * the handbook told the crew the board would go up by itself.
+     *
+     * Sourced 'cue', the automatic kind of screen change: it gives way to a
+     * screen a producer is holding, and it sets no hold of its own, so the
+     * first playoff match's load takes program to its overview as any load
+     * does. Only on the move INTO the mode, because a reconnect replays the
+     * current mode and the arena's screen can still read allianceSelection
+     * after Match 1 is loaded: that replay must not pull the board back over
+     * it. For the same reason not while a playoff match is loaded, which a
+     * desk restarted after selection can hear before the mode.
+     */
+    if (mode === 'allianceSelection' && was !== mode
+        && !(this.#loadedType === MatchType.Playoff && !this.#testLoaded)) {
+      this.#emit({ type: 'screen.change', source: 'cue', payload: { screen: 'selection' } });
     }
   }
 
   /** Make a (real) load the loaded match. Everything per-match starts over. */
   #applyLoad(msg: MatchLoadMessage, match: MatchInfo): void {
     const m = msg.Match ?? {};
-    this.#last = { red: zero(), blue: zero() };
+    /*
+     * A load that lands behind the start of its own match.
+     *
+     * A desk started or restarted mid-match opens every socket at once, and
+     * the field monitor's opening burst sends matchTime ahead of matchLoad.
+     * Whichever socket answers first owns each, so the running frame can
+     * come first: it is announced as a late join, back-dated to the field's
+     * clock, and then this load reset it. match.loaded clears the reducer's
+     * start and puts program on the overview, and the field is past the
+     * transition the start keys on, so nothing ever started it again: the
+     * clock dead and the overview up for the rest of the match.
+     *
+     * The arena cannot load a match while one is running, so a load heard
+     * now is the running match's own, and the start is put back as it was
+     * announced, after the load. Its score ledger is kept for the same
+     * reason: the frames already diffed were this match's, and diffing the
+     * next one against zero would mint a second burst of replay markers.
+     *
+     * Only for THAT match, though: the one a restarted desk has not seen a
+     * load for yet, or the same match again. #matchState is only as fresh as
+     * the last clock frame, and the socket carrying the clock can go quiet
+     * (half-open, or the end and reset frames lost from a full channel)
+     * while the score and the next load arrive on others. A running state
+     * left over from Q42 then handed Q42's start to Q43 when it was let in:
+     * the desk's own ticker ran Q43's clock out and buzzed it before it had
+     * started, and Q43's real start was swallowed as a repeat.
+     */
+    const same = this.#loadedMatchId === null || match.id === this.#loadedMatchId;
+    const resume = this.#started && running(this.#matchState) && same ? this.#startTs : null;
+    const resumeOnFieldTime = this.#startOnFieldTime;
+    // For the same reason, a running state under a different match is stale:
+    // the field is between matches. Left running, the next match's first
+    // frame could read as no change at all and its start would never be said.
+    if (!same && running(this.#matchState)) this.#matchState = MatchState.PreMatch;
+    if (resume === null) {
+      this.#last = { red: zero(), blue: zero() };
+      // And how far the last match's clock got is not this one's.
+      this.#runningSec = null;
+    }
+    this.#reload = null;
     this.#started = false;
+    this.#startTs = null;
     this.#autoFuel = { red: 0, blue: 0 };
     this.#autoWinnerSent = false;
     this.#matchLoaded = true;
@@ -1241,7 +1456,39 @@ export class CheesyAdapter {
     };
     this.#cardsSeen.clear();
     this.#emit({ type: 'match.loaded', payload: { ...match, run } });
+    if (resume !== null) this.#announceStart(resume, resumeOnFieldTime);
     if (this.#joinedAfterBuzzer) this.#endedBeforeJoin();
+  }
+
+  /**
+   * The field has started the loaded match (at `ts`, when that is known).
+   * `onFieldTime` when the frame that said so carried the field's match time.
+   */
+  #announceStart(ts?: number, onFieldTime = false): void {
+    this.#started = true;
+    this.#startTs = ts ?? Date.now();
+    this.#startOnFieldTime = onFieldTime;
+    if (this.#loadedType === MatchType.Practice) this.#practiceStartedAt = this.#startTs;
+    this.#emit({ type: 'match.start', ...(ts !== undefined ? { ts } : {}) });
+  }
+
+  /**
+   * A load waiting on the field's next word (see #onMatchLoad), and here it
+   * is. PreMatch is a Discard: the field reset, so the load was real, and it
+   * goes in ahead of whatever the frame carrying that state does. Anything
+   * else is not an answer, since a frame generated before the reset can still
+   * be in flight on another socket, and the wait is short: a Discard's
+   * PreMatch follows its load within a loop tick, and arenaStatus says where
+   * the field is four times a second, so a load nobody has confirmed by
+   * POST_RACE_MS was a reconnect replaying the match that is still loaded.
+   */
+  #settleReload(state: unknown): void {
+    const msg = this.#reload;
+    if (!msg) return;
+    if (Date.now() - this.#reloadAt > POST_RACE_MS) { this.#reload = null; return; }
+    if (state !== MatchState.PreMatch) return;
+    this.#reload = null;
+    this.#applyLoad(msg, mapMatchLoad(msg));
   }
 
   /** See #joinedAfterBuzzer. Its own event: a real match.end fires cues. */
@@ -1258,6 +1505,12 @@ export class CheesyAdapter {
    */
   #onMatchTime(msg: MatchTimeMessage): void {
     const state = msg.MatchState ?? MatchState.PreMatch;
+    // Every running frame, the ticks included: the arena sends one each
+    // second of the match, and the last of them is how far it got. See #ranFor.
+    if (running(state)) {
+      const at = Number(msg.MatchTimeSec);
+      if (Number.isFinite(at) && at > 0) this.#runningSec = at;
+    }
     // Either socket can win the race after a (re)start, so this works in both
     // orders: frame first (the load then picks it up), or load first.
     if (!this.#sawMatchTime) {
@@ -1265,20 +1518,43 @@ export class CheesyAdapter {
       // A test match that has buzzed is not a real match that ended.
       this.#joinedAfterBuzzer = state === MatchState.PostMatch && !this.#testLoaded;
       if (this.#joinedAfterBuzzer && this.#matchLoaded) this.#endedBeforeJoin();
+      /*
+       * Back after a break ended while the desk was down. The boot puts the
+       * logged break card back up, and only prestart or a start retires an
+       * automatic one, but the field is past that edge already: its first
+       * frame is no transition at all when it reads PreMatch, which is what
+       * #matchState starts at. The card then promised a return time for a
+       * break that had finished, until the next match started. Any first
+       * frame outside a timeout is the field saying the break is over.
+       */
+      if (state !== MatchState.TimeoutActive && state !== MatchState.PostTimeout) {
+        this.#emit({ type: 'match.prestart' });
+      }
     } else if (state !== MatchState.PostMatch) {
       this.#joinedAfterBuzzer = false;
     }
+    // A reload of the aborted match waiting on this: see #settleReload.
+    this.#settleReload(msg.MatchState);
     // The field is starting a match, so the one the arena loaded behind the
     // last result is on now, whatever its display is doing. Loaded FIRST, so
     // the start, the arming and everything after them belong to it rather
     // than to the match that already finished. See #held.
     if (this.#held && running(state)) this.#releaseHeld();
+    // A break held back for its words (see the TimeoutActive case) is said on
+    // the field's next tick of it, whatever has arrived by then: the opening
+    // burst is long over, and what did not come with it is not coming.
+    if (this.#breakPending && state === MatchState.TimeoutActive
+        && state === this.#matchState) {
+      this.#breakPending = false;
+      this.#announceBreak();
+    }
     if (state === this.#matchState) return;
     const previous = this.#matchState;
     // Tracked through a test match too: the schedule poll must still hold off
     // while one runs (it costs the arena's loop the same), and the load
     // guards need to know where the field really is.
     this.#matchState = state;
+    this.#breakPending = false;
     /*
      * Everything below that belongs to a match is skipped while the arena has
      * its test match loaded: start, late join, the teleop re-anchor, the
@@ -1288,6 +1564,12 @@ export class CheesyAdapter {
      * test match loaded, and the room needs that card and its end.
      */
     const test = this.#testLoaded;
+    // The frame says where the field's own clock is. Cheesy's first frame of
+    // a live start is AutoPeriod at 0 (StartMatch lasts one loop iteration,
+    // and the tick that follows it already reads AutoPeriod), so a start
+    // stamped from one is on the field's time.
+    const told = typeof msg.MatchTimeSec === 'number' && Number.isFinite(msg.MatchTimeSec)
+      && msg.MatchTimeSec >= 0;
 
     /*
      * Joining a match already in progress.
@@ -1317,8 +1599,7 @@ export class CheesyAdapter {
       const ts = Number.isFinite(elapsed) && elapsed > 0
         ? Date.now() - elapsed * 1000
         : Date.now();
-      this.#started = true;
-      this.#emit({ type: 'match.start', ts });
+      this.#announceStart(ts, told);
       console.log('[cheesy] joined a match already running '
         + `(${Number.isFinite(elapsed) ? Math.round(elapsed) : '?'}s in); clock re-anchored`);
       /*
@@ -1335,7 +1616,7 @@ export class CheesyAdapter {
     switch (state) {
       case MatchState.StartMatch:
       case MatchState.AutoPeriod:
-        if (!test && !this.#started) { this.#started = true; this.#emit({ type: 'match.start' }); }
+        if (!test && !this.#started) this.#announceStart(undefined, told);
         break;
       case MatchState.PostMatch:
         // Only a real match end (coming back from a timeout isn't one).
@@ -1353,13 +1634,14 @@ export class CheesyAdapter {
            *
            * The clock tells them apart. A real match reaches the end of the
            * timeline; an abort stops short of it. The arena's own match time
-           * is on this message, so this is its number rather than ours, and
-           * the grace is generous because the only cost of guessing "ended"
-           * is the behaviour that was there before.
+           * is the measure (see #ranFor), against the arena's own match
+           * length (see #matchLengthSec), and the grace is generous because
+           * the only cost of guessing "ended" is the behaviour that was there
+           * before.
            */
-          const at = Number(msg.MatchTimeSec);
-          const full = REBUILT.MATCH_END - REBUILT.AUTO_START;   // 160s
-          const aborted = Number.isFinite(at) && at > 0 && at < full - 5;
+          const at = this.#ranFor(msg);
+          const full = this.#matchLengthSec();
+          const aborted = at !== null && at < full - 5;
           if (aborted) {
             console.log(`[cheesy] the field stopped at ${Math.round(at)}s of ${full}: ` +
               'treating this as an abort rather than a result.');
@@ -1369,9 +1651,13 @@ export class CheesyAdapter {
           this.#endedUnposted = true;
         }
         this.#started = false;
+        this.#startTs = null;
+        this.#runningSec = null;
         break;
       case MatchState.PreMatch:
         this.#started = false;
+        this.#startTs = null;
+        this.#runningSec = null;
         this.#emit({ type: 'match.prestart' });
         break;
       case MatchState.TeleopPeriod:
@@ -1386,7 +1672,7 @@ export class CheesyAdapter {
           this.#emit({ type: 'match.teleop_start' });
         }
         break;
-      case MatchState.TimeoutActive:
+      case MatchState.TimeoutActive: {
         /*
          * The arena knows what this break IS, and says so.
          *
@@ -1399,18 +1685,130 @@ export class CheesyAdapter {
          * name, the next match and a live countdown while the venue screens
          * and the stream showed an undescribed "timeout" with no clock.
          * Those are exactly the moments the room most needs telling.
+         *
+         * In a timeout MatchTimeSec is the time since it began. Zero on the
+         * frame that starts one live; on a desk that comes back mid-break it
+         * is how much of the break has gone, and the break's full length,
+         * stamped from now, put lunch back on every screen thirty minutes
+         * after the field's own countdown ended it.
          */
-        this.#emit({
-          type: 'break.started',
-          payload: {
-            kind: 'timeout',
-            ...(this.#breakDescription ? { label: this.#breakDescription } : {}),
-            ...(this.#breakNextMatch ? { nextMatch: this.#breakNextMatch } : {}),
-            ...(this.#timeoutSec > 0 ? { seconds: this.#timeoutSec } : {}),
-          },
-        });
+        const elapsed = Number(msg.MatchTimeSec);
+        this.#breakStartAt = Date.now()
+          - (Number.isFinite(elapsed) && elapsed > 0 ? elapsed * 1000 : 0);
+        /*
+         * Not yet, though, on a desk that has just come back onto the card it
+         * went down with. The boot put the logged "Lunch, back at 12:45" back
+         * up, and the field monitor sends its clock ahead of its load, so the
+         * break was announced before its words: every screen repainted to a
+         * bare "Field timeout" for a moment, then to "Lunch" again, and the
+         * day's log gained a break nobody called. The card already up is the
+         * better guess until the field has said both what the break is and
+         * how long it runs, and #breakChanged says it then, once.
+         */
+        if (this.#bus.state.status?.auto && !(this.#heardBreakWords && this.#heardBreakLength)) {
+          this.#breakPending = true;
+        } else {
+          this.#announceBreak();
+        }
         break;
+      }
     }
+  }
+
+  /** break.started for the field's break, with the time it has LEFT. */
+  #announceBreak(): void {
+    const left = this.#timeoutSec > 0
+      ? Math.round(this.#timeoutSec - (Date.now() - this.#breakStartAt) / 1000) : 0;
+    this.#breakKey = this.#breakWords();
+    this.#emit({
+      type: 'break.started',
+      payload: {
+        kind: 'timeout',
+        ...(this.#breakDescription ? { label: this.#breakDescription } : {}),
+        ...(this.#breakNextMatch ? { nextMatch: this.#breakNextMatch } : {}),
+        ...(left > 0 ? { seconds: left } : {}),
+      },
+    });
+  }
+
+  #breakWords(): string {
+    return `${this.#breakDescription}|${this.#breakNextMatch}|${this.#timeoutSec}`;
+  }
+
+  /**
+   * The break's name or length has changed under a break already announced.
+   *
+   * Live these all land before the state flips to TimeoutActive, so this is
+   * quiet. A desk that comes back mid-break can hear them after the clock
+   * frame, though, since each notifier is taken from whichever socket says
+   * it first: the card went up as an undescribed "Field timeout" with no
+   * return time over the restored "Lunch, back at 12:45". And the scorekeeper
+   * can retitle a break under way. Said again, with the time left on the
+   * break as it began, not a new break from now.
+   *
+   * A break held back on a restart (#breakPending) is said here for the
+   * first time, as soon as both its words and its length are in.
+   */
+  #breakChanged(): void {
+    if (this.#matchState !== MatchState.TimeoutActive) return;
+    if (this.#breakPending) {
+      if (!this.#heardBreakWords || !this.#heardBreakLength) return;
+      this.#breakPending = false;
+    } else if (this.#breakWords() === this.#breakKey) {
+      return;
+    }
+    this.#announceBreak();
+  }
+
+  /**
+   * How far into the match the field got, in seconds, or null if it never
+   * said.
+   *
+   * Not off the PostMatch frame: the arena's MatchTimeSec() returns zero in
+   * PostMatch, so on a real field that frame always says 0 and every abort
+   * was judged a full match, shown as Final. The running frames do carry the
+   * time, one each second, and the last of them is where the field stopped.
+   * The PostMatch frame's own figure still counts if a build sends one.
+   *
+   * The desk's own clock since the start is a floor under that, so a few
+   * ticks dropped by a busy listener channel at the very end cannot turn a
+   * full match into an abort. Beside a tick it only ever pushes towards
+   * "ended". Alone it counts only when the field's own clock vouched for the
+   * start (see below): a field that sends no times at all is still given
+   * the benefit of the doubt.
+   */
+  #ranFor(msg: MatchTimeMessage): number | null {
+    const said = [Number(msg.MatchTimeSec), this.#runningSec ?? NaN]
+      .filter(t => Number.isFinite(t) && t > 0);
+    const wall = this.#startTs !== null ? (Date.now() - this.#startTs) / 1000 : 0;
+    /*
+     * No tick above zero at all. A field that sends no times is still given
+     * the benefit of the doubt, but a field that DOES, and whose start the
+     * desk stamped off its own zero, has just said the match was stopped
+     * inside its first second: the arena's first tick is 0 and its next
+     * whole second never came. A false start or an early e-stop went up as
+     * a result, with the buzzer cues, for a match that was stopped at once.
+     */
+    if (!said.length) return this.#startTs !== null && this.#startOnFieldTime ? wall : null;
+    return Math.max(...said, wall);
+  }
+
+  /**
+   * How long a match runs on this field, start to buzzer, in the field's own
+   * match time: auto, the pause and teleop, which is what Cheesy's
+   * GetDurationToTeleopEnd adds up. Each period from the field's matchTiming
+   * when it has said, REBUILT's otherwise, so a desk that never heard the
+   * timing judges on the game it is built for, 163 s.
+   */
+  #matchLengthSec(): number {
+    const t = this.#timing;
+    const sec = (v: unknown, fallback: number): number =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : fallback;
+    return sec(t?.AutoDurationSec, -REBUILT.AUTO_START)
+      + sec(t?.PauseDurationSec, PAUSE_SEC)
+      + sec(t?.TransitionShiftDurationSec, REBUILT.TRANSITION_END - REBUILT.TELEOP_START)
+      + REBUILT.SHIFT_COUNT * sec(t?.ShiftDurationSec, REBUILT.SHIFT_SECONDS)
+      + sec(t?.EndgameDurationSec, REBUILT.MATCH_END - REBUILT.ENDGAME_START);
   }
 
   // ---- scoring ------------------------------------------------------------
@@ -1445,6 +1843,9 @@ export class CheesyAdapter {
      * and that load is the only way out of a test.
      */
     if (this.#testLoaded) return;
+    // The all-zero frame the arena sends with a Discard's reload says the
+    // field has reset: that reload is real, and this frame is its first.
+    this.#settleReload(msg.MatchState);
     /*
      * And while the next match is held behind a posted result, its frames
      * are not the result's. The first is the all-zero frame the arena sends
@@ -1723,6 +2124,9 @@ export class CheesyAdapter {
     this.#postedId = this.#loadedMatchId;
     this.#postedAt = Date.now();
     this.#endedUnposted = false;
+    // A reload of this match heard before its result was a reconnect echo:
+    // the arena commits only the match it has loaded, and loads the next.
+    this.#reload = null;
     // A next match that beat this score onto the desk was only waiting
     // POST_RACE_MS for it. Now it waits behind the result, counted from here.
     if (this.#held) this.#holdFor(POSTED_HOLD_MS);
@@ -1786,6 +2190,9 @@ export class CheesyAdapter {
 
   #onArenaStatus(msg: ArenaStatusMessage): void {
     this.#checkTestStillLoaded(msg.MatchId);
+    // Where the field is, four times a second: the net under a Discard's
+    // PreMatch frame lost from a full channel. See #settleReload.
+    this.#settleReload(msg.MatchState);
     // A running field with the next match still held: load it now, on
     // whichever socket said so first. See #held.
     if (this.#held && running(msg.MatchState)) this.#releaseHeld();

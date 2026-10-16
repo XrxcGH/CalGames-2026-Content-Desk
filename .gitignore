@@ -110,3 +110,7 @@ RUN-THE-DESK.html
 
 # The launcher remembers the desk PIN here, in the desk folder. Never commit it.
 desk-pin.txt
+
+# Which cues the crew armed, kept across a restart. Event-specific runtime state.
+data/cues.json
+data/cues.json.tmp

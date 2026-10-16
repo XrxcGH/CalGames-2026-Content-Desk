@@ -1,11 +1,11 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import {
   CheesyClient, assertPathAllowed, assertSocketAllowed, ALLOWED_SOCKETS, DEFAULT_SOCKETS,
 } from './client.ts';
 import { fuelPoints, towerPoints, MatchState, MatchStatus, type MatchWithResult } from './protocol.ts';
-import { CheesyAdapter, mapRankings, mapSelection, mapUpcoming } from './adapter.ts';
+import { CheesyAdapter, POST_RACE_MS, mapRankings, mapSelection, mapUpcoming } from './adapter.ts';
 import { EventBus } from '../../bus.ts';
 import type { DeskEvent } from '../../types.ts';
 
@@ -1002,8 +1002,12 @@ test('a desk that restarts mid-match picks the match up where it is', () => {
     'the teleop re-anchor exists to guess an unknown pause; here the field '
     + 'told us the time, so guessing would throw that away');
 
-  // And it still only fires once as the match plays out.
-  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+  // And it still only fires once as the match plays out. Played out as the
+  // arena sends it: a tick each second to the end, then a PostMatch frame
+  // whose MatchTimeSec is zero. Going straight from 42 s to the buzzer would
+  // be a field stopping at 42 s, which is an abort.
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 162 });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
   assert.equal(seen.filter(t => t === 'match.start').length, 1);
   assert.equal(seen.filter(t => t === 'match.end').length, 1);
 });
@@ -1700,6 +1704,320 @@ test('a match that runs to the buzzer still ends normally', () => {
   assert.equal(seen2.includes('match.end'), true);
 });
 
+/**
+ * Q42 loaded and armed, then run as the arena runs it: a tick each second.
+ * `timing` is the field's matchTiming, said first as every socket says it.
+ */
+function runQ42(lastTick: number, opts: { endFrame?: boolean; timing?: object } = {}) {
+  const bus = new EventBus();
+  const seen: DeskEvent[] = [];
+  bus.subscribe(ev => seen.push(ev));
+  const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+  if (opts.timing) adapter.ingest('matchTiming', opts.timing);
+  adapter.ingest('matchLoad', { Match: { Id: 42, Type: 2, TypeOrder: 42, LongName: 'Qualification 42' } });
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+  adapter.ingest('arenaStatus', linkedQ42(MatchState.PreMatch));
+  adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+  for (let sec = 1; sec <= lastTick; sec++) {
+    const state = sec < 20 ? MatchState.AutoPeriod
+      : sec < 23 ? MatchState.PausePeriod : MatchState.TeleopPeriod;
+    adapter.ingest('matchTime', { MatchState: state, MatchTimeSec: sec });
+    if (sec === 10 || sec === 25) {
+      adapter.ingest('realtimeScore', {
+        MatchState: state,
+        Red: { ScoreSummary: { AutoFuelPoints: 9, TeleopFuelPoints: sec === 25 ? 12 : 0 } },
+        Blue: { ScoreSummary: { AutoFuelPoints: 3 } },
+        RedCards: { '846': 'yellow' },
+      });
+    }
+  }
+  // MatchTimeSec() is zero in PostMatch: this is the frame every end sends.
+  if (opts.endFrame !== false) {
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
+  }
+  const types = () => seen.map(e => e.type);
+  return { bus, seen, adapter, types };
+}
+
+function linkedQ42(state: number, linked = true) {
+  return {
+    MatchId: 42, MatchState: state, PlcIsHealthy: true, FieldEStop: false,
+    AllianceStations: { R1: { Team: { Id: 846 }, DsConn: { RobotLinked: linked }, Bypass: false } },
+  };
+}
+
+test('an abort on a real field is judged on the running clock, not the PostMatch frame', () => {
+  /*
+   * Cheesy's MatchTimeSec() returns zero in PostMatch, so the frame that ends
+   * a match says 0 whether it ran to the buzzer or the FTA stopped it, and
+   * the abort test read that frame: no real arena ever produced an abort, and
+   * a half-played match went up as Final. The running ticks carry the time.
+   */
+  const aborted = runQ42(30);
+  assert.equal(aborted.types().includes('match.aborted'), true, 'stopped at 30 s is an abort');
+  assert.equal(aborted.types().includes('match.end'), false);
+  aborted.adapter.stop();
+
+  const full = runQ42(162);
+  assert.equal(full.types().includes('match.end'), true, 'to the buzzer is a result');
+  assert.equal(full.types().includes('match.aborted'), false);
+  full.adapter.stop();
+});
+
+test('ticks lost at the very end do not turn a full match into an abort', () => {
+  // A listener channel is five deep and drops when full. The desk's own clock
+  // since the start is the floor under the field's last tick.
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const { adapter, types } = runQ42(100, { endFrame: false });
+    mock.timers.tick(163_000);
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
+    assert.equal(types().includes('match.end'), true);
+    assert.equal(types().includes('match.aborted'), false);
+    adapter.stop();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a field with its own period lengths is judged against its own buzzer', () => {
+  /*
+   * The scorekeeper can change every period on /setup/settings, and the desk
+   * only warns about it. Judged against REBUILT's length, a field with
+   * shorter shifts had every match it played to its own buzzer called an
+   * abort: no buzzer cues, no hold on the result, and the coverage ledger
+   * listing the match unplayed.
+   */
+  const shorter = {
+    AutoDurationSec: 20, PauseDurationSec: 3, TransitionShiftDurationSec: 10,
+    ShiftDurationSec: 22, EndgameDurationSec: 30, TimeoutDurationSec: 0,
+  };
+  // 20 + 3 + 10 + 4 x 22 + 30 = 151 s on the field's clock: its last tick is 150.
+  const full = runQ42(150, { timing: shorter });
+  assert.equal(full.types().includes('match.end'), true, 'to its own buzzer is a result');
+  assert.equal(full.types().includes('match.aborted'), false);
+  full.adapter.stop();
+
+  const stopped = runQ42(30, { timing: shorter });
+  assert.equal(stopped.types().includes('match.aborted'), true, 'stopped at 30 s is still an abort');
+  assert.equal(stopped.types().includes('match.end'), false);
+  stopped.adapter.stop();
+
+  // And the other way: 30 s shifts make a 183 s match, so stopping where
+  // REBUILT's would have buzzed is stopping 20 s short of this one.
+  const longer = runQ42(162, { timing: { ...shorter, ShiftDurationSec: 30 } });
+  assert.equal(longer.types().includes('match.aborted'), true, 'short of its own buzzer');
+  assert.equal(longer.types().includes('match.end'), false);
+  longer.adapter.stop();
+
+  // The pause is part of the match too. A field that never says its timing
+  // is judged on REBUILT's with the arena's own 3 s pause, 163 s, so a run
+  // that got to 156 s stopped 7 s short; on a field set to no pause at all,
+  // 160 s, the same run is inside the grace of its own buzzer.
+  const unsaid = runQ42(156);
+  assert.equal(unsaid.types().includes('match.aborted'), true, 'short of REBUILT\'s 163 s');
+  unsaid.adapter.stop();
+  const noPause = runQ42(156, { timing: { ...shorter, PauseDurationSec: 0, ShiftDurationSec: 25 } });
+  assert.equal(noPause.types().includes('match.end'), true, 'within reach of its own 160 s');
+  noPause.adapter.stop();
+});
+
+test('a match stopped inside its first second is an abort, not a result', () => {
+  /*
+   * The arena's first tick of a match is AutoPeriod at 0 and its next is at
+   * 1 s. Stopped before that, no tick above zero ever came, and with nothing
+   * to measure the desk gave the match the benefit of the doubt: a false
+   * start or an early e-stop went up as a result, buzzer cues and all. The
+   * desk stamped that start off the field's own zero, so its clock since
+   * then is the field's.
+   */
+  const load = { Match: { Id: 42, Type: 2, TypeOrder: 42, LongName: 'Qualification 42' } };
+  const at0 = (state: number) => ({ MatchState: state, MatchTimeSec: 0 });
+  const starts: Record<string, (a: CheesyAdapter) => void> = {
+    'as the arena sends it': a => {
+      a.ingest('matchLoad', load);
+      a.ingest('matchTime', at0(MatchState.PreMatch));
+      a.ingest('matchTime', at0(MatchState.AutoPeriod));
+    },
+    'with the start frame too': a => {
+      a.ingest('matchLoad', load);
+      a.ingest('matchTime', at0(MatchState.PreMatch));
+      a.ingest('matchTime', at0(MatchState.StartMatch));
+      a.ingest('matchTime', at0(MatchState.AutoPeriod));
+    },
+    // A desk restarted onto the very start, its load behind the clock: the
+    // start is put back after the load as it was stamped.
+    'on a restart, clock first': a => {
+      a.ingest('matchTime', at0(MatchState.AutoPeriod));
+      a.ingest('matchLoad', load);
+    },
+  };
+  for (const [name, start] of Object.entries(starts)) {
+    mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    try {
+      const bus = new EventBus();
+      const seen: string[] = [];
+      bus.subscribe(ev => seen.push(ev.type));
+      const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+      start(adapter);
+      mock.timers.tick(600);
+      adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
+      assert.equal(seen.includes('match.aborted'), true, `${name}: stopped at 0.6 s`);
+      assert.equal(seen.includes('match.end'), false, name);
+      adapter.stop();
+    } finally {
+      mock.timers.reset();
+    }
+  }
+
+  // A field that sends no times at all still gets the benefit of the doubt,
+  // its start seen or not: the desk's clock alone is never the evidence.
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const bus = new EventBus();
+    const seen: string[] = [];
+    bus.subscribe(ev => seen.push(ev.type));
+    const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+    adapter.ingest('matchTime', { MatchState: MatchState.PreMatch });
+    adapter.ingest('matchTime', { MatchState: MatchState.StartMatch });
+    adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod });
+    mock.timers.tick(600);
+    adapter.ingest('matchTime', { MatchState: MatchState.PostMatch });
+    assert.equal(seen.includes('match.end'), true);
+    assert.equal(seen.includes('match.aborted'), false);
+    adapter.stop();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('the Discard after an abort reloads the match: overview, arming and a clean slate', () => {
+  /*
+   * Discard is ResetMatch, which moves the field to PreMatch without a word,
+   * then LoadNextMatch, which loads the first unplayed match: the one just
+   * aborted, same id, no IsReplay. The load beats the PreMatch frame, and the
+   * mid-match echo guard, still reading PostMatch, swallowed it: no overview,
+   * no arming for the re-run, and the aborted run's card and auto winner
+   * latched against it. Any of the field's next frames can say PreMatch, the
+   * clock's being the one a full channel loses.
+   */
+  for (const via of ['matchTime', 'realtimeScore', 'arenaStatus']) {
+    const { bus, seen, adapter } = runQ42(30);
+    const from = seen.length;
+    adapter.ingest('matchLoad', { Match: { Id: 42, Type: 2, TypeOrder: 42, LongName: 'Qualification 42' } });
+    if (via === 'matchTime') {
+      adapter.ingest('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+    } else if (via === 'realtimeScore') {
+      adapter.ingest('realtimeScore', {
+        MatchState: MatchState.PreMatch, Red: { ScoreSummary: {} }, Blue: { ScoreSummary: {} },
+      });
+    } else {
+      adapter.ingest('arenaStatus', linkedQ42(MatchState.PreMatch, false));
+    }
+    const after = () => seen.slice(from).map(e => e.type);
+    assert.equal(after().filter(t => t === 'match.loaded').length, 1, `${via}: the re-run is loaded`);
+    assert.equal(bus.state.screen, 'overview', `${via}: with its overview`);
+    assert.equal(bus.state.matchEndedAt, null, `${via}: and nothing about it says over`);
+    assert.equal(bus.state.score.red.total, 0, via);
+
+    adapter.ingest('arenaStatus', linkedQ42(MatchState.PreMatch));
+    assert.equal(after().filter(t => t === 'match.armed').length, 1, `${via}: armed when its robots link`);
+
+    // The re-run is its own match: the card and the auto winner are said again.
+    adapter.ingest('matchTime', { MatchState: MatchState.StartMatch, MatchTimeSec: 0 });
+    adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 1 });
+    adapter.ingest('realtimeScore', {
+      MatchState: MatchState.TeleopPeriod,
+      Red: { ScoreSummary: { AutoFuelPoints: 2 } }, Blue: { ScoreSummary: { AutoFuelPoints: 5 } },
+      RedCards: { '846': 'yellow' },
+    });
+    const hub = seen.slice(from).filter(e => e.type === 'hub.state'
+      && (e.payload as { autoWinner?: unknown }).autoWinner !== undefined);
+    assert.deepEqual(hub.map(e => (e.payload as { autoWinner: unknown }).autoWinner), ['blue'], via);
+    assert.equal(after().filter(t => t === 'card.issued').length, 1, `${via}: the card is the re-run's too`);
+    adapter.stop();
+  }
+});
+
+test('a reconnect after an unposted end is still an echo, and the commit after it goes as ever', () => {
+  // The same bytes as a Discard's load, but the field is still in PostMatch,
+  // and every frame after it says so. The referees are still deliberating.
+  const { bus, types, adapter } = runQ42(162);
+  const red = bus.state.score.red.total;
+  assert.ok(red > 0, 'fixture sanity: a score on the board');
+  const loads = () => types().filter(t => t === 'match.loaded').length;
+  const before = loads();
+  adapter.ingest('matchLoad', { Match: { Id: 42, Type: 2, TypeOrder: 42, LongName: 'Qualification 42' } });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
+  adapter.ingest('arenaStatus', linkedQ42(MatchState.PostMatch));
+  adapter.ingest('realtimeScore', {
+    MatchState: MatchState.PostMatch,
+    Red: { ScoreSummary: { AutoFuelPoints: 9, TeleopFuelPoints: 12 } }, Blue: { ScoreSummary: { AutoFuelPoints: 3 } },
+  });
+  assert.equal(loads(), before, 'the echo loads nothing');
+  assert.equal(bus.state.score.red.total, red, 'and the finished score stays up');
+
+  // The commit: the post, then the next match and the reset, the reset's
+  // frame first by a socket. The echo was answered by the post.
+  adapter.ingest('scorePosted', {
+    Match: { Id: 42, Type: 2 }, RedScoreSummary: { Score: 21 }, BlueScoreSummary: { Score: 3 },
+  });
+  adapter.ingest('audienceDisplayMode', 'score');
+  adapter.ingest('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+  adapter.ingest('matchLoad', { Match: { Id: 43, Type: 2, TypeOrder: 43, LongName: 'Qualification 43' } });
+  assert.equal(loads(), before, 'the next match waits behind the result, and Q42 is not reloaded');
+  assert.equal(bus.state.match?.displayName, 'Qualification 42');
+  assert.ok(bus.state.scorePostedAt !== null);
+  adapter.stop();
+});
+
+test('an echo from early in the deliberation is not taken for a Discard when the commit resets', () => {
+  /*
+   * The field confirms a Discard's reload within a loop tick, by resetting.
+   * A reload nobody has confirmed after POST_RACE_MS was a reconnect echo,
+   * and waiting on it any longer meant the commit's own reset, minutes into
+   * the deliberation and a moment ahead of its score on another socket,
+   * applied the echo as a Discard: the finished match reloaded and its
+   * result wiped as it was about to post. Both sides of the bound, on the
+   * clock's word and on the field monitor's.
+   */
+  for (const via of ['matchTime', 'arenaStatus'] as const) {
+    for (const after of [POST_RACE_MS + 1000, POST_RACE_MS - 1000]) {
+      const label = `${via}, ${after / 1000} s on`;
+      mock.timers.enable({ apis: ['Date'], now: Date.now() });
+      try {
+        const { bus, types, adapter } = runQ42(162);
+        const red = bus.state.score.red.total;
+        assert.ok(red > 0, 'fixture sanity: a score on the board');
+        const loads = () => types().filter(t => t === 'match.loaded').length;
+        const before = loads();
+        adapter.ingest('matchLoad', { Match: { Id: 42, Type: 2, TypeOrder: 42, LongName: 'Qualification 42' } });
+        mock.timers.tick(after);
+        if (via === 'matchTime') {
+          adapter.ingest('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+        } else {
+          adapter.ingest('arenaStatus', linkedQ42(MatchState.PreMatch, false));
+        }
+        if (after > POST_RACE_MS) {
+          assert.equal(loads(), before, `${label}: the echo loads nothing`);
+          assert.equal(bus.state.score.red.total, red, `${label}: and the finished score is still up`);
+          adapter.ingest('scorePosted', {
+            Match: { Id: 42, Type: 2 }, RedScoreSummary: { Score: 21 }, BlueScoreSummary: { Score: 3 },
+          });
+          assert.equal(bus.state.match?.displayName, 'Qualification 42', label);
+          assert.ok(bus.state.scorePostedAt !== null, `${label}: the result goes up on its own match`);
+        } else {
+          assert.equal(loads(), before + 1, `${label}: the field reset, so the reload was a Discard`);
+          assert.equal(bus.state.score.red.total, 0, label);
+        }
+        adapter.stop();
+      } finally {
+        mock.timers.reset();
+      }
+    }
+  }
+});
+
 test('the field loading its test match does not put "Test Match" on air', () => {
   /*
    * When the last match of a type is committed, LoadNextMatch finds nothing
@@ -2031,11 +2349,16 @@ test('a desk that starts before or during a match never claims it was over', () 
 
 // ---- Friday practice --------------------------------------------------------
 
-/** A practice row, flat like every schedule row, on Friday evening's clock. */
-const practiceRow = (n: number, status: number) => ({
+/**
+ * A practice row, flat like every schedule row, seven minutes apart from
+ * `startAt`. That defaults to now, not to a fixed Friday: an unplayed practice
+ * row from an earlier day is practice abandoned, and a fixture dated October
+ * 16 would have turned into one the day after.
+ */
+const practiceRow = (n: number, status: number, startAt = Date.now()) => ({
   Id: 200 + n, Type: 1, TypeOrder: n,
   ShortName: `P${n}`, LongName: `Practice ${n}`, Status: status,
-  Time: new Date(Date.UTC(2026, 9, 17, 1, 0) + n * 7 * 60_000).toISOString(),
+  Time: new Date(startAt + n * 7 * 60_000).toISOString(),
   Red1: 846, Red2: 1868, Red3: 253, Blue1: 100, Blue2: 115, Blue3: 670,
 });
 
@@ -2115,6 +2438,118 @@ test('during practice the on-deck list is the practice schedule, not Saturday\'s
     adapter.stop();
     await new Promise(r => server.close(r));
   }
+});
+
+test('a practice session that stops before its schedule does hands the list to quals', async () => {
+  /*
+   * Friday's practice stops at 7:45 whether or not the schedule is done, and
+   * after the last commit the arena has already loaded the next unplayed
+   * practice match, or the FTA has put the test match over it. Practice
+   * never "ran out", so P21 to P28 stayed on every screen through Saturday
+   * morning and Qualification 1 appeared nowhere until it was loaded.
+   */
+  const localAt = (daysAgo: number, hour: number, minute = 0): number => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    d.setHours(hour, minute, 0, 0);
+    return d.getTime();
+  };
+  const deckAt = async (o: {
+    rowsFrom: number; now: number; loaded: 'P21' | 'test';
+    /** When this desk saw P20 start and play out, if it did. */
+    started?: number;
+  }) => {
+    // Twenty played, ten left. P21 is due at rowsFrom + 147 min.
+    const practice = Array.from({ length: 30 }, (_, i) =>
+      practiceRow(i + 1, i < 20 ? MatchStatus.RedWon : MatchStatus.Scheduled, o.rowsFrom));
+    mock.timers.enable({ apis: ['Date'], now: o.started ?? o.now });
+    const bus = new EventBus();
+    const adapter = new CheesyAdapter({ bus, host: '127.0.0.1:1', displayId: 'test' });
+    const asked: string[] = [];
+    (adapter.client as unknown as { get(path: string): Promise<unknown> }).get = async path => {
+      asked.push(path);
+      if (path === '/api/rankings') return { Rankings: [] };
+      if (path === '/api/matches/practice') return practice;
+      if (path === '/api/matches/qualification') {
+        return [1, 2, 3, 4].map(n => qual(n, MatchStatus.Scheduled));
+      }
+      return [];
+    };
+    try {
+      adapter.ingest('matchLoad', {
+        Match: { Id: 220, Type: 1, TypeOrder: 20, LongName: 'Practice 20', ShortName: 'P20' },
+      });
+      if (o.started !== undefined) {
+        // P20 played on this desk and committed; the next load comes in
+        // after the result has had its time.
+        adapter.ingest('matchTime', { MatchState: MatchState.PreMatch, MatchTimeSec: 0 });
+        adapter.ingest('matchTime', { MatchState: MatchState.AutoPeriod, MatchTimeSec: 0 });
+        adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 162 });
+        adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
+        adapter.ingest('scorePosted', {
+          Match: { Id: 220, Type: 1 }, RedScoreSummary: { Score: 40 }, BlueScoreSummary: { Score: 30 },
+        });
+        adapter.ingest('audienceDisplayMode', 'score');
+        mock.timers.tick(o.now - o.started);
+      }
+      adapter.ingest('matchLoad', o.loaded === 'P21'
+        ? { Match: { Id: 221, Type: 1, TypeOrder: 21, LongName: 'Practice 21', ShortName: 'P21' } }
+        : { Match: { Id: 0, Type: 0, ShortName: 'T', LongName: 'Test Match' } });
+      await adapter.pollNow();
+      return {
+        deck: bus.state.upcoming.map(u => u.shortName),
+        asked: asked.filter(p => p.startsWith('/api/matches/')),
+        played: bus.state.fieldPlayed,
+      };
+    } finally {
+      adapter.stop();
+      mock.timers.reset();
+    }
+  };
+
+  // Saturday at 8, Friday's rows from 6 PM: never to be played, whatever is loaded.
+  for (const loaded of ['P21', 'test'] as const) {
+    const sat = await deckAt({ rowsFrom: localAt(1, 18), now: localAt(0, 8), loaded });
+    assert.deepEqual(sat.deck, ['Q1', 'Q2', 'Q3', 'Q4'], `${loaded}: Saturday's first matches`);
+    assert.deepEqual(sat.asked, ['/api/matches/practice', '/api/matches/qualification'], loaded);
+    assert.ok(sat.played.includes('Practice 20'), `${loaded}: practice still counts as played`);
+  }
+
+  // Friday night, the field on its test match and P21 over an hour overdue.
+  const night = await deckAt({ rowsFrom: localAt(0, 18), now: localAt(0, 21, 30), loaded: 'test' });
+  assert.deepEqual(night.deck, ['Q1', 'Q2', 'Q3', 'Q4'], 'the session is over');
+
+  // But half an hour behind is an ordinary Friday, test match or not, and the
+  // arena's own next practice match loaded says nothing at all on the day.
+  const behind = await deckAt({ rowsFrom: localAt(0, 18), now: localAt(0, 21), loaded: 'test' });
+  assert.equal(behind.deck[0], 'P21', 'running late is not over');
+  const loaded = await deckAt({ rowsFrom: localAt(0, 18), now: localAt(0, 21, 30), loaded: 'P21' });
+  assert.equal(loaded.deck[0], 'P21', 'the next practice match loaded is still next');
+
+  /*
+   * A schedule generated with the wrong date puts every row on an earlier
+   * day, and the arena's own queueing display, which never reads the dates,
+   * goes on listing practice. A practice match this desk saw start today is
+   * the field saying practice is on, so the list stays, the FTA's test match
+   * between two practice matches included.
+   */
+  for (const on of ['P21', 'test'] as const) {
+    const misdated = await deckAt({
+      rowsFrom: localAt(1, 18), started: localAt(0, 18, 30), now: localAt(0, 18, 35), loaded: on,
+    });
+    assert.equal(misdated.deck[0], 'P21', `${on}: practice is being played, whatever the rows say`);
+  }
+  // Over once the field's own last start is an hour gone, on the test match.
+  const misdatedNight = await deckAt({
+    rowsFrom: localAt(1, 18), started: localAt(0, 19, 40), now: localAt(0, 21), loaded: 'test',
+  });
+  assert.deepEqual(misdatedNight.deck, ['Q1', 'Q2', 'Q3', 'Q4'], 'over an hour since the last start');
+  // And a start from yesterday says nothing about today: a desk left running
+  // overnight still hands Saturday morning to quals.
+  const overnight = await deckAt({
+    rowsFrom: localAt(1, 18), started: localAt(1, 19, 40), now: localAt(0, 8), loaded: 'P21',
+  });
+  assert.deepEqual(overnight.deck, ['Q1', 'Q2', 'Q3', 'Q4'], 'Saturday is quals');
 });
 
 // ---- the test match ---------------------------------------------------------
@@ -2425,6 +2860,70 @@ test('alliance selection is not interrupted by the arena replaying the last qual
   assert.equal(types2.filter(t => t === 'match.score_posted').length, 1, 'and its replay does not');
   adapter.stop();
   a2.stop();
+});
+
+test('the arena putting selection on its screen puts the board on program, and Match 1 takes it off', () => {
+  /*
+   * Nothing ever put the board up. The picks arrive as
+   * alliance_selection.update, which only stores them, so program sat on the
+   * last qual's Final for the whole of selection, and the handbook told a
+   * first-time crew the board went up by itself.
+   */
+  const MATCH_1 = {
+    Match: { Id: 101, Type: 3, TypeOrder: 1, LongName: 'Match 1', Red1: 846, Blue1: 100,
+             PlayoffRedAlliance: 1, PlayoffBlueAlliance: 8 },
+  };
+  const picks = {
+    Alliances: [{ Id: 1, TeamIds: [846, 254, 0, 0] }, { Id: 2, TeamIds: [100, 0, 0, 0] }],
+    RankedTeams: [], ShowTimer: true, TimeRemainingSec: 45,
+  };
+  const { bus, types, adapter } = lastQualPosted();
+  adapter.ingest('matchLoad', TEST_LOAD);
+  adapter.ingest('audienceDisplayMode', 'logoLuma');   // the arena's own end-of-quals move
+  assert.equal(bus.state.screen, 'score', 'fixture sanity: the last Final is up');
+
+  adapter.ingest('audienceDisplayMode', 'allianceSelection');
+  assert.equal(bus.state.screen, 'selection', 'the board goes up');
+  assert.equal(bus.state.screenHold, false, 'as an automatic change, holding nothing');
+  const change = bus.recent.filter(e => e.type === 'screen.change').at(-1);
+  assert.equal(change?.source, 'cue', 'the automatic kind of screen change, not a take');
+  adapter.ingest('allianceSelection', picks);
+  adapter.ingest('audienceDisplayMode', 'allianceSelection');   // a reconnect
+  assert.equal(types.filter(t => t === 'screen.change').length, 1, 'said once, on the move into it');
+  assert.equal(bus.state.screen, 'selection');
+
+  adapter.ingest('matchLoad', MATCH_1);
+  assert.equal(bus.state.screen, 'overview', 'the first playoff match takes program to its overview');
+  // The arena's own screen can still read allianceSelection, and a blip replays it.
+  adapter.ingest('audienceDisplayMode', 'allianceSelection');
+  assert.equal(bus.state.screen, 'overview', 'the board is not pulled back over Match 1');
+  adapter.stop();
+
+  // A producer's hold wins: the board waits for them.
+  const held = lastQualPosted();
+  held.adapter.ingest('matchLoad', TEST_LOAD);
+  held.bus.emit({ type: 'screen.change', source: 'manual', payload: { screen: 'score' } });
+  held.adapter.ingest('audienceDisplayMode', 'allianceSelection');
+  assert.equal(held.bus.state.screen, 'score');
+  assert.equal(held.bus.state.screenHold, true);
+  held.adapter.stop();
+
+  // A desk restarted during selection puts it back up, mode or load first;
+  // one restarted after Match 1 loaded does not, whichever it hears first.
+  for (const [load, mode, want] of [
+    [TEST_LOAD, 'first', 'selection'], [TEST_LOAD, 'second', 'selection'],
+    [MATCH_1, 'first', 'overview'], [MATCH_1, 'second', 'overview'],
+  ] as const) {
+    const bus3 = new EventBus();
+    const a3 = new CheesyAdapter({ bus: bus3, host: '127.0.0.1:1', displayId: 'test' });
+    if (mode === 'first') a3.ingest('audienceDisplayMode', 'allianceSelection');
+    a3.ingest('matchLoad', load);
+    if (mode === 'second') a3.ingest('audienceDisplayMode', 'allianceSelection');
+    const label = `${load.Match.LongName}, mode ${mode}`;
+    if (want === 'overview') assert.equal(bus3.state.screen, 'overview', label);
+    else assert.equal(bus3.state.screen, 'selection', label);
+    a3.stop();
+  }
 });
 
 test('a desk that joins after a test match buzzed does not call the next real match over', () => {

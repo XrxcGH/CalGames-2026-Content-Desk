@@ -41,8 +41,9 @@ You do not need a terminal, and you do not need to install anything. You need on
    and starts the desk, with no window to close by accident.
 3. Wait about a minute on the first run, seconds after that.
 4. Your browser opens on an address like `http://172.22.0.23:8720/`. That page lists every
-   screen. The PIN the control screens ask for, and everything the launcher did, are in
-   `desk-log.txt` in the desk folder.
+   screen. The PIN the control screens ask for is in the Start here box on that page, on the
+   desk laptop only. Everything the launcher did is in `desk-log.txt` in the desk folder, which
+   does not contain the PIN.
 
 Just trying it out at a kitchen table, with no field to connect to? The launcher notices there
 is no field and asks; press **D** and every screen plays a pretend match. After the first run
@@ -225,7 +226,8 @@ Two more screens cover the parts of the weekend that usually have no graphics at
 **alliance selection board** mirrors the field: captains in seed order, the pool graying out as
 teams are taken, and Cheesy Arena's own pick clock. The **explainer loop** runs in the gaps and
 answers what nobody ever says out loud, like what fuel is and why a losing alliance is
-celebrating. Both are in the screen dropdown on the desk.
+celebrating. The selection board also goes up by itself when the scorekeeper puts Alliance Selection on the
+arena's audience display, and both are in the screen dropdown on the desk.
 
 Replay a recorded event log instead of running live. Every run of the desk
 writes one to `data/events/`, named for the moment it started; those logs are

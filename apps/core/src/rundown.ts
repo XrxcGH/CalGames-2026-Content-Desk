@@ -120,6 +120,12 @@ export class Rundown {
     // noon must not inherit the morning's count, and a bare counter cannot
     // tell the difference.
     if (ev.type === 'match.score_posted') {
+      // Once per match, not once per press: "Post score" held down on the desk
+      // console auto-repeats about thirty times a second, and every repeat
+      // counted as a match played, emptying a matches block in one go. No two
+      // real matches post within a minute of each other.
+      const last = this.#playedAt.at(-1);
+      if (last !== undefined && Math.abs(ev.ts - last) < 60_000) return;
       this.#playedAt.push(ev.ts);
       this.#publish();
       return;

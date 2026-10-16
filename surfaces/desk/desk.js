@@ -631,6 +631,12 @@ addEventListener('keydown', e => {
   const fn = KEYS[e.key.toLowerCase()];
   if (!fn) return;
   e.preventDefault();
+  // One press, one action. A key held a moment too long (or one that sticks)
+  // auto-repeats at about thirty a second: 5 held for a second posted the
+  // score thirty times, each one a played match in the run of show, and 0
+  // aborted over and over. The repeats are still swallowed above, so a held
+  // Space does not scroll the console away either.
+  if (e.repeat) return;
   // The buttons go honest-disabled while the socket is down; the shortcuts
   // must not keep lying on their behalf. emit() silently drops on a closed
   // socket, and the number row is the PRIMARY interface during a match, so a
@@ -1238,6 +1244,9 @@ function paintAudio(s) {
     : 'Drops the music under the announcer so the room can hear them.';
   setText($('audToggle'), s.source === 'playlist' ? 'Pause music' : 'Play music');
   $('audToggle').setAttribute('aria-pressed', String(s.source === 'playlist'));
+  $('audToggle').title = s.music && s.music.configured === false
+    ? 'No music service is set up, so this plays nothing. Walk-ups and stingers still play.'
+    : 'Starts and stops the playlist on the house speakers. The stream never hears it.';
 
   // Do not fight the operator's thumb: a poll landing mid-drag would snap the
   // slider back to the value the server last heard about.
@@ -1304,6 +1313,13 @@ function paintAudio(s) {
   } else if (players.armed > 1) {
     warn = `${players.armed} house players are armed. If one of them is the machine OBS ` +
       'captures, the music is going to the stream. Close the other one.';
+  } else if (s.music && s.music.configured === false) {
+    // The exe has no way to set up the playlist service (it needs a Premium
+    // account and a sign-in done off-site), and Play music then "worked": the
+    // source flipped to Playlist and the room stayed silent, with nothing on
+    // this console saying why.
+    warn = 'No music service is set up, so Play music does nothing: only walk-ups and ' +
+      'stingers play. Load them with Add a clip on the house player page (/s/house).';
   } else if (s.music?.configured && s.music.linked && !s.music.reachable) {
     warn = 'The music service is not answering, so the playlist cannot be changed. ' +
       'Clips still play. ' + (s.music.error ?? '');
@@ -1591,11 +1607,27 @@ async function loadVitals(manual = false) {
 }
 
 $('vitalsCheck').onclick = () => void loadVitals(true);
-// Every way in opens the fold on the way past. An anchor pointing inside a
+// Every way in opens the folds on the way past. An anchor pointing inside a
 // closed <details> scrolls to a section the browser is not showing, so the
-// jump strip and the header mirror would both look broken.
-for (const a of document.querySelectorAll('a[href="#vitalsSection"]')) {
-  a.onclick = () => { $('setupGroup').open = true; };
+// jump strip and the header mirror would both look broken. Any fold, not just
+// the doors check's: Sample data sits inside the field-down kit.
+function openFoldsAround(id) {
+  const el = id ? document.getElementById(id) : null;
+  for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+  return el;
+}
+for (const a of document.querySelectorAll('a[href^="#"]')) {
+  a.addEventListener('click', () => { openFoldsAround(a.getAttribute('href').slice(1)); });
+}
+// The same on arrival. The Start here box links to #sec-sample, the sign-in
+// page now carries the fragment through, and the target is in a fold that
+// starts shut: a first-timer used to land at the top of a very long page with
+// the one button they came for nowhere in sight.
+{
+  let id = '';
+  try { id = decodeURIComponent(location.hash.slice(1)); } catch { /* a malformed fragment */ }
+  const target = openFoldsAround(id);
+  if (target) requestAnimationFrame(() => target.scrollIntoView());
 }
 $('vitalsPrint').onclick = () => {
   // A closed <details> is display:none inside, and display:none beats the

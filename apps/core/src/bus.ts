@@ -42,6 +42,16 @@ export class EventBus {
   #logDay = '';
   /** Rotated-out files still flushing their tails; closeLog() waits on them too. */
   #flushing = new Set<Promise<void>>();
+  /**
+   * Logging was asked for (openLog) and not closed. A write failure used to
+   * switch the log off for good: a full disk at 3pm, freed by 3:05, and every
+   * event after it was never written, so the next restart rebuilt cards,
+   * coverage, scores and the safety message from a log that stopped at 3pm,
+   * with nothing on any screen saying so.
+   */
+  #logWanted = false;
+  /** Why the log is not being written right now, and since when. */
+  #logBroken: { at: number; reason: string } | null = null;
   /** Recent history, for late-joining surfaces and the replay timeline. */
   #ring: DeskEvent[] = [];
   #ringMax = 5000;
@@ -91,7 +101,27 @@ export class EventBus {
     this.#logDir = dir;
     this.#logTag = opts.tag;
     this.#logDay = localDay(now);
+    this.#logWanted = true;
+    this.#logBroken = null;
     this.#log = this.#openStream(logPathFor(dir, now, opts.tag));
+  }
+
+  /** Every this long after a failure, the next event tries a fresh file. */
+  static readonly LOG_RETRY_MS = 30_000;
+
+  /**
+   * Why the event log is not being written, or null when it is (or was never
+   * asked for). For the doors check: the one place an operator can hear about
+   * it while there is still a day to protect.
+   *
+   * Asking makes the same retry the next event would. The desk console asks
+   * every 30 seconds, so once the disk is freed its red row clears even in
+   * a quiet spell with nothing on the bus, rather than staying red, with a
+   * "do not restart" on it, until something happens to be emitted.
+   */
+  get logProblem(): string | null {
+    this.#retryLog();
+    return this.#logBroken?.reason ?? null;
   }
 
   #openStream(path: string): WriteStream {
@@ -107,8 +137,10 @@ export class EventBus {
         console.error('[bus] rotated-out event log failed to flush:', err.message);
         return;
       }
-      console.error('[bus] event log write failed, logging disabled:', err.message);
+      console.error(`[bus] event log write failed: ${err.message}. Trying a fresh file in `
+        + `${EventBus.LOG_RETRY_MS / 1000} s.`);
       this.#log = null;
+      this.#logBroken = { at: Date.now(), reason: err.message };
     });
     return stream;
   }
@@ -141,6 +173,23 @@ export class EventBus {
     void done.then(() => this.#flushing.delete(done));
   }
 
+  /**
+   * After a write failure, open a fresh file on the first event once the
+   * retry interval has passed. A new file rather than the same one, because
+   * the failed stream may hold a torn line, and rebuildFromLog reads every
+   * file of the day anyway. A second failure just schedules the next try.
+   */
+  #retryLog(): void {
+    const broken = this.#logBroken;
+    if (this.#log || !this.#logWanted || !this.#logDir || !broken) return;
+    if (Date.now() - broken.at < EventBus.LOG_RETRY_MS) return;
+    const now = new Date();
+    this.#logBroken = null;
+    this.#logDay = localDay(now);
+    this.#log = this.#openStream(logPathFor(this.#logDir, now, this.#logTag));
+    console.log(`[bus] event log reopened after the failure: ${String(this.#log.path)}`);
+  }
+
   /** The file the log is currently being written to, or null when logging is off. */
   get logPath(): string | null {
     const log = this.#log;
@@ -156,6 +205,8 @@ export class EventBus {
   closeLog(): Promise<void> {
     const log = this.#log;
     this.#log = null;
+    this.#logWanted = false;
+    this.#logBroken = null;
     const tails = [...this.#flushing];
     if (log) tails.push(new Promise(res => log.end(() => res())));
     return Promise.all(tails).then(() => undefined);
@@ -265,6 +316,7 @@ export class EventBus {
   #record(ev: DeskEvent): void {
     this.#ring.push(ev);
     if (this.#ring.length > this.#ringMax) this.#ring.shift();
+    this.#retryLog();
     this.#rotateLog(ev.ts);
     this.#log?.write(JSON.stringify(ev) + '\n');
     for (const fn of this.#subscribers) {

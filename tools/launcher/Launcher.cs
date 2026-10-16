@@ -845,6 +845,8 @@ internal static class Launcher
         }
 
         Ok("running");
+        // On this thread, the one that waits on the desk below: see KeepAwake.
+        KeepAwake(true);
         ReadyBanner(port, fieldHost, installDir);
 
         if (!_opt.NoBrowser)
@@ -853,10 +855,57 @@ internal static class Launcher
         }
 
         _desk.WaitForExit();
+        KeepAwake(false);
         Console.WriteLine();
         Console.WriteLine("   The content desk has stopped.");
         Hold();
         return _desk.ExitCode;
+    }
+
+    // ---- keeping the laptop awake ------------------------------------------
+    //
+    // Windows sleeps on keyboard and mouse idle, not on network traffic or a
+    // busy processor, and a lunch break with nobody touching the desk laptop
+    // is exactly that idle. Asleep, the desk, the recorder and every screen in
+    // the building stop, and the stream holds a frozen frame. The only defence
+    // was one sentence in the handbook asking for a power setting, the first
+    // thing a borrowed laptop gets wrong; OBS asks for the same only while it
+    // is streaming or recording, so Friday practice and the gaps were bare.
+    //
+    // ES_CONTINUOUS | ES_SYSTEM_REQUIRED, set from the thread that waits on
+    // the desk, for as long as the desk runs. Windows drops the request by
+    // itself when that thread or this process ends, however it ends, so a
+    // crash cannot leave the laptop unable to sleep. The display may still
+    // turn off (OBS renders without one, and every screen is another
+    // machine), and closing the lid or pressing the power button still sleeps
+    // it: that is somebody's decision, not idle.
+
+    private const uint ES_CONTINUOUS = 0x80000000;
+    private const uint ES_SYSTEM_REQUIRED = 0x00000001;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SetThreadExecutionState(uint esFlags);
+
+    private static void KeepAwake(bool on)
+    {
+        try
+        {
+            uint was = SetThreadExecutionState(on ? (ES_CONTINUOUS | ES_SYSTEM_REQUIRED) : ES_CONTINUOUS);
+            if (!on) return;
+            if (was == 0)
+            {
+                // Said where the log keeps it: the power plan is then the only defence.
+                const string msg = "Windows would not keep this laptop awake for the desk. "
+                    + "Set its power plan to never sleep while plugged in.";
+                Warn(msg);
+                WriteLog("WARN: " + msg);
+            }
+            else
+            {
+                Detail("keeping this laptop awake while the desk runs");
+            }
+        }
+        catch { }
     }
 
     // ---- tying the desk to this window -------------------------------------
@@ -1036,8 +1085,32 @@ internal static class Launcher
     private static int ReopenRunningDesk(int port)
     {
         List<string> unused = StartOnlyOptionsGiven();
+        string practice = PracticeSentence(RunningDeskMode(port));
         if (unused.Count == 0)
         {
+            /*
+             * A desk left in practice is the one a plain double-click must not
+             * reopen in silence. The handbook says to end a rehearsal and
+             * "start it normally again" before doors, and the obvious way to
+             * start it is a double-click, which landed here and reopened the
+             * rehearsal: Saturday's show then kept none of the day (no rebuild
+             * after a restart, no match videos, the Judge Advisor's staged
+             * winners in a practice file). Said loudly, with the way out, and
+             * then the page they came for.
+             */
+            if (practice != null)
+            {
+                ShowNotice(
+                    "The content desk running on this computer is " + practice + " "
+                      + "Nothing done on it becomes the day's history: no match video is queued, and the "
+                      + "Judge Advisor's staged winners go to a practice file. Double-clicking again does not change that."
+                      + Environment.NewLine + Environment.NewLine
+                      + "To run the real show, stop it first: press Ctrl+Shift+Esc to open Task Manager, find \""
+                      + AppTitle + "\", select it and press End task. Then double-click the exe again."
+                      + (_opt.NoBrowser ? "" : Environment.NewLine + Environment.NewLine
+                          + "Press OK to open the practice desk in the browser."),
+                    0x30 /* MB_ICONWARNING */);
+            }
             if (!_opt.NoBrowser)
             {
                 try { Process.Start("http://localhost:" + port + "/"); } catch { }
@@ -1049,6 +1122,7 @@ internal static class Launcher
         ShowNotice(
             "A content desk is already running on this computer, so " + string.Join(", ", unused)
               + (unused.Count == 1 ? " was" : " were") + " ignored. Nothing was changed, and the running desk was not touched."
+              + (practice != null ? " The running desk is " + practice : "")
               + Environment.NewLine + Environment.NewLine
               + "Those options only take effect when the desk starts. To use them, stop the desk first: "
               + "press Ctrl+Shift+Esc to open Task Manager, find \"" + AppTitle + "\", select it and press End task. "
@@ -1058,18 +1132,58 @@ internal static class Launcher
         return 0;
     }
 
+    /// The practice session a running desk says it is ("rehearsal", "demo" or
+    /// "replay"), "normal" for the show, or null when it does not say (a desk
+    /// from before /api/info, or no answer). /api/info is open on purpose: the
+    /// launcher holds no PIN. GET-only, against this machine only.
+    private static string RunningDeskMode(int port)
+    {
+        try
+        {
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/api/info");
+            req.Method = "GET";
+            req.Timeout = 1500;
+            req.ReadWriteTimeout = 1500;
+            req.AllowAutoRedirect = false;
+            using (HttpWebResponse res = (HttpWebResponse)req.GetResponse())
+            using (StreamReader body = new StreamReader(res.GetResponseStream(), Encoding.UTF8))
+            {
+                if (res.StatusCode != HttpStatusCode.OK) return null;
+                Match m = Regex.Match(body.ReadToEnd(), "\"mode\"\\s*:\\s*\"([a-z]+)\"");
+                return m.Success ? m.Groups[1].Value : null;
+            }
+        }
+        catch { return null; }
+    }
+
+    /// The end of "The desk is ...", or null for the show (and for a desk that
+    /// does not say: a guess here would be a box on every double-click).
+    private static string PracticeSentence(string mode)
+    {
+        if (mode == "rehearsal") return "in PRACTICE MODE: it was started with /rehearsal.";
+        if (mode == "demo") return "in PRACTICE MODE: it is running a pretend match on a loop (START-PRACTICE.cmd or /demo).";
+        if (mode == "replay") return "REPLAYING a saved event log, not running the show.";
+        return null;
+    }
+
     /// Something the operator should read on the double-click path, where there
     /// is no window to print it in. Not an error: it carries no icon of alarm
     /// and does not claim that nothing is running.
     private static void ShowNotice(string text)
     {
+        // MB_ICONINFORMATION
+        ShowNotice(text, 0x40);
+    }
+
+    private static void ShowNotice(string text, uint icon)
+    {
         WriteLog("NOTE: " + text.Replace(Environment.NewLine, " "));
         if (!_silent) return;
         try
         {
-            // MB_ICONINFORMATION | MB_SETFOREGROUND: a notice that opens behind
-            // the browser or OBS is the same silence this exists to end.
-            MessageBox(IntPtr.Zero, text, AppTitle, 0x40 | 0x10000);
+            // | MB_SETFOREGROUND: a notice that opens behind the browser or OBS
+            // is the same silence this exists to end.
+            MessageBox(IntPtr.Zero, text, AppTitle, icon | 0x10000);
         }
         catch { }
     }
@@ -1087,6 +1201,9 @@ internal static class Launcher
         {
             Detail("it answers as a content desk, so one is already running here" +
                 (pid > 0 ? " (process " + pid + ")" : ""));
+            // The console's half of the practice-mode notice in ReopenRunningDesk.
+            string practice = PracticeSentence(RunningDeskMode(port));
+            if (practice != null) Warn("that desk is " + practice + " Stop it before doors to run the real show.");
         }
         else
         {
@@ -1295,7 +1412,15 @@ internal static class Launcher
         Console.WriteLine("  There is no window to close, on purpose: closing one by accident");
         Console.WriteLine("  would take the broadcast off air.");
         Console.WriteLine();
-        WriteLog("READY on http://" + (lan ?? "localhost") + ":" + port + "/  PIN " + _opt.Pin);
+        // Not the PIN, and nothing that depends on it. desk-log.txt is the
+        // file a radio call asks for first and the one that gets pasted into a
+        // crew chat, and the PIN in it opened every console to whoever read
+        // it. Saying it was "the shipped default" did the same, since the
+        // default is printed in the help text and the handbook. One fixed
+        // sentence, the same whatever the PIN is: the Start here box on this
+        // laptop shows the PIN and says when it is still the default.
+        WriteLog("READY on http://" + (lan ?? "localhost") + ":" + port + "/  "
+            + "PIN: see the Start here box on this laptop");
         WriteLog("To stop: Task Manager -> " + AppTitle + " -> End task, "
             + "or PowerShell: Stop-Process -Name CalGamesContentDesk -Force");
         if (_opt.Demo)

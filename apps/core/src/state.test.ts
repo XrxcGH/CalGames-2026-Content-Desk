@@ -66,6 +66,59 @@ test('after the buzzer the desk reads Final 0:00, never Pre-match 0:20', () => {
   assert.equal(s.phase, 'pre');
   assert.equal(s.clockDisplay, '0:20');
 });
+
+test('an aborted match goes back to its overview, not a stopped score bar', () => {
+  /*
+   * The field's abort is really detected now, and the abort used to put the
+   * score bar up: "Pre-match 0:20" over the stopped match's partial score,
+   * on the stream until the Discard reload arrived.
+   */
+  const live = (): DeskState => {
+    let s = initialState();
+    s = reduce(s, ev('match.loaded', T0, { id: 'q42', displayName: 'Qualification 42', red: [], blue: [] }));
+    s = reduce(s, ev('match.armed', T0 + 1_000));
+    s = reduce(s, ev('match.start', T0 + 2_000));
+    s = reduce(s, ev('score.realtime', T0 + 30_000, { red: { autoFuel: 12 } }));
+    assert.equal(s.screen, 'match');
+    return s;
+  };
+  for (const source of ['cheesy', 'manual'] as const) {
+    let s = reduce(live(), { ...ev('match.aborted', T0 + 32_000), source });
+    assert.equal(s.screen, 'overview', `${source}: the alliances about to play it again`);
+    assert.equal(s.screenHold, false, `${source}: automatic, so nothing is held`);
+    assert.equal(s.matchStartedAt, null, `${source}: the clock has stopped`);
+    assert.equal(s.matchEndedAt, null, `${source}: and nothing says the match was played`);
+    assert.equal(s.score.red.autoFuel, 12, `${source}: the partial score is kept, for a commit`);
+
+    // A commit of the partial result is a result like any other.
+    const committed = reduce(s, { ...ev('match.score_posted', T0 + 90_000,
+      { red: { score: 12 }, blue: { score: 0 } }), source: 'cheesy' });
+    assert.equal(committed.screen, 'score');
+    // A Discard reloads the same match onto the same screen, from nothing.
+    s = reduce(s, { ...ev('match.loaded', T0 + 60_000,
+      { id: 'q42', displayName: 'Qualification 42', red: [], blue: [] }), source: 'cheesy' });
+    assert.equal(s.screen, 'overview');
+    assert.equal(s.score.red.autoFuel, 0);
+  }
+
+  // A screen an operator is holding stays held, as it does for a load.
+  let held = reduce(live(), ev('screen.change', T0 + 20_000, { screen: 'analysis' }));
+  held = reduce(held, { ...ev('match.aborted', T0 + 32_000), source: 'cheesy' });
+  assert.equal(held.screen, 'analysis');
+  assert.equal(held.screenHold, true);
+});
+
+test('a lower third carries the time it went up', () => {
+  // So an overlay that loads later can tell one still within its dwell from
+  // the morning's name strip. See paintThird in surfaces/program.
+  let s = reduce(initialState(), ev('lower_third.show', T0, { line1: 'Pat Lee', line2: 'Head referee', pinned: false }));
+  assert.deepEqual(s.lowerThird, { line1: 'Pat Lee', line2: 'Head referee', pinned: false, at: T0 });
+  s = reduce(s, ev('lower_third.show', T0 + 5_000, { line1: 'Pat Lee', line2: 'Head referee', pinned: false }));
+  assert.equal(s.lowerThird?.at, T0 + 5_000, 'a show again is a fresh one');
+  s = reduce(s, ev('lower_third.hide', T0 + 6_000));
+  assert.equal(s.lowerThird, null);
+});
+
 test('bonus RPs score against configured thresholds, not the shipped defaults', () => {
   let s = initialState();
   // An event that decides 100 fuel is too easy and moves the bar to 150.
@@ -588,6 +641,61 @@ test('a hold on the Final screen does not survive into the next match', () => {
   s = reduce(s, ev('match.loaded', T0 + 6, { id: 'q3', displayName: 'Q3', red: [], blue: [] }));
   assert.equal(s.screen, 'arcade', 'an arcade hold still means something next match');
   assert.equal(s.screenHold, true);
+});
+
+test('the selection board gives way to Match 1, taken by hand or put up by the field', () => {
+  /*
+   * The Selection button is a take, so it holds, and the first playoff
+   * match then loaded, armed and started under a full-frame selection board
+   * with no score bar until somebody found Auto. The board is finished when
+   * a real match loads after it, the same way a held Final is.
+   */
+  const playoffs = (s: DeskState): DeskState => {
+    s = reduce(s, ev('match.loaded', T0 + 10, { id: 'm1', displayName: 'Match 1', red: [], blue: [] }));
+    assert.equal(s.screen, 'overview', 'Match 1 shows its overview');
+    assert.equal(s.screenHold, false, 'and the program follows the match again');
+    s = reduce(s, ev('match.armed', T0 + 11));
+    assert.equal(s.screen, 'match', 'the score bar is up for the countdown');
+    return s;
+  };
+  let s = initialState();
+  s = reduce(s, ev('match.loaded', T0, { id: 'q60', displayName: 'Qualification 60', red: [], blue: [] }));
+  s = reduce(s, ev('match.score_posted', T0 + 1, { red: { score: 88 }, blue: { score: 74 } }));
+
+  // By hand.
+  let hand = reduce(s, ev('screen.change', T0 + 2, { screen: 'selection' }));
+  assert.equal(hand.screen, 'selection');
+  assert.equal(hand.screenHold, true);
+  hand = playoffs(hand);
+
+  // By the field, which holds nothing.
+  const field = reduce(s, { ...ev('screen.change', T0 + 2, { screen: 'selection' }), source: 'cue' });
+  assert.equal(field.screen, 'selection');
+  assert.equal(field.screenHold, false);
+  playoffs(field);
+});
+
+test('a restored card from another phase marks nothing on the loaded match', () => {
+  /*
+   * The boot rebuild carries yesterday's cards (Saturday's quals continue
+   * on Sunday morning), and the field's first load can land before it. A
+   * Sunday-afternoon restart then put Saturday's qual yellows on the
+   * playoff graphics until the next load swept them off.
+   */
+  const card = (m: string) => ({ team: 253, card: 'yellow', alliance: 'red', match: m });
+  let s = initialState();
+  s = reduce(s, ev('match.loaded', T0, { id: 'm3', displayName: 'Match 3', red: [], blue: [] }));
+  s = reduce(s, ev('card.issued', T0 + 1, card('Qualification 30')));
+  assert.equal(s.cards.byTeam[253], undefined, 'no qual card on a playoff match');
+
+  // With nothing loaded yet the restore keeps it, and the next load decides.
+  let boot = reduce(initialState(), ev('card.issued', T0 + 1, card('Qualification 30')));
+  assert.equal(boot.cards.byTeam[253]?.yellows, 1);
+  boot = reduce(boot, ev('match.loaded', T0 + 2, { id: 'q41', displayName: 'Qualification 41', red: [], blue: [] }));
+  assert.equal(boot.cards.byTeam[253]?.yellows, 1, 'Sunday morning quals still carry it');
+  // And a card from the loaded match's own phase counts as ever.
+  boot = reduce(boot, ev('card.issued', T0 + 3, card('Qualification 41')));
+  assert.equal(boot.cards.byTeam[253]?.yellows, 2);
 });
 
 test('a replayed match does not turn one yellow into two', () => {

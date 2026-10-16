@@ -1,5 +1,9 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import fs, { type WriteStream } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventBus } from './bus.ts';
 import { Vitals, type Vital, type VitalsDeps, type VitalsReport } from './vitals.ts';
@@ -357,4 +361,230 @@ test('"not streaming" is fine on Friday and an emergency during a match', async 
   const live = await new Vitals(base({ obs, bus })).report();
   assert.equal(find(live, 'stream-health').level, 'fail');
   assert.match(find(live, 'stream-health').detail, /match is underway/i);
+});
+
+test('a config.json the desk could not use holds the doors, and says where to look', async () => {
+  // It used to be one line in desk-log.txt, while every code, the awards list
+  // and OBS were silently back to their defaults.
+  const typo = await new Vitals(base({
+    configFile: () => ({ state: 'unusable', reason: 'typo', line: 315, duplicates: [] }),
+  })).report();
+  const row = find(typo, 'config-file');
+  assert.equal(row.label, 'Settings file');
+  assert.equal(row.level, 'fail');
+  assert.equal(row.blocking, true);
+  assert.match(row.detail, /typo near line 315, so none of it is in use/);
+  assert.match(row.detail, /awards and settings codes are back to the shipped defaults, OBS is off/);
+  assert.match(row.fix ?? '', /around line 315/);
+  assert.ok(typo.blockers.some(b => b.id === 'config-file'), 'it holds the doors shut');
+  assert.equal(typo.worst, 'fail');
+
+  for (const reason of ['not-an-object', 'unreadable'] as const) {
+    const r = find(await new Vitals(base({
+      configFile: () => ({ state: 'unusable', reason, duplicates: [] }),
+    })).report(), 'config-file');
+    assert.equal(r.level, 'fail', reason);
+    assert.match(r.detail, /none of it is in use/, reason);
+    assert.ok(r.fix, reason);
+  }
+});
+
+test('a section written twice is a warning naming it and its lines, not a blocker', async () => {
+  // The example file already has "obs" near the end, so the handbook's line
+  // pasted in near the top parsed fine and left OBS off: the later one wins.
+  const r = await new Vitals(base({
+    configFile: () => ({ state: 'read', duplicates: [{ section: 'obs', lines: [2, 310] }] }),
+  })).report();
+  const row = find(r, 'config-file');
+  assert.equal(row.level, 'warn');
+  assert.match(row.detail, /"obs" on lines 2 and 310/);
+  assert.match(row.detail, /uses only the last/);
+  assert.ok(row.fix);
+  assert.ok(!r.blockers.some(b => b.id === 'config-file'), 'the file is in use; one section is not');
+});
+
+test('the Settings file row reads a missing file as defaults, and stays away before any load', async () => {
+  const missing = find(await new Vitals(base({
+    configFile: () => ({ state: 'missing', duplicates: [] }),
+  })).report(), 'config-file');
+  assert.equal(missing.level, 'off');
+  assert.match(missing.detail, /shipped default/);
+
+  const read = find(await new Vitals(base({
+    configFile: () => ({ state: 'read', duplicates: [] }),
+  })).report(), 'config-file');
+  assert.equal(read.level, 'ok');
+
+  // A test or a tool that built its own Config never ran loadConfig.
+  const unread = await new Vitals(base({ configFile: () => ({ state: 'unread', duplicates: [] }) })).report();
+  assert.equal(unread.checks.find(c => c.id === 'config-file'), undefined);
+});
+
+test('a desk in practice says so on the doors check, and holds the doors', async () => {
+  // A double-click on a running desk only reopens it, so a rehearsal left up
+  // on Friday night ran Saturday's show keeping none of the day.
+  for (const mode of ['rehearsal', 'demo', 'replay'] as const) {
+    const r = await new Vitals(base({ mode })).report();
+    const row = find(r, 'mode');
+    assert.equal(row.label, 'Desk mode');
+    assert.equal(row.level, 'warn', mode);
+    assert.equal(row.blocking, true, mode);
+    assert.match(row.detail, /^(PRACTICE|REPLAY)/, mode);
+    assert.match(row.detail, /staged winners go to a practice file/, mode);
+    assert.match(row.fix ?? '', /Task Manager/, mode);
+    assert.ok(r.blockers.some(b => b.id === 'mode'), mode);
+  }
+  assert.match(find(await new Vitals(base({ mode: 'rehearsal' })).report(), 'mode').detail, /\/rehearsal/);
+
+  const show = await new Vitals(base({ mode: null })).report();
+  assert.equal(find(show, 'mode').level, 'ok');
+  assert.ok(!show.blockers.some(b => b.id === 'mode'));
+});
+
+test('the Recording row says which half of its setup is missing, and never holds the doors', async () => {
+  // "Started without --record" named a flag the exe cannot pass. The exe
+  // records once ffmpeg is installed and a camera is listed in config.json.
+  const camera = cfg();
+  camera.recording.sources = [{ id: 'program', label: 'Program', role: 'program', input: ['-i', 'x'] }];
+  const rowFor = async (ffmpeg: boolean, config: Config) => {
+    const r = await new Vitals(base({ config, ffmpegFound: async () => ffmpeg })).report();
+    assert.ok(!r.blockers.some(b => b.id === 'recorder'), 'never a blocker');
+    const row = find(r, 'recorder');
+    assert.equal(row.level, 'off');
+    assert.doesNotMatch(row.detail, /--record/);
+    return row.detail;
+  };
+
+  const neither = await rowFor(false, cfg());
+  assert.match(neither, /ffmpeg is not installed/);
+  assert.match(neither, /no cameras are listed under "recording" in config\.json/);
+  assert.match(neither, /chapter 4, step 9/);
+
+  const noFfmpeg = await rowFor(false, camera);
+  assert.match(noFfmpeg, /ffmpeg is not installed/);
+  assert.doesNotMatch(noFfmpeg, /no cameras/);
+
+  const noCameras = await rowFor(true, cfg());
+  assert.match(noCameras, /no cameras are listed/);
+  assert.doesNotMatch(noCameras, /ffmpeg is not installed/);
+
+  // A disabled camera is not a camera the recorder will open.
+  const disabled = cfg();
+  disabled.recording.sources = [{ ...camera.recording.sources[0]!, enabled: false }];
+  assert.match(await rowFor(true, disabled), /no cameras are listed/);
+
+  assert.match(await rowFor(true, camera), /desk-log\.txt says why/);
+});
+
+test('the Field bridge row says what the exe can do, not a flag it cannot take', async () => {
+  const off = find(await new Vitals(base({ mode: null })).report(), 'field');
+  assert.equal(off.level, 'off');
+  assert.doesNotMatch(off.detail, /--cheesy/);
+  assert.match(off.detail, /did not find the field when it started/);
+  assert.match(off.detail, /restart the desk/);
+  assert.match(off.detail, /START-DESK\.cmd \/cheesy-host:ADDRESS:8080/);
+  assert.match(off.detail, /chapter 9/);
+
+  // Practice runs without the field on purpose; restarting would not help.
+  const demo = find(await new Vitals(base({ mode: 'demo' })).report(), 'field');
+  assert.match(demo.detail, /practice mode runs without the field/);
+});
+
+test('an event log that stopped writing holds the doors, says why, and clears when it is back', async () => {
+  // A full disk used to switch the log off for the rest of the process with a
+  // line in desk-log.txt and nothing on any screen; the next restart then
+  // rebuilt the day only up to the failure. The bus now retries by itself, and
+  // the doors check says so while it is down. A real bus and a real failure:
+  // the stream the bus opened raises the error Node raises on a full disk.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-vitals-log-'));
+  const real = fs.createWriteStream;
+  const made: WriteStream[] = [];
+  fs.createWriteStream = ((...args: Parameters<typeof real>) => {
+    const s = real(...args);
+    made.push(s);
+    return s;
+  }) as typeof real;
+  syncBuiltinESMExports();
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const bus = new EventBus();
+  try {
+    const none = await new Vitals(base()).report();
+    assert.equal(none.checks.find(c => c.id === 'event-log'), undefined, 'no row when no log was asked for');
+
+    await bus.openLog(dir);
+    bus.emit({ type: 'screen.change', payload: { screen: 'match' } });
+    const fine = find(await new Vitals(base({ bus, mode: null })).report(), 'event-log');
+    assert.equal(fine.label, 'Event log');
+    assert.equal(fine.level, 'ok');
+    assert.match(fine.detail, /restart rebuilds the day/);
+    // A practice desk's file is the one the next boot leaves out, and the
+    // row must not promise otherwise right under the Desk mode row.
+    const practice = find(await new Vitals(base({ bus, mode: 'rehearsal' })).report(), 'event-log');
+    assert.equal(practice.level, 'ok');
+    assert.doesNotMatch(practice.detail, /restart rebuilds the day/);
+    assert.match(practice.detail, /practice file/);
+
+    made.at(-1)!.emit('error', Object.assign(
+      new Error("ENOSPC: no space left on device, write 'C:/Users/volunteer/data/events/x.ndjson'"),
+      { code: 'ENOSPC' }));
+    const down = await new Vitals(base({ bus })).report();
+    const row = find(down, 'event-log');
+    assert.equal(row.level, 'fail');
+    assert.equal(row.blocking, true);
+    assert.ok(down.blockers.some(b => b.id === 'event-log'), 'it holds the doors shut');
+    assert.match(row.detail, /not being written \(ENOSPC: no space left on device\)/);
+    assert.match(row.detail, /rebuild the day only up to the moment it stopped/);
+    assert.doesNotMatch(JSON.stringify(row), /volunteer|ndjson/, 'the error, not the path it names');
+    assert.match(row.fix ?? '', /tries again by itself every 30 seconds/);
+    assert.match(row.fix ?? '', /Disk row/);
+
+    // The bus's own retry, then the row goes green with nobody touching it.
+    mock.timers.tick(EventBus.LOG_RETRY_MS);
+    bus.emit({ type: 'screen.change', payload: { screen: 'score' } });
+    const back = await new Vitals(base({ bus })).report();
+    assert.equal(find(back, 'event-log').level, 'ok');
+    assert.ok(!back.blockers.some(b => b.id === 'event-log'));
+  } finally {
+    mock.timers.reset();
+    fs.createWriteStream = real;
+    syncBuiltinESMExports();
+    // The bus closes its current file; the one that "failed" is still ours.
+    await bus.closeLog();
+    made[0]?.destroy();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Disk row says what a first-time crew can do, not a flag the exe cannot take', async () => {
+  const disk = find(await new Vitals(base({ freeBytes: async () => 1 * GB })).report(), 'disk');
+  assert.doesNotMatch(disk.fix ?? '', /--record/);
+  assert.match(disk.fix ?? '', /Recycle Bin/);
+  assert.match(disk.fix ?? '', /rec folder inside the desk folder/);
+  assert.match(disk.fix ?? '', /leave its clips folder alone/, 'the cut match videos stay');
+});
+
+test('a section that is not a group of settings is a warning naming it, never its value', async () => {
+  // "obs": true parsed fine and was dropped with a line in the log, while the
+  // doors check said config.json was read and in use and OBS stayed off.
+  const r = await new Vitals(base({
+    configFile: () => ({ state: 'read', duplicates: [], ignored: ['obs'] }),
+  })).report();
+  const row = find(r, 'config-file');
+  assert.equal(row.level, 'warn');
+  assert.match(row.detail, /gives "obs" something other than a group of settings/);
+  assert.match(row.detail, /\(so OBS is off\)/);
+  assert.match(row.fix ?? '', /config\.example\.json/);
+  assert.ok(!r.blockers.some(b => b.id === 'config-file'), 'the rest of the file is in use');
+
+  // Two, and alongside a repeated section: one row that says both.
+  const both = find(await new Vitals(base({
+    configFile: () => ({ state: 'read', duplicates: [{ section: 'awards', lines: [3, 40] }],
+      ignored: ['publish.playlists', 'recording'] }),
+  })).report(), 'config-file');
+  assert.equal(both.level, 'warn');
+  assert.match(both.detail, /"awards" on lines 3 and 40/);
+  assert.match(both.detail, /"publish\.playlists" and "recording"/);
+  assert.doesNotMatch(both.detail, /OBS is off/);
+  assert.match(both.fix ?? '', /merge each repeated section/);
+  assert.match(both.fix ?? '', /write each as a group/);
 });

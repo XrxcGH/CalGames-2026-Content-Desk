@@ -67,3 +67,21 @@ export function markerWindow(state, marker, t0, lead = 6, tail = 4) {
   if (c === null || c === undefined || !Number.isFinite(c)) return null;
   return [c - lead, c + tail];
 }
+
+/**
+ * What a Take puts on the bus for a clip the desk cut: its file NAME, its
+ * label and length, and the take's id. Never the clip's path.
+ *
+ * Every bus event is fanned out to every open socket, phones on the venue
+ * Wi-Fi included, and the take used to carry the whole cut response, path
+ * and all: the desk laptop's own folder tree, the Windows user's name in it,
+ * on every Take of the weekend. The desk's replay cue finds the file by name
+ * in its own clips folder, the only place it will play from anyway. The
+ * name is read off the clip's /clips/ address, which every cut answers with.
+ * Kept here, beside the clock mapping, so the server's tests can run it.
+ */
+export function takeOf(clip, takeId) {
+  const url = String(clip?.url ?? '');
+  const name = url.startsWith('/clips/') ? url.slice('/clips/'.length) : '';
+  return { name, label: clip?.label, seconds: clip?.seconds, takeId };
+}

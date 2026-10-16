@@ -345,3 +345,53 @@ test('the break card on the stream says "Back soon" once its time has gone', asy
   page.paint();
   assert.equal(page.el('statusBack').hidden, true);
 });
+
+test('a lower third whose dwell ran out long ago stays off when the overlay reloads', async () => {
+  /*
+   * The reducer keeps an unpinned third until somebody hides it; only the
+   * overlay retires it, on its dwell (8 s unless the theme says otherwise).
+   * OBS restarting, its Browser Source refreshing or a pit kiosk reloading
+   * put the morning's name strip back over the afternoon for a full dwell.
+   */
+  const shownAt = (el: FakeEl): boolean =>
+    (el as unknown as { hasAttribute: (n: string) => boolean }).hasAttribute('data-show');
+  const strip = { line1: 'Morning Interview Guest', line2: 'Team 254 mentor' };
+  /** A page loading now onto a desk that showed this third `ago` ms before. */
+  const reload = async (pinned: boolean, ago: number): Promise<{ page: Page; state: DeskState }> => {
+    const page = await openProgram();
+    const now = Date.now();
+    const state = deskAfter(
+      { type: 'lower_third.show', source: 'manual', ts: now - ago, payload: { ...strip, pinned } },
+      // The desk has carried on since: the schedule and rankings polls.
+      { type: 'rankings.updated', source: 'cheesy', ts: now },
+    );
+    // In the order the server sends them to a new socket.
+    await page.send({ t: 'hb', now });
+    await page.send(snapshot(state));
+    return { page, state };
+  };
+
+  const hoursAgo = 3 * 3_600_000;
+  const old = await reload(false, hoursAgo);
+  assert.equal(shownAt(old.page.el('third')), false, 'the morning\'s strip stays retired');
+  assert.equal(old.page.el('thirdT1').textContent, '');
+  // And stays that way through the frames that follow.
+  await old.page.send({ t: 'event', ev: { type: 'rankings.updated' }, state: old.state });
+  assert.equal(shownAt(old.page.el('third')), false);
+  // A fresh show of the same words is a fresh third.
+  const again = deskAfter({ type: 'lower_third.show', source: 'manual', payload: { ...strip, pinned: false } });
+  await old.page.send({ t: 'event', ev: { type: 'lower_third.show' }, state: again });
+  assert.equal(shownAt(old.page.el('third')), true, 'shown again on purpose, it airs');
+
+  // A pinned one is up until somebody hides it, however long ago it went up.
+  const pinned = await reload(true, hoursAgo);
+  assert.equal(shownAt(pinned.page.el('third')), true, 'a pinned third is still on');
+  assert.equal(pinned.page.el('thirdT1').textContent, strip.line1);
+
+  // One still inside its dwell gets what is left of it, not a whole dwell.
+  const recent = await reload(false, 7_400);
+  assert.equal(shownAt(recent.page.el('third')), true, 'a third the page loaded into is on');
+  // The rest of its dwell, then the exit (260 ms unless the theme says).
+  await new Promise(r => setTimeout(r, 1_400));
+  assert.equal(shownAt(recent.page.el('third')), false, 'and leaves when its own dwell ends');
+});

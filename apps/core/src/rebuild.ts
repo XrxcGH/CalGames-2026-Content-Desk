@@ -23,12 +23,14 @@
  * 1. It feeds `observe()` DIRECTLY and never touches the bus. Re-emitting the
  *    morning would re-fire cues, re-cut clips, re-announce cards, and take the
  *    program screen to whatever was up at 9am. Nothing here reaches air.
- * 2. It feeds TODAY's events only, judged by each event's own timestamp. A
- *    three-day event is three days of separate tournament phases and separate
- *    rundowns; dragging Friday's practice cards into Sunday is the thing the
- *    phase rule in cards.ts exists to prevent. It opens yesterday's files as
- *    well as today's to find them, because a file is named for the moment it
- *    was opened and the desk does not restart at midnight: see rebuildFromLog.
+ * 2. It feeds TODAY's events only, judged by each event's own timestamp, to
+ *    everything but the cards. The coverage, the rundown and the rest are a
+ *    day's own record. It opens yesterday's files as well as today's to find
+ *    them, because a file is named for the moment it was opened and the desk
+ *    does not restart at midnight: see rebuildFromLog. The cards also take
+ *    yesterday's events (Observer.alsoYesterday), because qualifications run
+ *    Saturday into Sunday morning and a Saturday yellow is still live then;
+ *    the phase rule in cards.ts, not the calendar, is what retires a card.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -39,6 +41,13 @@ import type { DeskEvent } from './types.ts';
 /** Anything that can be fed a logged event to rebuild itself. */
 export interface Observer {
   observe(ev: DeskEvent): void;
+  /**
+   * Take yesterday's events too, before today's. For the cards only, whose
+   * phase runs across midnight: qualifications run Saturday into Sunday
+   * morning, and a yellow from Saturday is still live in Sunday's first qual.
+   * Everything else here is a day's own record and stays today's.
+   */
+  alsoYesterday?: boolean;
 }
 
 /**
@@ -63,12 +72,15 @@ export interface RebuildResult {
   events: number;
   /** Torn lines and sample-data events, left out. */
   skipped: number;
-  /** Events read from a file but stamped on a different day, left where they were. */
+  /** Events read from a file but stamped on a different day, yesterday's included. */
   otherDay: number;
+  /** Of those, yesterday's, handed to the observers that take them (alsoYesterday). */
+  carried: number;
 }
 
 /**
- * Feed today's logged events to each observer, oldest first.
+ * Feed today's logged events to each observer, oldest first, and yesterday's
+ * to the ones that take them.
  *
  * Which file an event sits in is not what decides whether it is today's: its
  * own `ts` is. A log file is named for the moment it was OPENED, and the desk
@@ -79,8 +91,9 @@ export interface RebuildResult {
  * on the first event of the new day, a desk that was killed at 23:59 and
  * restarted at 00:10 never rotated at all, and a log copied in from another
  * machine is whatever it is. So yesterday's files are opened too, and every
- * event is placed on its own day. Yesterday's events in them are dropped;
- * today's are kept, whatever the name on the file says.
+ * event is placed on its own day. Yesterday's events in them go only to the
+ * observers that ask for them (Observer.alsoYesterday); today's go to every
+ * observer, whatever the name on the file says. Anything older goes nowhere.
  *
  * Never throws. A missing log directory is the normal first-boot case, and a
  * torn last line is what a power cut leaves behind. Neither is a reason to
@@ -98,7 +111,16 @@ export async function rebuildFromLog(
   const eve = new Date(now);
   eve.setDate(eve.getDate() - 1);
   const yesterday = localDay(eve);
-  const result: RebuildResult = { files: 0, events: 0, skipped: 0, otherDay: 0 };
+  const result: RebuildResult = { files: 0, events: 0, skipped: 0, otherDay: 0, carried: 0 };
+  const twoDay = observers.filter(o => o.alsoYesterday);
+  const feed = (list: Observer[], ev: DeskEvent): void => {
+    for (const o of list) {
+      // One observer throwing must not cost the others their history.
+      try { o.observe(ev); } catch (err) {
+        console.warn(`[rebuild] ${(err as Error).message}`);
+      }
+    }
+  };
 
   let names: string[];
   try {
@@ -146,14 +168,18 @@ export async function rebuildFromLog(
       // is taken to belong to the file it is in rather than dropped.
       const evDay = typeof ev.ts === 'number' && Number.isFinite(ev.ts)
         ? localDay(new Date(ev.ts)) : fileDay;
-      if (evDay !== day) { result.otherDay++; continue; }
-      result.events++;
-      for (const o of observers) {
-        // One observer throwing must not cost the others their history.
-        try { o.observe(ev); } catch (err) {
-          console.warn(`[rebuild] ${(err as Error).message}`);
+      if (evDay !== day) {
+        result.otherDay++;
+        // Files are read oldest first, so yesterday's events reach these
+        // observers ahead of today's, in the order they happened.
+        if (evDay === yesterday && twoDay.length) {
+          result.carried++;
+          feed(twoDay, ev);
         }
+        continue;
       }
+      result.events++;
+      feed(observers, ev);
     }
   }
 

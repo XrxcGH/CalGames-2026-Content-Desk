@@ -525,10 +525,22 @@ if (previewDesk) {
 
 // Cues start disarmed. Nobody should discover automation by having it happen
 // to them mid-match: the producer arms each cue after watching it be right.
-const cues = new CueEngine(bus, obs, { autopilot: has('autopilot') });
+// What they arm is kept in data/cues.json and comes back after a restart (see
+// CueEngine.restoreArmed); --autopilot still arms every cue for this session.
+// Not in any rehearsal and not on the preview desk: a practice session's
+// switches must not be the show's after the restart the handbook prescribes,
+// and the preview desk photographs a desk with nothing armed.
+const keepArmed = !rehearsalTag && !previewDesk;
+const cues = new CueEngine(bus, obs, {
+  autopilot: has('autopilot'),
+  ...(keepArmed ? { armedFile: join(ROOT, 'data', 'cues.json') } : {}),
+});
 cues.attach();
+const rearmed = keepArmed && !has('autopilot') ? await cues.restoreArmed() : [];
 console.log(`[cue] ${cues.status.length} cues loaded, autopilot ` +
-  `${has('autopilot') ? 'ARMED' : 'off'}, arm per-cue from the desk`);
+  `${has('autopilot') ? 'ARMED' : rearmed.length
+    ? `on for ${rearmed.length}, as they were left before the restart (data/cues.json)`
+    : 'off'}, arm per-cue from the desk`);
 
 // ---- publishing -----------------------------------------------------------
 // What each bonus RP costs, straight from config. On the bus rather than read
@@ -696,7 +708,8 @@ const chapterSeed: DeskEvent[] = [];
  * which is its one job in exactly the situation it exists for. The sponsor
  * counts under-report airings in a document that goes to the people who paid.
  *
- * So they are rebuilt from today's log, straight into observe() and never
+ * So they are rebuilt from today's log (the cards from yesterday's as well,
+ * see below), straight into observe() and never
  * through the bus: re-emitting the morning would re-fire cues, re-cut clips
  * and take the program screen to whatever was up at 9am. Nothing here reaches
  * air. See rebuild.ts.
@@ -715,7 +728,14 @@ if (previewDesk) {
   const CHAPTER_TYPES = new Set<DeskEvent['type']>(
     ['match.loaded', 'match.start', 'award.presented', 'alliance_selection.update']);
   const rebuilt = await rebuildFromLog(join(ROOT, 'data', 'events'), [
-    cardLedger, coverage, rundown, sponsors, awards,
+    // The cards from yesterday as well as today: qualifications run Saturday
+    // into Sunday morning, so a desk switched on (or restarted) on Sunday
+    // forgot every yellow from Saturday's quals and told the announcer a
+    // carded team was clean. A finished phase still drops out by itself: the
+    // ledger only counts a card as carried in the phase now running, and the
+    // reducer drops byTeam entries at the phase boundary.
+    { observe: ev => cardLedger.observe(ev), alsoYesterday: true },
+    coverage, rundown, sponsors, awards,
     // Trivia scores and played rounds, and the arcade's grand prix standings,
     // were memory-only too, so the handbook's "scores carry across the day"
     // held until the first restart. Their events carry whole snapshots; the
@@ -729,8 +749,9 @@ if (previewDesk) {
     // empty: the ledger came back after a restart while every match graphic
     // showed carded teams clean. card.issued events carry their match name,
     // so folding them back through the reducer rebuilds byTeam with the
-    // right phase, and restore() touches nothing but the snapshot.
-    { observe: ev => { if (ev.type === 'card.issued') bus.restore(ev); } },
+    // right phase, and restore() touches nothing but the snapshot. From
+    // yesterday too, for the same Sunday-morning quals as the ledger.
+    { observe: ev => { if (ev.type === 'card.issued') bus.restore(ev); }, alsoYesterday: true },
     // The safety message, the delay card, the event countdown and the live
     // announcement are set once and left up on purpose, and a restart used
     // to drop all four from every screen without a word. See latched.ts.
@@ -745,13 +766,15 @@ if (previewDesk) {
   ]);
   // After the rebuild, so the last word on each comes from the whole day.
   const restored = latched.apply(bus);
-  if (rebuilt.events) {
+  if (rebuilt.events || rebuilt.carried) {
     console.log(`[rebuild] ${rebuilt.events} event(s) from ${rebuilt.files} log file(s): ` +
       'cards, coverage, run of show, sponsor counts, trivia, arcade, match pace and '
       + 'chapters carried over'
+      + (rebuilt.carried ? `; ${rebuilt.carried} from yesterday for the cards` : '')
       + (restored.length ? `; still on screen: ${restored.join(', ')}` : '')
       + (rebuilt.skipped ? ` (${rebuilt.skipped} torn line(s) skipped)` : '')
-      + (rebuilt.otherDay ? ` (${rebuilt.otherDay} from another day left alone)` : ''));
+      + (rebuilt.otherDay - rebuilt.carried > 0
+        ? ` (${rebuilt.otherDay - rebuilt.carried} from another day left alone)` : ''));
   }
 }
 

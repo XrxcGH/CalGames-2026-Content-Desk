@@ -13,8 +13,8 @@
  *      a session first.
  */
 
-import { stat } from 'node:fs/promises';
-import { basename, extname, isAbsolute, relative, resolve } from 'node:path';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EventBus } from '../bus.ts';
 import type { DeskEvent, DeskState } from '../types.ts';
@@ -27,10 +27,18 @@ export interface CueContext {
   event: DeskEvent;
   state: DeskState;
   /**
+   * Run now: a person pressed this cue's own button. Not the same as the
+   * event being operator-driven. A level cue (Fill the gap) runs on whatever
+   * event arrives first after its moment, and that is often a press of
+   * something else or a 'manual' event no person made, such as the house
+   * audio poll's track change.
+   */
+  byHand: boolean;
+  /**
    * Cut to one of the show's scenes. Resolves to the scene name it cut to,
-   * or null when a lock held the cut (the wide shot during a live match, or
-   * a replay an operator has on air), so a cue whose whole point is the cut
-   * can tell "done" from "refused".
+   * or null when a lock held the cut (the wide shot during a live match, a
+   * replay an operator has on air, or a screen the desk is holding), so a
+   * cue whose whole point is the cut can tell "done" from "refused".
    */
   scene: (name: keyof typeof DEFAULT_SCENES) => Promise<string | null>;
   /** The OBS scene names this show uses, resolved, to map a name back to its key. */
@@ -68,15 +76,15 @@ export interface Cue {
    * `scene.change` on the bus whatever happens and only reaches the switcher
    * `if (this.#obs?.connected)`, under the comment "A missing OBS is not a
    * failure. The graphics still switch; only the camera cut is lost." Four of
-   * these seven cues emit their `screen.change` (the graphic the projectors
-   * and the overlay render) before they ever call `scene`.
+   * these cues emit their `screen.change` (the graphic the projectors and
+   * the overlay render) before they ever call `scene`.
    *
    * So no cue fails with OBS away, and the desk must not disable any of them.
-   * It first disabled all eleven, then, briefly, these seven; both were the
-   * same mistake, which is taking "talks to OBS" for "needs OBS". The flag is
-   * kept because the distinction is still worth SAYING: with OBS down these
-   * cues will switch the graphics and not the camera, and the person on the
-   * switcher has to cover that cut by hand.
+   * It first disabled every cue, then, briefly, the ones that cut a camera;
+   * both were the same mistake, which is taking "talks to OBS" for "needs
+   * OBS". The flag is kept because the distinction is still worth SAYING:
+   * with OBS down these cues will switch the graphics and not the camera,
+   * and the person on the switcher has to cover that cut by hand.
    *
    * Take replay is the one exception, and it fails out loud rather than
    * degrading: its whole job is OBS playing a file, and with no OBS there is
@@ -88,13 +96,16 @@ export interface Cue {
    */
   needsObs?: boolean;
   /**
-   * The trigger is itself an operator's press (the replay console's Take),
-   * so the cue runs on that press whether or not its autopilot is armed.
-   * Manual always wins: a Take that silently did nothing because a toggle on
-   * another console was off is a button that lies. Only operator-sourced
-   * events count; nothing automatic ever rides this past a disarmed cue.
+   * This match runs whether or not the cue's autopilot is armed. Asked only
+   * once `when` has matched, with the same event and state.
+   *
+   * Mostly because the trigger is itself an operator's press (the replay
+   * console's Take): manual always wins, and a Take that silently did
+   * nothing because a toggle on another console was off is a button that
+   * lies. An automatic event only ever rides past a disarmed cue to undo
+   * something automation itself just did (see the plate cue).
    */
-  operatorTake?: boolean;
+  take?: (ev: DeskEvent, state: DeskState) => boolean;
   when: (ev: DeskEvent, state: DeskState) => boolean;
   run: (ctx: CueContext) => void | Promise<void>;
 }
@@ -163,16 +174,68 @@ export function replayRunning(state: DeskState, now = Date.now()): boolean {
 }
 
 /**
+ * The desk is deliberately holding the program: an award or a slide on the
+ * plate, or any screen an operator has taken by hand. The hold only ever
+ * guarded the overlay's screen, so automation kept cutting the CAMERA under
+ * it: the gap filler to the arcade mid-ceremony, and, once the field's next
+ * load started arriving in the ceremony's first minute, the On deck cue to
+ * the field camera in the middle of an award. A held screen holds the camera
+ * too.
+ *
+ * Judged by what is on the screen, never by state.award or state.slide
+ * merely being set. Those stay set until somebody presses Clear or Hide,
+ * and the handbook's way off a plate is Auto, which hands the screen back
+ * and leaves both behind: the next load moves the program to the overview,
+ * but a test of those two fields went on holding every automatic cut (On
+ * deck, the buzzer, the score reveal) for the rest of the day. The plate
+ * holds the camera while it is up, and award.show and slide.show take a
+ * hold of their own as well.
+ */
+export function deskHolding(state: DeskState): boolean {
+  return state.screenHold || state.screen === 'award' || state.screen === 'slide';
+}
+
+/**
+ * Program screens drawn only by the Overlay source, which the handbook builds
+ * into the match, score and replay scenes and not into the arcade or the
+ * intro. Put up while the stream is on one of those two, they never reach
+ * the stream at all. A sponsor card counts, and costs the most: the sponsor
+ * report counts it as aired whether or not the stream could show it.
+ */
+const PLATE_SCREENS = new Set(['award', 'slide', 'selection', 'sponsor']);
+
+/** An operator putting one of PLATE_SCREENS up by hand. */
+const platePress = (ev: DeskEvent): boolean => operatorDriven(ev)
+  && (ev.type === 'award.show' || ev.type === 'award.presented'
+    || ev.type === 'slide.show' || ev.type === 'sponsor.show'
+    || (ev.type === 'screen.change'
+      && PLATE_SCREENS.has(String((ev.payload as { screen?: unknown } | null)?.screen))));
+
+/**
  * The clip a take names, as a file directly inside rec/clips, or a thrown
  * reason. The socket that carries a take accepts any PIN holder's event, and
  * OBS plays whatever file it is handed straight onto the stream: licensed
  * music under media/audio included. Only what the clip store wrote may air.
+ *
+ * The replay console names the clip by its file NAME. Every event is fanned
+ * out to every open socket, phones on the venue Wi-Fi included, and a path
+ * put the desk laptop's own folder tree (the Windows user's name in it) on
+ * all of them; the server now strips one from replay events on the way out,
+ * so nothing may depend on it arriving. A name is looked for in rec/clips
+ * and nowhere else, and only one shaped like the clip store's own names
+ * (letters, digits, dot, dash and underscore) is looked for at all, so a
+ * drive letter, a stream suffix or a climb never reaches the path code. A
+ * path is still taken from an in-process caller, under the same rule.
  */
-function clipFile(clipsDir: string, path: unknown): string {
-  if (typeof path !== 'string' || !path) {
+function clipFile(clipsDir: string, clip: { name?: unknown; path?: unknown }): string {
+  const named = typeof clip.name === 'string' && clip.name !== '';
+  if (!named && (typeof clip.path !== 'string' || !clip.path)) {
     throw new Error('This take carried no clip. Cut one on the replay console, then take it.');
   }
-  const file = resolve(path);
+  if (named && !/^[\w-][\w.-]*$/.test(clip.name as string)) {
+    throw new Error('That take does not name a replay clip in rec/clips, so it was not played.');
+  }
+  const file = named ? join(resolve(clipsDir), clip.name as string) : resolve(clip.path as string);
   const rel = relative(resolve(clipsDir), file);
   if (!rel || rel === '..' || isAbsolute(rel) || /[\\/]/.test(rel)
       || extname(file).toLowerCase() !== '.mp4') {
@@ -192,6 +255,13 @@ export function defaultCues(): Cue[] {
   // that one is still the picture asks OBS where the show is and hears "the
   // replay scene", which is the first clip, not where the show came from.
   let lastTake: { entry: NonNullable<DeskState['replayOnAir']>; back: keyof SceneMap } | null = null;
+  // The program screen as of the last event the plate cue judged, so it can
+  // tell the selection board going up from the board staying up.
+  let boardSeen: string | null = null;
+  // The gap (its scorePostedAt) in which the gap filler really cut the
+  // stream to the arcade. The plate cue undoes that cut for the selection
+  // board armed or not: see its take.
+  let arcadeCutIn: number | null = null;
   return [
     {
       id: 'on-deck',
@@ -310,13 +380,13 @@ export function defaultCues(): Cue[] {
     {
       id: 'replay',
       needsObs: true,
-      operatorTake: true,
+      take: operatorDriven,
       name: 'Take replay',
       does: `Play the clip the replay console takes in OBS's "${REPLAY_INPUT}" media source, cut to the replay scene, and cut back when the clip ends, unless the switcher has already cut away. A Take always runs, armed or not.`,
       when: ev => ev.type === 'replay.play',
       run: async ctx => {
         const clip = (ctx.event.payload ?? {}) as {
-          path?: unknown; label?: unknown; seconds?: unknown; takeId?: unknown;
+          name?: unknown; path?: unknown; label?: unknown; seconds?: unknown; takeId?: unknown;
         };
         // The take this one replaces, if any is still the picture. Read
         // before anything awaits, so the first clip ending in the meantime
@@ -331,7 +401,7 @@ export function defaultCues(): Cue[] {
         let scene: string | null;
         let before: string | null = ctx.state.scene;
         try {
-          const file = clipFile(ctx.clipsDir, clip.path);
+          const file = clipFile(ctx.clipsDir, clip);
           if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) {
             throw new Error('This take carried no usable clip length. Cut the clip again, then take it.');
           }
@@ -472,11 +542,66 @@ export function defaultCues(): Cue[] {
         // arcade capture in the middle of the awards ceremony. A held screen
         // holds the camera too. Latched rather than deferred, so the arcade
         // does not jump in the instant the ceremony's last plate comes down.
-        if (state.screenHold || state.award !== null || state.slide !== null
-            || replayRunning(state)) return false;
+        // The selection board counts as well, held or not: the field puts it
+        // up by itself when the arena starts alliance selection, which is
+        // exactly the gap after the last qual, and the arcade carries no
+        // overlay to show it on.
+        if (deskHolding(state) || state.screen === 'selection' || replayRunning(state)) return false;
         return true;
       },
-      run: async ctx => { await ctx.scene('arcade'); },
+      run: async ctx => {
+        const cut = await ctx.scene('arcade');
+        // Only automation's own cut is the plate cue's to take back; a Run
+        // now is a person's, and nothing automatic undoes one of those.
+        // Judged by how the cue ran, not by the event's source: the event
+        // that crosses the three-minute mark is often a press of something
+        // else, or the house audio poll's 'manual' track change.
+        if (cut !== null && !ctx.byHand) arcadeCutIn = ctx.state.scorePostedAt;
+      },
+    },
+    {
+      id: 'plate-back',
+      needsObs: true,
+      name: 'Plates on the stream',
+      does: 'Cut back to the field camera scene when an award, a slide, a sponsor card or the selection board goes up while the stream is on the arcade or the intro, the two scenes with no overlay to carry it. Showing any of those by hand always runs it, armed or not, and so does the board going up after Fill the gap cut to the arcade.',
+      // Armed or not for a press, which is the trigger itself. And for the
+      // board the field puts up by itself in a gap where Fill the gap cut
+      // the stream to the arcade: automation is only taking back its own
+      // cut there. This cue ships disarmed and cannot earn a count to be
+      // trusted on before Sunday's selection, so waiting for it to be armed
+      // left the whole of selection on the arcade behind an armed Fill the
+      // gap. Anywhere else the board's automatic cut waits for the producer
+      // like any other automation.
+      take: (ev, state) => platePress(ev)
+        || (arcadeCutIn !== null && arcadeCutIn === state.scorePostedAt),
+      // An edge, not a level: once a plate is up the producer may cut to any
+      // camera they like for the presentation, and this must not fight them
+      // on every event after. A press is its own edge. The board the field
+      // puts up by itself arrives as a cue-sourced screen change, which this
+      // engine never sees (cues must not trigger cues), so it is caught on
+      // the next event that does arrive (the board republishes on every pick
+      // and once a second while its clock runs) as the screen having become
+      // the board since the last one.
+      when: (ev, state) => {
+        if (operatorDriven(ev)) {
+          // Any other press leaves the edge for the next automatic event, so
+          // an unrelated tap cannot swallow the board's automatic cut.
+          if (!platePress(ev)) return false;
+          boardSeen = state.screen;
+          return PLATE_SCREENS.has(state.screen);
+        }
+        const rose = state.screen === 'selection' && boardSeen !== 'selection';
+        boardSeen = state.screen;
+        return rose;
+      },
+      run: async ctx => {
+        // Asked of OBS, as the replay cue asks: the switcher cuts by hand in
+        // OBS's own Scenes panel too, and the desk hears nothing of that. A
+        // question OBS cannot answer falls back to the desk's own last cut.
+        const live = await ctx.obs?.programScene().catch(() => null) ?? ctx.state.scene;
+        if (live !== ctx.scenes.arcade && live !== ctx.scenes.intro) return;
+        await ctx.scene('match');
+      },
     },
   ];
 }
@@ -498,21 +623,100 @@ export class CueEngine {
   /** See CueContext.heldDuring: the last cut the replay lock held, and for which replay. */
   #heldForReplay: { key: keyof SceneMap; replay: DeskState['replayOnAir'] } | null = null;
 
+  /** See the constructor's armedFile. Null: nothing is kept. */
+  #armedFile: string | null;
+  /** The tail of the arm-switch writes. Never rejects; see #saveArmed. */
+  #savingArmed: Promise<void> = Promise.resolve();
+
   constructor(bus: EventBus, obs: ObsClient | null,
               opts: {
                 cues?: Cue[]; scenes?: Partial<SceneMap>; autopilot?: boolean;
                 /** The ClipStore's output directory. See DEFAULT_CLIPS_DIR. */
                 clipsDir?: string;
+                /**
+                 * Where the arm switches are kept across a restart
+                 * (data/cues.json). Left out, nothing is kept: the tests, and
+                 * the rehearsal and preview desks, which must leave no mark.
+                 */
+                armedFile?: string;
               } = {}) {
     this.#bus = bus;
     this.#obs = obs;
     this.#clipsDir = opts.clipsDir ?? DEFAULT_CLIPS_DIR;
     this.#scenes = { ...DEFAULT_SCENES, ...opts.scenes };
     this.#cues = opts.cues ?? defaultCues();
+    this.#armedFile = opts.armedFile ?? null;
     // Off by default. Nobody should discover automation by having it happen to
     // them mid-match; the producer switches cues on once they've watched them
     // be right.
     for (const cue of this.#cues) this.#autopilot.set(cue.id, opts.autopilot ?? false);
+  }
+
+  /**
+   * The arm switches as the crew left them, back after a restart.
+   *
+   * They lived only in memory, and the packaged desk has no --autopilot, so a
+   * crew that armed every cue at doors (as the handbook says to) and then
+   * restarted mid-day (a kicked cable, a crash, the handbook's own fix of
+   * closing the desk and starting it again) came back with every cue
+   * silently off: no On deck, no Armed, no score reveal, the music still
+   * playing under the countdown, and a stream the gap filler had cut to the
+   * arcade left there through the next match start. The switches are the
+   * producer's decisions, the same as a staged winner, so they are kept the
+   * same way.
+   *
+   * Only the cues this desk has, and only a true or false for each: a file
+   * from an older desk, or a hand edit, cannot arm something by accident.
+   * Anything it does not mention stays off. Returns the ids now armed.
+   */
+  async restoreArmed(): Promise<string[]> {
+    if (!this.#armedFile) return [];
+    let saved: unknown;
+    try {
+      saved = (JSON.parse(await readFile(this.#armedFile, 'utf8')) as { armed?: unknown })?.armed;
+    } catch (err) {
+      // No file is the first boot of the event, and nothing to say.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn('[cue] the saved cue switches could not be read, every cue starts off:',
+          (err as Error).message);
+      }
+      return [];
+    }
+    if (!saved || typeof saved !== 'object') return [];
+    for (const cue of this.#cues) {
+      const on = (saved as Record<string, unknown>)[cue.id];
+      if (typeof on === 'boolean') this.#autopilot.set(cue.id, on);
+    }
+    return this.#cues.filter(c => this.#autopilot.get(c.id)).map(c => c.id);
+  }
+
+  /** Settles once every arm switch changed so far is on disk, or has failed and said so. */
+  get armedSaved(): Promise<void> { return this.#savingArmed; }
+
+  /**
+   * One writer at a time, through a fixed temp name renamed into place: the
+   * rename is atomic against a reader, so a power cut mid-write leaves the
+   * last good file rather than half of one, and the queue keeps two quick
+   * presses from racing each other for the temp file (see Awards#save).
+   * Each write carries the switches as they stood when it was asked for, so
+   * the last one on disk is the last press.
+   */
+  #saveArmed(): void {
+    const file = this.#armedFile;
+    if (!file) return;
+    const armed = Object.fromEntries(this.#cues.map(c => [c.id, this.#autopilot.get(c.id) ?? false]));
+    const write = async (): Promise<void> => {
+      try {
+        await mkdir(dirname(file), { recursive: true });
+        const tmp = `${file}.tmp`;
+        await writeFile(tmp, JSON.stringify({ armed }, null, 2));
+        await rename(tmp, file);
+      } catch (err) {
+        // The switches still hold for this session; only a restart loses them.
+        console.warn('[cue] the cue switches could not be saved:', (err as Error).message);
+      }
+    };
+    this.#savingArmed = this.#savingArmed.then(write, write);
   }
 
   /** Set after construction: house audio is built later in boot than the cue
@@ -536,11 +740,13 @@ export class CueEngine {
   setAutopilot(id: string, on: boolean): boolean {
     if (!this.#cues.some(c => c.id === id)) return false;
     this.#autopilot.set(id, on);
+    this.#saveArmed();
     return true;
   }
 
   setAll(on: boolean): void {
     for (const cue of this.#cues) this.#autopilot.set(cue.id, on);
+    this.#saveArmed();
   }
 
   /** Run a cue by hand, ignoring its autopilot setting. */
@@ -550,7 +756,7 @@ export class CueEngine {
     await this.#run(cue, {
       id: 'manual', seq: 0, ts: Date.now(), matchClock: this.#bus.state.matchClock,
       source: 'manual', confidence: 'authoritative', type: 'graphic.show', payload: {},
-    });
+    }, true);
     return true;
   }
 
@@ -565,8 +771,10 @@ export class CueEngine {
         catch (err) { this.#errors.set(cue.id, (err as Error).message); continue; }
         if (!matches) continue;
 
-        // See Cue.operatorTake: a press that IS the trigger runs disarmed.
-        const take = !!cue.operatorTake && operatorDriven(ev);
+        // See Cue.take: a press that IS the trigger runs disarmed.
+        let take = false;
+        try { take = !!cue.take?.(ev, state); }
+        catch (err) { this.#errors.set(cue.id, (err as Error).message); }
         if (!this.#autopilot.get(cue.id) && !take) {
           this.#would.set(cue.id, (this.#would.get(cue.id) ?? 0) + 1);
           continue;
@@ -584,12 +792,13 @@ export class CueEngine {
     this.#later.clear();
   }
 
-  async #run(cue: Cue, event: DeskEvent): Promise<void> {
+  async #run(cue: Cue, event: DeskEvent, byHand = false): Promise<void> {
     const ctx: CueContext = {
       bus: this.#bus,
       obs: this.#obs,
       audio: this.#audio,
       event,
+      byHand,
       state: this.#bus.state,
       clipsDir: this.#clipsDir,
       scenes: { ...this.#scenes },
@@ -631,6 +840,27 @@ export class CueEngine {
         if (!operatorDriven(event) && replayRunning(this.#bus.state)) {
           console.log(`[cue] held scene "${sceneName}": replay on air`);
           this.#heldForReplay = { key: name, replay: this.#bus.state.replayOnAir };
+          return null;
+        }
+        // And the same again for anything the desk is holding: an award, a
+        // slide, a screen taken by hand. The score hold moved the next
+        // match's load into the ceremony's first minute, and On deck cut the
+        // stream from the presentation camera to the field mid-award. See
+        // deskHolding.
+        //
+        // The field going ready or live gets through, which is the wide-shot
+        // rule above: a plate an operator forgot to take down must not keep
+        // the camera off a match being played, and this hold has no moment
+        // of its own to hand the cut back at, the way a replay ending does.
+        // Not remembered for that reason: the press that ends a hold is the
+        // operator's, and they may be about to show the next award on the
+        // same camera. (The plate cue needs no way through: its presses are
+        // an operator's, and the board it brings back by itself is held only
+        // when an operator took it by hand, a press that already ran it.)
+        const fieldGoing = name === 'match'
+          && (event.type === 'match.armed' || event.type === 'match.start');
+        if (!operatorDriven(event) && !fieldGoing && deskHolding(this.#bus.state)) {
+          console.log(`[cue] held scene "${sceneName}": the desk is holding the screen`);
           return null;
         }
         this.#bus.emit({ type: 'scene.change', source: 'cue', payload: { scene: sceneName } });

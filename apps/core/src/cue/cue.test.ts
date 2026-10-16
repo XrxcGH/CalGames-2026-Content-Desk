@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
@@ -9,6 +9,12 @@ import { CueEngine, defaultCues, REPLAY_INPUT } from './engine.ts';
 import { isLocalHost, ObsClient, sign } from './obs.ts';
 import { EventBus } from '../bus.ts';
 import type { DeskEvent } from '../types.ts';
+
+// The replay console's own take builder (surfaces/replay/timeline.js), so the
+// payload a Take sends is the one these tests send.
+type TakeOf = (clip: unknown, takeId: string) => Record<string, unknown>;
+// @ts-expect-error untyped browser module, cast on the same line
+const { takeOf } = (await import('../../../../surfaces/replay/timeline.js')) as { takeOf: TakeOf };
 
 const loadMatch = (bus: EventBus): void => {
   bus.emit({
@@ -1005,6 +1011,497 @@ test('the gap-filler leaves a running replay alone, and that gap stays filled', 
     bus.emit({ type: 'rankings.updated', source: 'cheesy' });
     assert.deepEqual(scenes, ['CG_REPLAY', 'CG_MATCH'], 'nor the moment it ends');
     engine.detach();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- a held desk holds the camera too -------------------------------------------
+
+test('a held screen holds autopilot camera cuts; the field going ready still cuts', async () => {
+  /*
+   * The score hold moved the next match's load into the ceremony's first
+   * minute: Show the award, the load lands, and On deck cut the stream from
+   * the presentation camera to the field in the middle of the award, with
+   * the overlay still on the plate.
+   */
+  const holds: { name: string; hold: (bus: EventBus) => void }[] = [
+    { name: 'an award', hold: bus => bus.emit({ type: 'award.show', source: 'manual',
+      payload: { id: 'ei', title: 'Engineering Inspiration' } }) },
+    { name: 'a slide', hold: bus => bus.emit({ type: 'slide.show', source: 'manual',
+      payload: { id: 'v', title: 'Thank you, volunteers' } }) },
+    { name: 'a screen taken by hand', hold: bus => bus.emit({ type: 'screen.change', source: 'manual',
+      payload: { screen: 'explain' } }) },
+  ];
+  for (const c of holds) {
+    const bus = new EventBus();
+    const fake = fakeObs();
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    engine.setAll(true);
+    loadMatch(bus);
+    bus.emit({ type: 'match.start', source: 'cheesy' });
+    bus.emit({ type: 'match.end', source: 'cheesy' });
+    bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+    await settle();
+    // The switcher takes the presentation camera by hand, in OBS.
+    fake.handCut('CG_DESK');
+    c.hold(bus);
+    await settle();
+    const scenes = sceneLog(bus);
+    fake.calls.length = 0;
+
+    bus.emit({ type: 'match.loaded', source: 'cheesy',
+      payload: { id: 'q51', displayName: 'Qualification 51', red: [], blue: [] } });
+    await settle();
+    assert.equal(bus.state.match?.displayName, 'Qualification 51', `${c.name}: the load itself lands`);
+    assert.deepEqual(scenes, [], `${c.name}: On deck leaves the camera alone`);
+    assert.deepEqual(fake.calls, [], `${c.name}: and OBS is never told to cut`);
+    assert.equal(engine.status.find(x => x.id === 'on-deck')!.lastError, null);
+
+    // An operator still cuts through it.
+    await engine.fire('result');
+    assert.deepEqual(scenes, ['CG_SCORE'], `${c.name}: Run now still cuts`);
+
+    // A plate somebody forgot to take down must not keep the camera off a
+    // match being played: the field going ready cuts to it as ever.
+    bus.emit({ type: 'match.armed', source: 'cheesy' });
+    await settle();
+    assert.deepEqual(scenes, ['CG_SCORE', 'CG_MATCH'], `${c.name}: the Armed cut still lands`);
+    engine.detach();
+  }
+});
+
+test('the field going live cuts through a held screen too, with only Live armed', async () => {
+  /*
+   * The other half of the field-going rule. A desk with Live armed and
+   * Armed not (or one that joined after the arm) would otherwise keep the
+   * stream off the field for a whole match under a plate somebody forgot.
+   */
+  const holds: { name: string; hold: (bus: EventBus) => void }[] = [
+    { name: 'an award', hold: bus => bus.emit({ type: 'award.show', source: 'manual',
+      payload: { id: 'ei', title: 'Engineering Inspiration' } }) },
+    { name: 'a slide', hold: bus => bus.emit({ type: 'slide.show', source: 'manual',
+      payload: { id: 'v', title: 'Thank you, volunteers' } }) },
+    { name: 'a screen taken by hand', hold: bus => bus.emit({ type: 'screen.change', source: 'manual',
+      payload: { screen: 'explain' } }) },
+  ];
+  for (const c of holds) {
+    const bus = new EventBus();
+    const fake = fakeObs({ program: 'CG_DESK' });
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    engine.setAutopilot('live', true);
+    loadMatch(bus);
+    c.hold(bus);
+    await settle();
+    const scenes = sceneLog(bus);
+    bus.emit({ type: 'match.start', source: 'cheesy' });
+    await settle();
+    assert.deepEqual(scenes, ['CG_MATCH'], `${c.name}: the stream goes to the field`);
+    assert.deepEqual(fake.calls, [['setScene', 'CG_MATCH']], c.name);
+    engine.detach();
+  }
+});
+
+test('a plate handed back with Auto stops holding the camera once the program moves on', async () => {
+  /*
+   * The award and the slide stay set in state until somebody presses Clear
+   * or Hide, and the handbook's way off a plate is Auto. A hold judged by
+   * those two fields outlived the plate: the next load moved the program to
+   * the overview, and On deck, the buzzer and the score reveal were all
+   * held for the rest of the day.
+   */
+  const plates: { name: string; up: (bus: EventBus) => void }[] = [
+    { name: 'an award, revealed', up: bus => {
+      bus.emit({ type: 'award.show', source: 'manual', payload: { id: 'ei', title: 'Engineering Inspiration' } });
+      bus.emit({ type: 'award.presented', source: 'manual',
+        payload: { id: 'ei', award: 'Engineering Inspiration', winner: 'Team 254', team: 254 } });
+    } },
+    { name: 'a slide', up: bus => bus.emit({ type: 'slide.show', source: 'manual',
+      payload: { id: 'lunch', title: 'Lunch until 12:45' } }) },
+  ];
+  for (const c of plates) {
+    const bus = new EventBus();
+    const fake = fakeObs({ program: 'CG_DESK' });
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    engine.setAll(true);
+    c.up(bus);
+    bus.emit({ type: 'screen.change', source: 'manual', payload: { screen: 'auto' } });
+    await settle();
+    assert.equal(bus.state.screenHold, false, c.name);
+    assert.ok(bus.state.award !== null || bus.state.slide !== null, `${c.name}: still set in state`);
+    const scenes = sceneLog(bus);
+
+    bus.emit({ type: 'match.loaded', source: 'cheesy',
+      payload: { id: 'q51', displayName: 'Qualification 51', red: [], blue: [] } });
+    await settle();
+    assert.equal(bus.state.screen, 'overview', c.name);
+    assert.deepEqual(scenes, ['CG_MATCH'], `${c.name}: On deck cuts`);
+    for (const type of ['match.armed', 'match.start', 'match.end', 'match.score_posted'] as const) {
+      bus.emit({ type, source: 'cheesy' });
+      await settle();
+    }
+    assert.deepEqual(scenes, ['CG_MATCH', 'CG_MATCH', 'CG_MATCH', 'CG_MATCH', 'CG_SCORE'],
+      `${c.name}: and the whole match cuts as ever`);
+    engine.detach();
+  }
+});
+
+// ---- plates on the stream -------------------------------------------------------
+
+test('an award, a slide, a sponsor or the board put up over the arcade or the intro brings the stream back', async () => {
+  /*
+   * The arcade and intro scenes carry no Overlay (handbook chapter 4), and
+   * the plates are drawn only by the Overlay. Fill the gap cut the stream to
+   * the arcade three minutes after the last final, the closing awards went
+   * up, and none of them reached the stream until somebody cut by hand. The
+   * press is the trigger, so it runs armed or not. A sponsor card the same:
+   * the sponsor report counted it as aired while only the room saw it.
+   */
+  const presses: { name: string; press: (bus: EventBus) => void }[] = [
+    { name: 'Show the award', press: bus => bus.emit({ type: 'award.show', source: 'manual',
+      payload: { id: 'ei', title: 'Engineering Inspiration' } }) },
+    { name: 'a slide', press: bus => bus.emit({ type: 'slide.show', source: 'manual',
+      payload: { id: 'v', title: 'Thank you, volunteers' } }) },
+    { name: 'the Selection take', press: bus => bus.emit({ type: 'screen.change', source: 'manual',
+      payload: { screen: 'selection' } }) },
+    // As the sponsor store sends it.
+    { name: 'a sponsor card', press: bus => bus.emit({ type: 'sponsor.show', source: 'manual',
+      payload: { id: 'acme', name: 'Acme Robotics', line: '', logo: null } }) },
+  ];
+  for (const c of presses) {
+    for (const from of ['CG_ARCADE', 'CG_INTRO']) {
+      const bus = new EventBus();
+      const fake = fakeObs({ program: from });
+      const engine = new CueEngine(bus, fake.obs);
+      engine.attach();
+      assert.equal(engine.status.find(x => x.id === 'plate-back')!.autopilot, false, 'shipped disarmed');
+      const scenes = sceneLog(bus);
+      c.press(bus);
+      await settle();
+      assert.deepEqual(scenes, ['CG_MATCH'], `${c.name} over ${from}`);
+      assert.deepEqual(fake.calls, [['setScene', 'CG_MATCH']], `${c.name} over ${from}: OBS is told`);
+      engine.detach();
+    }
+    // On any camera the producer chose that carries the Overlay, or one the
+    // desk has no view on, nothing moves: the plate is already on the stream.
+    for (const from of ['CG_MATCH', 'CG_SCORE', 'CG_DESK']) {
+      const bus = new EventBus();
+      const fake = fakeObs({ program: from });
+      const engine = new CueEngine(bus, fake.obs);
+      engine.attach();
+      const scenes = sceneLog(bus);
+      c.press(bus);
+      await settle();
+      assert.deepEqual(scenes, [], `${c.name} over ${from}: no cut`);
+      assert.deepEqual(fake.calls, [], `${c.name} over ${from}: OBS is left alone`);
+      engine.detach();
+    }
+  }
+});
+
+test('the closing awards after Fill the gap reach the stream', async t => {
+  // The finding's own sequence, end to end: the last final, a poll three
+  // minutes on, Show the award, Reveal.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const bus = new EventBus();
+  const fake = fakeObs({ program: 'CG_SCORE' });
+  const engine = new CueEngine(bus, fake.obs);
+  engine.attach();
+  engine.setAutopilot('gap-filler', true);
+  const scenes = sceneLog(bus);
+  bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+  t.mock.timers.tick(4 * 60_000);
+  bus.emit({ type: 'rankings.updated', source: 'cheesy' });
+  await settle();
+  assert.deepEqual(scenes, ['CG_ARCADE'], 'the gap is filled');
+
+  bus.emit({ type: 'award.show', source: 'manual', payload: { id: 'ei', title: 'Engineering Inspiration' } });
+  await settle();
+  bus.emit({ type: 'award.presented', source: 'manual',
+    payload: { id: 'ei', award: 'Engineering Inspiration', winner: 'Team 254', team: 254 } });
+  await settle();
+  assert.deepEqual(scenes, ['CG_ARCADE', 'CG_MATCH'], 'back to the overlay for the plate, once');
+  assert.equal(bus.state.screen, 'award');
+  engine.detach();
+});
+
+test('the board the field puts up by itself brings the stream back once, when armed', async () => {
+  /*
+   * The field's own switch to the selection board is automatic, so it is a
+   * cue-sourced screen change, which no cue ever sees. Three minutes after
+   * the last qual Fill the gap has usually cut to the arcade already, and
+   * the board went up where the stream could not show it.
+   */
+  const pick = { alliances: [], ranked: [], showTimer: true, timeRemainingSec: 60 };
+  const run = async (armed: boolean) => {
+    const bus = new EventBus();
+    const fake = fakeObs({ program: 'CG_ARCADE' });
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    if (armed) engine.setAutopilot('plate-back', true);
+    const scenes = sceneLog(bus);
+    bus.emit({ type: 'screen.change', source: 'cue', payload: { screen: 'selection' } });
+    assert.equal(bus.state.screen, 'selection');
+    assert.equal(bus.state.screenHold, false, 'automatic, so nothing is held');
+    // An unrelated press first: it must not carry the automatic cut past a
+    // disarmed cue, and must not swallow the edge either.
+    bus.emit({ type: 'lower_third.hide', source: 'manual' });
+    await settle();
+    assert.deepEqual(scenes, []);
+    // The board republishes on every pick and once a second on its clock.
+    for (let i = 0; i < 3; i++) {
+      bus.emit({ type: 'alliance_selection.update', source: 'cheesy', payload: pick });
+      await settle();
+    }
+    engine.detach();
+    return { scenes, engine };
+  };
+  const on = await run(true);
+  assert.deepEqual(on.scenes, ['CG_MATCH'], 'cut back once, never once per pick');
+  const off = await run(false);
+  assert.deepEqual(off.scenes, [], 'automation waits for the cue to be armed');
+  assert.equal(off.engine.status.find(c => c.id === 'plate-back')!.wouldHaveFired, 1,
+    'and says it would have been right, once');
+});
+
+test('Fill the gap never cuts to the arcade over the selection board', t => {
+  // The arena starting alliance selection puts the board up by itself,
+  // unheld, in exactly the gap after the last qual.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const bus = new EventBus();
+  const engine = new CueEngine(bus, null);
+  engine.attach();
+  engine.setAutopilot('gap-filler', true);
+  const scenes = sceneLog(bus);
+  bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+  t.mock.timers.tick(90_000);
+  bus.emit({ type: 'screen.change', source: 'cue', payload: { screen: 'selection' } });
+  t.mock.timers.tick(3 * 60_000);
+  bus.emit({ type: 'alliance_selection.update', source: 'cheesy',
+    payload: { alliances: [], ranked: [], showTimer: false, timeRemainingSec: 0 } });
+  bus.emit({ type: 'rankings.updated', source: 'cheesy' });
+  assert.equal(bus.state.screen, 'selection');
+  assert.deepEqual(scenes, [], 'the board is the content of this gap');
+  engine.detach();
+});
+
+test('the board after Fill the gap reaches the stream with only Fill the gap armed', async t => {
+  /*
+   * Plates on the stream ships disarmed, and nothing before Sunday's
+   * selection can earn it a count to be trusted on. Fill the gap cut to the
+   * arcade four minutes after the last qual, the field put the board up,
+   * and the stream stayed on the arcade for the whole of selection. Taking
+   * back automation's own cut does not wait to be armed.
+   */
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const pick = { alliances: [], ranked: [], showTimer: true, timeRemainingSec: 60 };
+  const board = async (bus: EventBus): Promise<void> => {
+    // The arena starting alliance selection, as the field bridge sends it.
+    bus.emit({ type: 'screen.change', source: 'cue', payload: { screen: 'selection' } });
+    for (let i = 0; i < 5; i++) {
+      bus.emit({ type: 'alliance_selection.update', source: 'cheesy', payload: pick });
+      await settle();
+    }
+  };
+  // The event that crosses the three-minute mark is whatever comes next: the
+  // arena's rankings poll, or one stamped 'manual' or 'replay' that no person
+  // pressed as a gap filler (the house audio poll's track change, the publish
+  // queue finishing the last match's clip). The cut is automation's either way.
+  type Crossing = Parameters<EventBus['emit']>[0];
+  const rankings: Crossing = { type: 'rankings.updated', source: 'cheesy' };
+  const gap = async (bus: EventBus, crossing: Crossing = rankings): Promise<void> => {
+    bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+    t.mock.timers.tick(4 * 60_000);
+    bus.emit(crossing);
+    await settle();
+  };
+
+  const rows: Array<{ plateArmed: boolean; crossing: Crossing }> = [
+    { plateArmed: false, crossing: rankings },
+    { plateArmed: true, crossing: rankings },
+    { plateArmed: false, crossing: { type: 'audio.updated', source: 'manual', payload: null } },
+    { plateArmed: false, crossing: { type: 'replay.clip_ready', source: 'replay', payload: null } },
+  ];
+  for (const { plateArmed, crossing } of rows) {
+    const bus = new EventBus();
+    const fake = fakeObs({ program: 'CG_SCORE' });
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    engine.setAutopilot('gap-filler', true);
+    if (plateArmed) engine.setAutopilot('plate-back', true);
+    const scenes = sceneLog(bus);
+    await gap(bus, crossing);
+    const how = `${plateArmed ? 'armed' : 'disarmed'}, crossed by ${crossing.type}`;
+    assert.deepEqual(scenes, ['CG_ARCADE'], `the gap is filled (${how})`);
+    await board(bus);
+    assert.deepEqual(scenes, ['CG_ARCADE', 'CG_MATCH'], `plate cue ${how}: back once, never once per pick`);
+    assert.deepEqual(fake.calls, [['setScene', 'CG_ARCADE'], ['setScene', 'CG_MATCH']], `plate cue ${how}`);
+    assert.equal(engine.status.find(c => c.id === 'plate-back')!.wouldHaveFired, 0, `plate cue ${how}`);
+    engine.detach();
+  }
+
+  // An arcade cut a person made (Run now on Fill the gap) is theirs: the
+  // board waits for the producer as before.
+  {
+    const bus = new EventBus();
+    const fake = fakeObs({ program: 'CG_SCORE' });
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    const scenes = sceneLog(bus);
+    bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+    await engine.fire('gap-filler');
+    await board(bus);
+    assert.deepEqual(scenes, ['CG_ARCADE'], 'a Run now is not undone');
+    assert.equal(engine.status.find(c => c.id === 'plate-back')!.wouldHaveFired, 1);
+    engine.detach();
+  }
+
+  // Nor does a cut from an earlier gap carry over to a later one.
+  {
+    const bus = new EventBus();
+    const fake = fakeObs({ program: 'CG_SCORE' });
+    const engine = new CueEngine(bus, fake.obs);
+    engine.attach();
+    engine.setAutopilot('gap-filler', true);
+    const scenes = sceneLog(bus);
+    await gap(bus);
+    loadMatch(bus);
+    bus.emit({ type: 'match.score_posted', source: 'cheesy' });
+    t.mock.timers.tick(60_000);
+    await board(bus);
+    assert.deepEqual(scenes, ['CG_ARCADE'], 'this gap\'s board is not the earlier gap\'s cut');
+    engine.detach();
+  }
+});
+
+test('a sponsor card under a held screen moves no camera', async () => {
+  // The card does not take a held screen (it is an automatic change), so it
+  // is not on the program and there is nothing to bring to the stream.
+  const bus = new EventBus();
+  const fake = fakeObs({ program: 'CG_ARCADE' });
+  const engine = new CueEngine(bus, fake.obs);
+  engine.attach();
+  bus.emit({ type: 'screen.change', source: 'manual', payload: { screen: 'arcade' } });
+  await settle();
+  const scenes = sceneLog(bus);
+  bus.emit({ type: 'sponsor.show', source: 'manual', payload: { id: 'acme', name: 'Acme Robotics' } });
+  await settle();
+  assert.equal(bus.state.screen, 'arcade');
+  assert.deepEqual(scenes, []);
+  assert.deepEqual(fake.calls, []);
+  engine.detach();
+});
+
+// ---- a Take by name -------------------------------------------------------------
+
+test('a Take names its clip, never its path, and only a plain clip name plays', async () => {
+  /*
+   * Every bus event reaches every open socket, phones on the venue Wi-Fi
+   * included, and a Take carried the whole cut response: the desk laptop's
+   * own folder tree, the Windows user's name in it. The console now sends
+   * the clip's name, and the cue looks for it in rec/clips and nowhere else.
+   */
+  const { dir, clip } = await clipOnDisk();
+  const folder = dir.split(/[\\/]/).pop()!;
+  try {
+    await mkdir(join(dir, 'nested'));
+    await writeFile(join(dir, 'nested', 'deeper-190001.mp4'), 'not the store');
+    await writeFile(join(dir, 'playlist.mp3'), 'music');
+
+    const bus = new EventBus();
+    const fake = fakeObs();
+    const engine = new CueEngine(bus, fake.obs, { clipsDir: dir });
+    engine.attach();
+    const onBus: DeskEvent[] = [];
+    bus.subscribe(ev => { if (ev.type.startsWith('replay.')) onBus.push(ev); });
+
+    // The cut, as /api/clips answers the console, through the console's own builder.
+    const { takeId: _unused, ...response } = clip;
+    const payload = takeOf(response, 'take-1');
+    assert.equal('path' in payload, false, 'no path on the take');
+    assert.equal(payload['name'], 'Qualification_42-0145-190001.mp4');
+
+    const answer = nextAnswer(bus);
+    bus.emit({ type: 'replay.play', source: 'manual', payload });
+    const ev = await answer;
+    assert.equal(ev.type, 'replay.on_air');
+    assert.deepEqual(fake.calls[0], ['playMedia', REPLAY_INPUT, clip.path],
+      'OBS is handed the clip in rec/clips by its full path, on this machine only');
+    assert.ok(!JSON.stringify(onBus).includes(folder), 'and no event on the bus carries the folder');
+    engine.detach();
+
+    // Any PIN holder can emit a take, so the name is checked, not trusted.
+    for (const name of ['../media/audio/track.mp4', 'nested/deeper-190001.mp4',
+      'nested\\deeper-190001.mp4', 'C:Qualification_42-0145-190001.mp4', '.hidden.mp4',
+      'playlist.mp3', 'Qualification_42-0145-190001.mp4:stream', 'Qualification_42-0145-190001.mp4.',
+      '..', join(dir, 'Qualification_42-0145-190001.mp4')]) {
+      const b = new EventBus();
+      const f = fakeObs();
+      const e = new CueEngine(b, f.obs, { clipsDir: dir });
+      e.attach();
+      const a = nextAnswer(b);
+      b.emit({ type: 'replay.play', source: 'manual', payload: { ...payload, name } });
+      const got = await a;
+      assert.equal(got.type, 'replay.failed', name);
+      assert.match((got.payload as { error: string }).error, /rec\/clips/, name);
+      assert.deepEqual(f.calls, [], `${name}: OBS never hears of it`);
+      e.detach();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- the arm switches across a restart ------------------------------------------
+
+test('the arm switches come back after a restart, as the crew left them', async () => {
+  /*
+   * They lived only in memory and the packaged desk has no --autopilot, so a
+   * crew that armed every cue at doors and then restarted mid-day came back
+   * with every cue silently off.
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'cg-cues-'));
+  const file = join(dir, 'data', 'cues.json');
+  try {
+    const first = new CueEngine(new EventBus(), null, { armedFile: file });
+    first.setAll(true);
+    first.setAutopilot('gap-filler', false);
+    // Quick presses race for the file; the last one is what is on disk.
+    for (const on of [true, false, true, false]) first.setAutopilot('music-up', on);
+    await first.armedSaved;
+    const saved = JSON.parse(await readFile(file, 'utf8')) as { armed: Record<string, boolean> };
+    assert.equal(saved.armed['on-deck'], true);
+    assert.equal(saved.armed['gap-filler'], false);
+    assert.equal(saved.armed['music-up'], false, 'the last press wins');
+
+    // The restart.
+    const bus = new EventBus();
+    const second = new CueEngine(bus, null, { armedFile: file });
+    second.attach();
+    const back = await second.restoreArmed();
+    assert.deepEqual(back, defaultCues().map(c => c.id)
+      .filter(id => id !== 'gap-filler' && id !== 'music-up'));
+    const scenes = sceneLog(bus);
+    loadMatch(bus);
+    assert.deepEqual(scenes, ['CG_MATCH'], 'and they act: the next load fires On deck');
+    second.detach();
+
+    // A file from an older desk, or a hand edit, cannot arm anything by accident.
+    await writeFile(file, JSON.stringify({
+      armed: { 'on-deck': 'yes', live: 1, armed: true, 'no-such-cue': true },
+    }));
+    assert.deepEqual(await new CueEngine(new EventBus(), null, { armedFile: file }).restoreArmed(),
+      ['armed']);
+
+    // A torn file is every cue off, never a failed boot.
+    await writeFile(file, '{"armed": {"on-de');
+    assert.deepEqual(await new CueEngine(new EventBus(), null, { armedFile: file }).restoreArmed(), []);
+    // No file at all is the first boot of the event.
+    assert.deepEqual(await new CueEngine(new EventBus(), null,
+      { armedFile: join(dir, 'nope', 'cues.json') }).restoreArmed(), []);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

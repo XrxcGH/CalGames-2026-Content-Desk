@@ -379,6 +379,11 @@ export interface LowerThird {
   line2: string;
   /** Unpinned graphics auto-retire after --dwell. */
   pinned: boolean;
+  /**
+   * When it went up, desk clock, stamped by the reducer. An overlay that
+   * loads later skips an unpinned third whose dwell has already run.
+   */
+  at?: number;
 }
 
 export interface RankingRow {

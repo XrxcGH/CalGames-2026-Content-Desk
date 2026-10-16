@@ -66,7 +66,10 @@ function played42(opts: { blank?: boolean } = {}) {
     Red: { ScoreSummary: { TeleopFuelPoints: 100, TeleopTowerPoints: 30, ...bonus(true) } },
     Blue: { ScoreSummary: { TeleopFuelPoints: 100, ...bonus(false) } },
   });
-  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 160 });
+  // The last of the arena's once-a-second ticks, then the buzzer, whose frame
+  // says 0: MatchTimeSec() is zero in PostMatch.
+  adapter.ingest('matchTime', { MatchState: MatchState.TeleopPeriod, MatchTimeSec: 162 });
+  adapter.ingest('matchTime', { MatchState: MatchState.PostMatch, MatchTimeSec: 0 });
   // matchEndScoreDwellSec after the buzzer the arena blanks its own screen.
   if (opts.blank !== false) adapter.ingest('audienceDisplayMode', 'blank');
   const types = () => seen.map(e => e.type);
@@ -474,6 +477,10 @@ test('rehearsal: the fake arena commits and loads at once, like a real field', a
     };
     await waitFor(() => events.some(e => e.type === 'match.score_posted'), 20_000);
     const posted = events.findIndex(e => e.type === 'match.score_posted');
+    // A full match, read as one: the buzzer's frame says 0 s, as a real
+    // arena's does, and the ticks before it say how far the match got.
+    assert.ok(events.slice(0, posted).some(e => e.type === 'match.end'), 'the buzzer is a result');
+    assert.equal(events.some(e => e.type === 'match.aborted'), false, 'not an abort');
     const post = events[posted]!;
     assert.equal(post.screen, 'score');
     assert.equal(post.match, 'Qualification 42', 'the result is the match that was played');

@@ -1,4 +1,6 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
+import fs, { type WriteStream } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -168,6 +170,58 @@ test('an event stamped behind the open file stays in it', async () => {
     assert.equal(files.length, 1, 'no yesterday-named file was opened');
     assert.deepEqual(await typesIn(join(dir, files[0]!)), ['match.loaded', 'match.start']);
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a write failure pauses the event log, and it comes back by itself", async () => {
+  // A full disk at 3pm used to switch the log off for good: the rest of the
+  // day was never written, and the next restart rebuilt from 3pm.
+  const dir = await mkdtemp(join(tmpdir(), 'cg-bus-retry-'));
+  const real = fs.createWriteStream;
+  const made: WriteStream[] = [];
+  fs.createWriteStream = ((...args: Parameters<typeof real>) => {
+    const s = real(...args);
+    made.push(s);
+    return s;
+  }) as typeof real;
+  syncBuiltinESMExports();
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const bus = new EventBus();
+    await bus.openLog(dir);
+    bus.emit({ type: 'screen.change', payload: { screen: 'match' } });
+    made.at(-1)!.emit('error', Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }));
+    assert.equal(bus.logPath, null, 'not writing');
+    assert.match(bus.logProblem ?? '', /ENOSPC/, 'and says why, for the doors check');
+
+    bus.emit({ type: 'screen.change', payload: { screen: 'score' } });
+    assert.equal(bus.logPath, null, 'not retried at once');
+
+    mock.timers.tick(EventBus.LOG_RETRY_MS);
+    bus.emit({ type: 'screen.change', payload: { screen: 'overview' } });
+    assert.ok(bus.logPath, 'a fresh file after the retry interval');
+    assert.equal(bus.logProblem, null);
+
+    // A quiet spell: nothing is emitted after the disk is freed, and the
+    // doors check asking is the retry, so its red row clears by itself.
+    const second = made.at(-1)!;
+    second.emit('error', Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }));
+    assert.match(bus.logProblem ?? '', /ENOSPC/, 'asking before the interval does not retry');
+    assert.equal(bus.logPath, null);
+    mock.timers.tick(EventBus.LOG_RETRY_MS);
+    assert.equal(bus.logProblem, null, 'asking after the interval retried');
+    assert.ok(bus.logPath, 'with no event emitted');
+    second.end();
+    made[0]!.end();
+    await bus.closeLog();
+    const files = (await readdir(dir)).filter(f => f.endsWith('.ndjson'));
+    const types = (await Promise.all(files.map(f => typesIn(join(dir, f))))).flat();
+    assert.ok(types.filter(t => t === 'screen.change').length >= 2, 'events before and after the failure are on disk');
+  } finally {
+    mock.timers.reset();
+    fs.createWriteStream = real;
+    syncBuiltinESMExports();
     await rm(dir, { recursive: true, force: true });
   }
 });

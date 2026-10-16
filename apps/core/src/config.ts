@@ -362,8 +362,14 @@ function merge(base: unknown, over: unknown): unknown {
  * of undefined, at boot, on a laptop with nobody around who reads stacks. A
  * section that is not an object cannot mean anything, so it is dropped with a
  * line naming it and the defaults stand.
+ *
+ * `dropped` collects the path of each group thrown away, for the Start here
+ * box and the doors check: a line in the log was all "obs": true ever got,
+ * and OBS stayed off with "config.json read and in use" on every screen.
  */
-function usableSections(parsed: unknown, expected: unknown = DEFAULTS, path = ''): Record<string, unknown> {
+function usableSections(
+  parsed: unknown, expected: unknown = DEFAULTS, path = '', dropped: string[] = [],
+): Record<string, unknown> {
   if (!isPlainObject(parsed)) {
     console.warn('[config] config.json is not a JSON object, so none of it could be used. ' +
       'It should start with { and end with }. Using defaults.');
@@ -378,12 +384,14 @@ function usableSections(parsed: unknown, expected: unknown = DEFAULTS, path = ''
     if (isPlainObject(want) && !isPlainObject(v)) {
       console.warn(`[config] "${where}" should be a group of settings like { ... }, but it is ` +
         `${Array.isArray(v) ? 'a list' : typeof v}. Ignoring it and using the defaults for ${where}.`);
+      // Only a name the desk itself defines goes to a screen, never the value.
+      if (Object.hasOwn(exp, k)) dropped.push(where);
       continue;
     }
     // Recurse so a nested group gets the same treatment: publish.playlists set
     // to a string used to leave String.prototype.match standing in for a
     // YouTube playlist id, which is not a crash and not a value either.
-    out[k] = isPlainObject(want) && isPlainObject(v) ? usableSections(v, want, where) : v;
+    out[k] = isPlainObject(want) && isPlainObject(v) ? usableSections(v, want, where, dropped) : v;
   }
   return out;
 }
@@ -405,17 +413,129 @@ export function jsonErrorLine(message: string, raw: string): number | null {
   if (line) return Number(line[1]);
   const pos = /at position (\d+)/.exec(message);
   const at = pos ? Number(pos[1]) : (() => {
-    const ctx = /\.\.\."(.+)"\.\.\./.exec(message)?.[1] ?? /"(.+)" is not valid JSON/.exec(message)?.[1];
-    return ctx ? raw.indexOf(ctx) : -1;
+    // The quoted context can cross a line break, and usually does: a value
+    // typed without quotes at the end of a line is followed by "\n}". With
+    // `.` here it matched nothing, so the commonest typos (an unquoted
+    // password, curly quotes) said "a typo" with no line to look at.
+    const ctx = /\.\.\."([\s\S]+?)"\.\.\./.exec(message)?.[1]
+      ?? /"([\s\S]+)" is not valid JSON/.exec(message)?.[1];
+    const start = ctx ? raw.indexOf(ctx) : -1;
+    if (start < 0) return -1;
+    // The context opens up to ten characters BEFORE the mistake, which can be
+    // the line above it. The mistake is the token V8 names, so find that.
+    const token = /^Unexpected token '([\s\S])'/.exec(message)?.[1];
+    const hit = token ? raw.indexOf(token, start) : -1;
+    return hit >= start && hit < start + ctx!.length ? hit : start;
   })();
   return at >= 0 ? raw.slice(0, at).split('\n').length : null;
 }
 
+/**
+ * What became of config.json at boot, for the screens rather than the log.
+ *
+ * A file the parser refused used to be one line in desk-log.txt, and then
+ * every code, the awards list and OBS were silently back to their defaults:
+ * the Start here box said "still on the shipped default" as if nobody had
+ * tried, and the doors check called OBS switched off. The lead had changed
+ * all of it, and nothing they would look at said the change never landed.
+ * So loadConfig keeps its verdict here, and the Start here box and the doors
+ * check read it (see configFileVital in vitals.ts for the words).
+ *
+ * Never the file's text: a line number, and the names of sections the desk
+ * itself defines. The commonest typo is in a password.
+ */
+export interface ConfigFileReport {
+  /**
+   * unread: loadConfig has not run (a test, or a tool building its own Config).
+   * missing: no config.json, so everything is the shipped default; normal on
+   * a fresh install. read: in use. unusable: the file is there and NONE of it
+   * is in use.
+   */
+  state: 'unread' | 'missing' | 'read' | 'unusable';
+  /** Why an unusable file is unusable. */
+  reason?: 'typo' | 'not-an-object' | 'unreadable';
+  /** Where the typo is, when the parser could say. */
+  line?: number | null;
+  /** Top-level sections written more than once. JSON keeps only the last. */
+  duplicates: { section: keyof Config; lines: number[] }[];
+  /**
+   * Groups of settings the file gave something other than a group ("obs":
+   * true), by path ("obs", "publish.playlists"), which the desk dropped for
+   * its defaults. Only the desk's own names; never the value written there.
+   */
+  ignored?: string[];
+}
+
+let lastConfigFile: ConfigFileReport = { state: 'unread', duplicates: [] };
+
+/** How the most recent loadConfig went. Module state because the running desk loads once. */
+export const configFileReport = (): ConfigFileReport => lastConfigFile;
+
+/**
+ * Sections written more than once at the top of the file, with the line of
+ * each.
+ *
+ * JSON.parse keeps the LAST of a repeated key and says nothing. The copied
+ * example file already has an "obs" block near the end, so pasting the
+ * handbook's "obs" line in near the top, comma and all, made a file that
+ * parsed perfectly and left OBS off: the example's later enabled: false won.
+ * Only run on text JSON.parse accepted, so this can be a plain scan. Only the
+ * desk's own section names are reported, so nothing typed into the file is
+ * ever repeated back.
+ */
+export function repeatedSections(raw: string): { section: keyof Config; lines: number[] }[] {
+  const at = new Map<string, number[]>();
+  let depth = 0;
+  let line = 1;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '\n') line++;
+    else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+    else if (c === '"') {
+      // A JSON string cannot hold a raw newline, so nothing in here moves the line.
+      let end = i + 1;
+      while (end < raw.length && raw[end] !== '"') end += raw[end] === '\\' ? 2 : 1;
+      const token = raw.slice(i, end + 1);
+      i = end;
+      if (depth !== 1) continue;
+      let k = end + 1;
+      while (k < raw.length && ' \t\r\n'.includes(raw[k]!)) k++;
+      if (raw[k] !== ':') continue;                   // a value, not a key
+      let key: unknown;
+      try { key = JSON.parse(token); } catch { continue; }
+      if (typeof key !== 'string' || !Object.hasOwn(DEFAULTS, key)) continue;
+      at.set(key, [...(at.get(key) ?? []), line]);
+    }
+  }
+  return [...at]
+    .filter(([, lines]) => lines.length > 1)
+    .map(([section, lines]) => ({ section: section as keyof Config, lines }));
+}
+
 export async function loadConfig(root: string): Promise<Config> {
   let raw = '';
+  lastConfigFile = { state: 'unread', duplicates: [] };
   try {
-    raw = await readFile(join(root, 'config.json'), 'utf8');
-    const cfg = merge(DEFAULTS, usableSections(JSON.parse(raw))) as Config;
+    // A byte-order mark is not JSON, and JSON.parse refuses the whole file
+    // over it. Notepad's "UTF-8 with BOM" and Windows PowerShell's
+    // Set-Content -Encoding UTF8 both write one, so a correct file saved
+    // either way read as "not valid JSON near line 1" and none of it applied.
+    raw = (await readFile(join(root, 'config.json'), 'utf8')).replace(/^\uFEFF/, '');
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) {
+      lastConfigFile = { state: 'unusable', reason: 'not-an-object', duplicates: [] };
+    } else {
+      const duplicates = repeatedSections(raw);
+      for (const d of duplicates) {
+        console.warn(`[config] "${d.section}" appears ${d.lines.length} times in config.json `
+          + `(lines ${d.lines.join(', ')}). Only the last one is used.`);
+      }
+      lastConfigFile = { state: 'read', duplicates };
+    }
+    const ignored: string[] = [];
+    const cfg = merge(DEFAULTS, usableSections(parsed, DEFAULTS, '', ignored)) as Config;
+    if (ignored.length && lastConfigFile.state === 'read') lastConfigFile = { ...lastConfigFile, ignored };
 
     // A typo here used to behave as 'live': uploads starting mid-match and
     // competing with the stream for the venue uplink, which is the one thing
@@ -431,13 +551,16 @@ export async function loadConfig(root: string): Promise<Config> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       // First run on a fresh machine. Say so now, or the missing publish
       // credentials get discovered at upload time.
+      lastConfigFile = { state: 'missing', duplicates: [] };
       console.log('[config] no config.json, using defaults. Copy config.example.json to configure publishing.');
     } else if (err instanceof SyntaxError) {
       const line = jsonErrorLine(err.message, raw);
+      lastConfigFile = { state: 'unusable', reason: 'typo', line, duplicates: [] };
       console.warn(`[config] config.json is not valid JSON${line ? ` near line ${line}` : ''}: `
         + 'check the quotes and commas there (text values need straight "double quotes"). '
         + 'Using defaults, so nothing in it is in effect.');
     } else {
+      lastConfigFile = { state: 'unusable', reason: 'unreadable', duplicates: [] };
       console.warn(`[config] config.json could not be read (${(err as NodeJS.ErrnoException).code ?? 'unknown error'}), using defaults.`);
     }
     return structuredClone(DEFAULTS);
@@ -553,6 +676,29 @@ export function obsPlan(
       ? `connecting to ${host} (${why})`
       : 'off, set "obs": { "enabled": true } in config.json to let the desk drive OBS',
   };
+}
+
+/**
+ * A practice session, by the launch flag that started it, or null for the
+ * real show.
+ *
+ * index.ts decides practice from these same three flags (its rehearsalTag),
+ * and practice changes what the day keeps: the log is set aside for the next
+ * boot's rebuild, no match video is queued, and the Judge Advisor's staged
+ * winners go to a practice file. None of that showed anywhere, and a
+ * double-click on a desk that is already up only reopens it, so a desk left
+ * in rehearsal on Friday night ran Saturday's show in rehearsal. The Start
+ * here box, the doors check and the launcher (through the open /api/info)
+ * read this to say so. Read from argv like index.ts's own has(), so the two
+ * can never disagree about which session this is.
+ */
+export type LaunchMode = 'demo' | 'replay' | 'rehearsal';
+
+export function launchMode(argv: readonly string[] = process.argv): LaunchMode | null {
+  if (argv.includes('--demo')) return 'demo';
+  if (argv.includes('--replay')) return 'replay';
+  if (argv.includes('--rehearsal')) return 'rehearsal';
+  return null;
 }
 
 /** Safe to log, and safe to send to a browser surface. */

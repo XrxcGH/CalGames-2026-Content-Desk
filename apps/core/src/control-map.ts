@@ -72,7 +72,7 @@ export const CONTROL_ACTIONS: ControlAction[] = [
   { id: 'match.score', group: 'Match', label: 'Post score', does: 'Reveal the final score.',
     method: 'POST', path: '/api/emit', body: { id: 'match.score' },
     emits: { type: 'match.score_posted' } },
-  { id: 'match.abort', group: 'Match', label: 'Abort', does: 'Stop the clock, hold the screen.',
+  { id: 'match.abort', group: 'Match', label: 'Abort', does: 'Stop the clock; the program goes back to this match\'s overview.',
     method: 'POST', path: '/api/emit', body: { id: 'match.abort' },
     emits: { type: 'match.aborted' } },
 

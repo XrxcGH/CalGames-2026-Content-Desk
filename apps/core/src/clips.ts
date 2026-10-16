@@ -33,6 +33,9 @@ async function sweep(files: string[]): Promise<void> {
 /** Windows' answers to "replace a file that something still has open". */
 const IN_USE = new Set(['EPERM', 'EBUSY', 'EACCES', 'EEXIST']);
 
+/** Cuts that may encode at once. See ClipStore.extract. */
+export const MAX_CUTS = 2;
+
 export interface Segment {
   file: string;
   /** Wall-clock start, epoch ms, decoded from the strftime filename. */
@@ -175,6 +178,9 @@ export class ClipStore {
    * that is taken gets the next free -2, -3 instead.
    */
   #writing = new Set<string>();
+  /** Cuts running now, and the turns of those waiting. See extract(). */
+  #cutting = 0;
+  #queued: (() => void)[] = [];
 
   constructor(tools: FfmpegTools, encoder: EncoderChoice, recRoot: string, opts: ClipStoreOptions = {}) {
     this.#tools = tools;
@@ -445,11 +451,38 @@ export class ClipStore {
     return { path: outFile, url: `/clips/${name}` };
   }
 
+  /**
+   * Cut a clip. At most MAX_CUTS run at once; the rest wait their turn, in
+   * the order they asked.
+   *
+   * Nothing bounded them before. Every cut is an ffmpeg re-encode on the
+   * desk laptop, beside the recorder's encoder for every camera and OBS's
+   * stream encoder, and any console holding the PIN can ask: the replay
+   * console's held Enter asked thirty times a second, and thirty cuts at
+   * once ran thirty-two ffmpeg processes. Two keeps the publish queue's
+   * match cut from shutting out the replay console's next clip, and no
+   * client can start more than that whatever it sends.
+   */
   async extract(req: ClipRequest): Promise<Clip> {
-    const { sourceId } = req;
-    const speed = req.speed ?? 1;
     const ranges = req.ranges.filter(r => r.toMs > r.fromMs);
     if (!ranges.length) throw new Error('At least one range is required');
+    if (this.#cutting >= MAX_CUTS) {
+      // Handed the slot directly by the cut that finishes; see below.
+      await new Promise<void>(go => this.#queued.push(go));
+    } else {
+      this.#cutting++;
+    }
+    try {
+      return await this.#extract(req, ranges);
+    } finally {
+      const next = this.#queued.shift();
+      if (next) next(); else this.#cutting--;
+    }
+  }
+
+  async #extract(req: ClipRequest, ranges: Range[]): Promise<Clip> {
+    const { sourceId } = req;
+    const speed = req.speed ?? 1;
 
     await mkdir(this.#outDir, { recursive: true });
 

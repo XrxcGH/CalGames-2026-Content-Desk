@@ -83,6 +83,56 @@ test('yesterday stays yesterday', async () => {
   }
 });
 
+test('a Sunday desk still knows Saturday\'s qual yellows, and nothing else of Saturday', async () => {
+  /*
+   * Qualifications run Saturday into Sunday morning. A desk switched on for
+   * Sunday (or restarted then) rebuilt from Sunday alone, so a team carded
+   * in Saturday's Q30 played Sunday's Q41 as clean, and a second yellow
+   * showed as a first. The cards take yesterday too; everything else is a
+   * day's own record and stays today's.
+   */
+  const dir = await logs({
+    [named(local(10, 17, 8))]: [
+      // A hand-merged line from two days back counts for nothing, whatever
+      // file it sits in.
+      line('card.issued', { team: 1678, card: 'yellow', alliance: 'blue', match: 'Practice 2' },
+        local(10, 16, 16)),
+      line('match.loaded', { displayName: 'Qualification 30' }, local(10, 17, 15)),
+      line('card.issued', { team: 253, card: 'yellow', alliance: 'red', match: 'Qualification 30' },
+        local(10, 17, 15, 2)),
+    ].join('\n'),
+    // Two days back is not opened at all.
+    [named(local(10, 16, 9))]: line('card.issued', { team: 1678, card: 'yellow', alliance: 'blue' },
+      local(10, 16, 9, 5)),
+  });
+  try {
+    const ledger = new CardLedger();
+    const cards = Object.assign(spy(), { alsoYesterday: true });
+    const day = spy();
+    const out = await rebuildFromLog(dir, [
+      { observe: ev => ledger.observe(ev), alsoYesterday: true }, cards, day,
+    ], local(10, 18, 8, 40));
+    assert.equal(ledger.forTeam(253)?.carrying, true, "Saturday's yellow is live on Sunday morning");
+    assert.equal(ledger.forTeam(1678), null, 'and Friday is not part of it');
+    assert.deepEqual(names(cards), ['Qualification 30', 'card.issued']);
+    assert.deepEqual(day.seen, [], 'the coverage, rundown and the rest stay Sunday only');
+    assert.equal(out.events, 0);
+    assert.equal(out.carried, 2);
+    assert.equal(out.files, 1, 'only yesterday and today are opened');
+
+    // Sunday's playoffs retire it by the phase rule, not by the calendar.
+    await writeFile(join(dir, named(local(10, 18, 13))),
+      line('match.loaded', { displayName: 'Match 1' }, local(10, 18, 13, 5)));
+    const later = new CardLedger();
+    await rebuildFromLog(dir, [{ observe: ev => later.observe(ev), alsoYesterday: true }],
+      local(10, 18, 14));
+    assert.equal(later.forTeam(253)?.carrying, false, 'a qual yellow is spent in the playoffs');
+    assert.equal(later.forTeam(253)?.yellows, 1, 'though the weekend total still has it');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('Saturday in a Friday-named file is still Saturday', async () => {
   // The desk ran from Friday morning straight through, the log was opened
   // once and named for the moment it opened, so all of Saturday morning sat
@@ -199,7 +249,7 @@ test('a torn last line is expected, not fatal', async () => {
 
 test('no log directory is a fresh desk, not an error', async () => {
   const out = await rebuildFromLog(join(tmpdir(), 'cg-rebuild-nope'), [spy()]);
-  assert.deepEqual(out, { files: 0, events: 0, skipped: 0, otherDay: 0 });
+  assert.deepEqual(out, { files: 0, events: 0, skipped: 0, otherDay: 0, carried: 0 });
 });
 
 test('one observer throwing does not cost the others their history', async () => {

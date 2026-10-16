@@ -7,7 +7,7 @@
  */
 
 import { connect, startTicker, clockDisplay, PHASE_LABEL, REBUILT } from '/shared/desk-client.js';
-import { wallAt as wallOn, markerWindow } from '/s/replay/timeline.js';
+import { wallAt as wallOn, markerWindow, takeOf } from '/s/replay/timeline.js';
 
 const $ = id => document.getElementById(id);
 const desk = connect('replay');
@@ -241,22 +241,27 @@ async function post(url, body) {
   return json;
 }
 
-// Cuts can overlap: Enter and the button both fire cut(), a slow-mo encode
-// takes many seconds, and an operator who re-aims the timeline and cuts again
-// has two responses in flight on separate connections. Whichever ARRIVED last
-// used to win showClip(), so the earlier cut's late response silently
-// replaced the fresh clip, the preview reverted, and T / Take then sent the
-// wrong clip to program under a status line still reading "Ready". Stamp
-// every request on the way out; only the newest one may paint, and a
-// superseded response (or its error) goes nowhere. cutMatch shares the stamp,
-// because its response races cut()'s the same way.
+// A clip and a full-match video can be in flight together, each on its own
+// connection, and a slow-mo encode or a match cut takes many seconds.
+// Whichever ARRIVED last used to win showClip(), so the earlier cut's late
+// response silently replaced the fresh clip, the preview reverted, and T /
+// Take then sent the wrong clip to program under a status line still reading
+// "Ready". Stamp every request on the way out; only the newest one may paint,
+// and a superseded response (or its error) goes nowhere.
 let cutSeq = 0;
 
 async function cut() {
+  // One at a time, like cutMatch. Every press used to start its own ffmpeg
+  // encode on the desk laptop, beside the recorder's encoders and OBS's
+  // stream: a held Enter auto-repeats at about thirty a second, and Enter
+  // pressed again while a slow-motion cut still said "Cutting..." did the
+  // same. The second cut waits for the first to answer.
+  if ($('cut').disabled) return;
   if (inClock === null) return say('Pick an in-point on the timeline first.', true);
   const fromMs = wallAt(inClock), toMs = wallAt(outClock);
   if (!fromMs) return say('No match start recorded yet: nothing to map the clock onto.', true);
 
+  $('cut').disabled = true;
   const mine = ++cutSeq;
   say('Cutting...');
   try {
@@ -269,7 +274,11 @@ async function cut() {
     if (mine !== cutSeq) return;
     showClip(clip);
     say(`Ready · ${clip.seconds.toFixed(1)}s`);
-  } catch (err) { if (mine === cutSeq) say(err.message, true); }
+  } catch (err) {
+    if (mine === cutSeq) say(err.message, true);
+  } finally {
+    $('cut').disabled = false;
+  }
 }
 
 async function cutMatch() {
@@ -358,7 +367,8 @@ function take() {
         + 'anybody talks over a replay.', true);
     }, TAKE_WAIT_MS),
   };
-  desk.emit({ type: 'replay.play', payload: { ...lastClip, takeId: id } });
+  // The clip's name, never its path: see takeOf.
+  desk.emit({ type: 'replay.play', payload: takeOf(lastClip, id) });
   say('Taking to program...');
 }
 
@@ -405,6 +415,11 @@ addEventListener('keydown', e => {
   // Buttons and links included: Enter on a focused button must activate that
   // button, not fire cut() over it (preventDefault cancels the activation).
   if (e.target.closest('button, a, input, select, textarea, video')) return;
+  // One press, one action. A key held a moment too long auto-repeats at
+  // about thirty a second, and every repeat was a press: a cut each (an
+  // ffmpeg encode each), or a Take each, restarting the clip in OBS from
+  // the top every time it landed.
+  if (e.repeat) return;
   if (e.key === 'Enter') { e.preventDefault(); cut(); }
   if (e.key.toLowerCase() === 'f') { e.preventDefault(); sendFrame(); }
   if (e.key.toLowerCase() === 't') { e.preventDefault(); take(); }

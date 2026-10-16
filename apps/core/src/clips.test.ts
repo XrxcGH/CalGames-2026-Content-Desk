@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, open, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
+import type { ChildProcess } from 'node:child_process';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { ClipStore, parseSegmentName } from './clips.ts';
+import { ClipStore, MAX_CUTS, parseSegmentName } from './clips.ts';
 import { findFfmpeg, run, type FfmpegTools } from './ffmpeg.ts';
 
 // These tests cut real video, because the failure they pin down lives in
@@ -433,6 +434,54 @@ test('a scratch file that will not delete never fails a finished cut', { skip },
     assert.ok(clip.seconds > 3, 'the cut is reported finished');
   } finally {
     fsp.rm = real;
+    syncBuiltinESMExports();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// Bounded: a turn never handed on leaves the waiting cuts hanging forever,
+// and that must fail here rather than stall the suite.
+test('no more than two cuts encode at once, and every cut asked for finishes', { skip, timeout: 120_000 }, async () => {
+  /*
+   * A held Enter on the replay console asked for a cut thirty times a
+   * second, and every request started its own ffmpeg encode on the desk
+   * laptop beside the recorder and OBS: thirty at once ran thirty-two
+   * ffmpeg processes. Watched at the spawn: ffmpeg.ts imports spawn by name
+   * from node:child_process, and replacing it on the shared module object
+   * and syncing the builtin's ESM exports updates that live binding, the
+   * same way the index tests above watch stat.
+   */
+  const { root, t0 } = await recordingTree(tools!);
+  const cp = createRequire(import.meta.url)('node:child_process') as
+    { spawn: (...args: unknown[]) => ChildProcess };
+  const real = cp.spawn;
+  let running = 0;
+  let peak = 0;
+  let encodes = 0;
+  cp.spawn = (...args: unknown[]) => {
+    const child = real(...args);
+    if (args[0] === tools!.ffmpeg) {
+      encodes++;
+      peak = Math.max(peak, ++running);
+      child.once('close', () => { running--; });
+    }
+    return child;
+  };
+  syncBuiltinESMExports();
+  try {
+    const store = new ClipStore(tools!, ENCODER, root);
+    const asked = 6;
+    const cuts = await Promise.all(Array.from({ length: asked }, (_, i) => store.extract({
+      sourceId: 'program', label: `Qualification ${i + 1}`,
+      ranges: [{ fromMs: t0 + 1000, toMs: t0 + 3000 }],
+    })));
+    assert.equal(new Set(cuts.map(c => c.path)).size, asked, 'every cut finished, in its own file');
+    for (const c of cuts) assert.ok(c.seconds > 1.5 && c.seconds < 2.5, `${c.path}: ${c.seconds}s`);
+    assert.equal(encodes, asked, 'one encode each');
+    assert.equal(peak, MAX_CUTS, `${MAX_CUTS} at a time, the rest waiting their turn`);
+    assert.equal(MAX_CUTS, 2);
+  } finally {
+    cp.spawn = real;
     syncBuiltinESMExports();
     await rm(root, { recursive: true, force: true });
   }

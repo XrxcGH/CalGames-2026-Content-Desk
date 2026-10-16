@@ -141,8 +141,26 @@ Registering as a display was the blocker on live data, and it's now in scope. Th
   score, so the bridge holds that load back and keeps the result on the desk until the arena's own
   audience screen leaves `score`, a match starts, or a minute passes. A match the scorekeeper
   loads by hand in that window waits the same way; a re-run of the match just played (the arena
-  flags it IsReplay) is loaded at once, because its result no longer stands. `playSound` is still
-  unused.
+  flags it IsReplay) is loaded at once, because its result no longer stands. The arena's display
+  moving to `allianceSelection` is also the desk's cue for the selection board: the program goes to
+  it as an automatic change (it gives way to a held screen and sets no hold), once per move into
+  the mode, and not while a playoff match is loaded. `playSound` is still unused.
+- **`matchTime`**: the desk tells an abort from a buzzer by the last running tick (the arena sends
+  one every second), because MatchTimeSec is 0 in PostMatch. The last tick is judged against the
+  field's own match length from `matchTiming` (auto + pause + transition + 4 shifts + endgame: 163 s
+  at the arena's defaults, and REBUILT's periods with a 3 s pause when the field never says), with
+  5 s of grace, so shortened periods on the arena's settings page do not turn every full match into
+  an abort. The clock and phase labels still do not adopt the field's timing, and the timing
+  mismatch vital still applies to them. A match stopped inside its first second (no tick above 0)
+  is an abort when the desk saw its start; a field that sends no times at all is still read as a
+  result. After an abort the program goes back to that match's overview by itself, with no hold. A load of the same match heard after
+  an end that was never posted waits for the field's next state: PreMatch means the scorekeeper
+  pressed Discard and the match is reloaded fresh; otherwise it was a reconnect and is dropped. In
+  a timeout, MatchTimeSec is the time since the break began, so a desk that reconnects mid-break
+  keeps the field's real end time. On a restart in the middle of a break, the restored break card
+  stays as it is until the field has sent both the break's name (`matchLoad`) and its length
+  (`matchTiming`), then it is announced once; it is never repainted as a bare "Field timeout" while
+  the reconnect burst arrives.
 
 It also means the rest of the stack is unconstrained: OBS, vMix, NodeCG, Companion, ffmpeg,
 whatever fits. The only line is the allowlist above.

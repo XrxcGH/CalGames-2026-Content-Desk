@@ -21,7 +21,10 @@ import { matchCut, type ClipStore, type Range } from './clips.ts';
 import { markersSince } from './markers.ts';
 import { streamTitle } from './publish/naming.ts';
 import type { PublishQueue } from './publish/queue.ts';
-import { redacted, publishReadiness, type Config } from './config.ts';
+import {
+  configFileReport, launchMode, redacted, publishReadiness,
+  type Config, type ConfigFileReport, type LaunchMode,
+} from './config.ts';
 import type { CheesyAdapter } from './ingest/cheesy/adapter.ts';
 import { ALLOWED_PATHS, ALLOWED_SOCKETS } from './ingest/cheesy/client.ts';
 import type { CueEngine } from './cue/engine.ts';
@@ -38,7 +41,7 @@ import type { Awards } from './awards.ts';
 import { DESK_EDITABLE_SECTIONS, type EventContent } from './content.ts';
 import type { Slides } from './slides.ts';
 import { CONTROL_ACTIONS, controlGroups } from './control-map.ts';
-import type { Vitals } from './vitals.ts';
+import { configFileVital, modeVital, type Vitals } from './vitals.ts';
 
 /** How many people the panel graphic can render and still be readable. */
 const PANEL_MAX = 6;
@@ -198,6 +201,14 @@ export interface ServerOpts {
    * one, turned a 429 into a 401 and failed a test of a control that worked.
    */
   lockoutClock?: () => number;
+  /**
+   * The practice session this desk is, or null for the show. Defaults to the
+   * launch flags, which is what the running desk wants (see launchMode); a
+   * test says instead.
+   */
+  mode?: LaunchMode | null;
+  /** How config.json loaded. Defaults to what loadConfig found; a test says instead. */
+  configFile?: () => ConfigFileReport;
 }
 
 export function startServer(opts: ServerOpts) {
@@ -207,7 +218,9 @@ export function startServer(opts: ServerOpts) {
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
           lanBase = null, content = null, seedSample = null, clearSample = null,
-          chapterSeed = null, lockoutBaseMs, lockoutClock } = opts;
+          chapterSeed = null, lockoutBaseMs, lockoutClock,
+          configFile = configFileReport } = opts;
+  const mode = opts.mode === undefined ? launchMode() : opts.mode;
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -800,6 +813,12 @@ export function startServer(opts: ServerOpts) {
 
       // ---- API ----------------------------------------------------------
       if (path === '/api/state') return json(res, 200, bus.state);
+      // Which kind of session this desk is, for the launcher: a double-click
+      // on a desk that is already up only reopens it, and one left in
+      // rehearsal on Friday night would otherwise run the show that way with
+      // nothing said. Open, because the launcher holds no PIN, and harmless:
+      // the mode is on the Start here box for anyone who opens the page.
+      if (path === '/api/info') return json(res, 200, { mode: mode ?? 'normal' });
       // The LAN-reachable base URL: what phone-facing QR codes must encode
       // (a surface's own location.host may be localhost on the desk box).
       // Open, because every QR code and every pit monitor needs it, and it
@@ -2461,7 +2480,27 @@ export function startServer(opts: ServerOpts) {
       : `<p class="addr warn">This desk has no address on a network yet. Plug it into
          the event network and reload this page; no restart is needed. Until it has
          one, no other screen can reach it.</p>`;
-    if (!local) return `<div class="start">${addr}</div>`;
+    // Practice says so to everyone who opens this page, at the top, before
+    // anything else: it decides whether today is being kept at all, and
+    // nothing else anywhere showed it. Not a secret, so not desk-only.
+    const practice = mode ? modeVital(mode) : null;
+    const modeLine = practice
+      ? `<p class="mode"><b>${esc(practice.detail)}</b> ${esc(practice.fix ?? '')}</p>` : '';
+    if (!local) return `<div class="start">${modeLine}${addr}</div>`;
+    // The commonest reason the address works here and nowhere else, said
+    // where the address is: the desk cannot see the firewall's answer, and
+    // the volunteer at a blank pit TV has no other clue to go on.
+    const reach = base
+      ? `<p class="hint">If other screens cannot open this address, it is the Windows
+          Firewall on this laptop or a Wi-Fi that keeps devices apart (handbook,
+          chapter 11).</p>` : '';
+    // Desk-only like the codes beside it, because it is about the file that
+    // holds them. A broken file is why every code below reads as a default.
+    const file = configFileVital(configFile());
+    const fileBad = !!file && (file.level === 'fail' || file.level === 'warn');
+    const fileLine = file && fileBad
+      ? `<p class="${file.level === 'fail' ? 'bad' : 'warn'}"><b>${esc(file.detail)}</b>
+          ${esc(file.fix ?? '')}</p>` : '';
     const defaults = [
       REMOTE_PIN === DEFAULT_PIN ? 'desk PIN' : '',
       JA_PIN === '1357' ? 'awards code' : '',
@@ -2469,12 +2508,17 @@ export function startServer(opts: ServerOpts) {
     ].filter(Boolean);
     return `<div class="start">
       <h2 style="margin-top:0">Start here</h2>
+      ${modeLine}
+      ${fileLine}
       ${addr}
+      ${reach}
       <p>Desk PIN: <b>${REMOTE_PIN ? esc(REMOTE_PIN) : 'none set'}</b>. Write the address
         and the PIN on the whiteboard: every screen in the building needs the
         address, and the crew running the consoles need the PIN.</p>
       ${defaults.length ? `<p class="warn">Still on the shipped default: ${defaults.join(', ')}.
-        Fine for practice. Change before doors (handbook, chapter 2).</p>` : ''}
+        ${file?.level === 'fail'
+          ? 'config.json is not in use (see above), so no code set in it can apply until it is fixed.'
+          : 'Fine for practice. Change before doors (handbook, chapter 2).'}</p>` : ''}
       <p>New to this? <a href="/s/desk#sec-sample">Fill the screens with sample data</a>,
         then open the screens below to see them working.
         Signs for the doors: <a href="/s/poster">print the QR posters</a>.</p>
@@ -2513,6 +2557,9 @@ h2{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2
 .start p{margin:6px 0}
 .start .addr b{font-family:var(--font-mono);color:var(--accent);font-size:22px}
 .start .warn{color:var(--st-warn-text,var(--st-warn))}
+.start .bad{color:var(--st-bad-text)}
+.start .mode{margin:0 0 12px;padding:12px 16px;background:var(--st-warn);color:#000;
+  clip-path:var(--chamfer);--ch:8px}
 .start .hint{color:var(--text-dim);font-size:13px}
 .start a{color:var(--accent)}
 </style></head><body>
@@ -2650,6 +2697,16 @@ ${sections}</body></html>`;
       // Surfaces may inject events. Source is forced to 'manual', so a surface
       // can never claim to be the field.
       if (msg.t === 'emit' && msg.init?.type) {
+        // An event type is text, and everything downstream (the reducer, the
+        // cue engine, the fan-out's own check for replay paths) reads it as
+        // text. A number or an object got past the truthy test above and into
+        // the log, and the first subscriber to call a string method on it
+        // threw, skipping that event's fan-out and putting a stack trace in
+        // desk-log.txt for every such frame. Refused before it is recorded.
+        if (typeof msg.init.type !== 'string') {
+          send(ws, { t: 'denied', reason: 'An event type has to be text.' });
+          return;
+        }
         // The award family is refused here BY TYPE: every award write is
         // supposed to sit behind the Judge Advisor tier on /api/awards, and
         // this socket authenticates with the desk PIN alone. Without this
@@ -2687,6 +2744,31 @@ ${sections}</body></html>`;
     ws.on('error', err => console.error(`[ws:${who}]`, err.message));
   });
 
+  /**
+   * An event as the open socket may carry it.
+   *
+   * A replay clip names its file by absolute path on this laptop
+   * (C:\Users\<name>\Downloads\...\rec\clips\...), and every clip_ready and
+   * every Take carried it to each socket, signed in or not: any phone on the
+   * venue Wi-Fi read the desk's Windows account name and folder layout off
+   * the fan-out all weekend. The cue engine needs the path, and gets it, from
+   * the bus in this process; no surface reads it off the socket, and the
+   * event log on disk keeps it for a post-mortem. Only the copy sent out
+   * loses it.
+   */
+  function onTheWire(ev: DeskEvent): DeskEvent {
+    const p = ev.payload as unknown;
+    // The socket refuses a type that is not text, but an emitter in this
+    // process is not checked, and a throw here skips the fan-out of that
+    // event to every screen.
+    const type: unknown = ev.type;
+    if (typeof type !== 'string' || !type.startsWith('replay.')) return ev;
+    if (!p || typeof p !== 'object' || Array.isArray(p) || !Object.hasOwn(p, 'path')) return ev;
+    const payload: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(p)) if (k !== 'path') payload[k] = v;
+    return { ...ev, payload };
+  }
+
   /*
    * Fan-out, with backpressure. Two rules, both learned the expensive way in
    * other stacks:
@@ -2707,7 +2789,7 @@ ${sections}</body></html>`;
   const SOFT_BUFFER = 1 * 1024 * 1024;
   const HARD_BUFFER = 16 * 1024 * 1024;
   const unsubscribe = bus.subscribe((ev, state) => {
-    const frame = JSON.stringify({ t: 'event', ev, state });
+    const frame = JSON.stringify({ t: 'event', ev: onTheWire(ev), state });
     for (const ws of wss.clients) {
       if (ws.readyState !== ws.OPEN) continue;
       if (ws.bufferedAmount > HARD_BUFFER) { ws.terminate(); continue; }
@@ -2752,20 +2834,17 @@ ${sections}</body></html>`;
       console.warn('[auth] REMOTE_PIN is empty: the gate is OFF, and anyone who can reach ' +
         'this desk can run the show.');
       console.warn('[auth] Only run this way on a machine nobody else can reach.');
-    } else if (REMOTE_PIN === DEFAULT_PIN) {
-      console.log('[auth] control surfaces are PIN-gated; audience surfaces are open');
-      console.warn(`[auth] Using the shipped default PIN (${DEFAULT_PIN}). Anyone with a copy ` +
-        'of this code knows it. Set REMOTE_PIN for the event.');
     } else {
-      console.log('[auth] control surfaces are PIN-gated; audience surfaces are open');
-    }
-    if (JA_PIN === '1357') {
-      console.warn('[auth] The awards code is the shipped default (1357). Anyone with a copy ' +
-        'of this code knows it. Set awards.pin in config.json for the event.');
-    }
-    if (SETUP_PIN === '4567') {
-      console.warn('[auth] The settings code is the shipped default (4567). Anyone with a copy ' +
-        'of this code knows it. Set setup.pin in config.json for the event.');
+      // The same words whatever the codes are. This output is desk-log.txt
+      // (the launcher relays every line into it), the file a radio call asks
+      // for and a crew chat gets pasted, and "the shipped default (1357)"
+      // there handed whoever read it the awards code, which opens the staged
+      // winners before the reveal, and the desk PIN with it. The Start here
+      // box on this laptop and the PIN-gated doors check say which codes are
+      // still the default; nothing in a log may.
+      console.log('[auth] control surfaces are PIN-gated; audience surfaces are open. Whether '
+        + 'any code is still a shipped default is on the Start here box on this laptop and in '
+        + 'the doors check.');
     }
   });
 

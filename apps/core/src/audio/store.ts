@@ -226,7 +226,48 @@ export class HouseAudio {
   }
 
   #publish(): void {
-    this.#bus.emit({ type: 'audio.updated', source: 'manual', payload: this.snapshot });
+    const snap = this.snapshot;
+    this.#lastPoll = HouseAudio.#pollKey(snap);
+    this.#bus.emit({ type: 'audio.updated', source: 'manual', payload: snap });
+  }
+
+  /**
+   * What the last publish said, judged the way a poll would, so a poll that
+   * learns nothing publishes nothing.
+   *
+   * The five-second poll used to publish every time: the whole snapshot,
+   * walk-up library and playlist list included, logged and sent to every
+   * socket, about 64 MB of event log over a ten-hour day, which a restart
+   * then had to read back before the desk answered.
+   */
+  #lastPoll = '';
+  #lastNow: NowPlaying | null = null;
+
+  /** The snapshot with the parts that move on their own taken out. */
+  static #pollKey(snap: HouseAudioSnapshot): string {
+    const now = snap.music.now;
+    return JSON.stringify({
+      ...snap, updatedAt: 0,
+      music: { ...snap.music, now: now ? { ...now, progressMs: 0, sampledAt: 0 } : null },
+    });
+  }
+
+  /**
+   * A poll's publish: only when something on a screen would change. The
+   * progress bar runs on its own between polls from progressMs and
+   * sampledAt, so a track playing on is not news; a seek, a new track, a
+   * pause or anything else is.
+   */
+  #publishIfChanged(): void {
+    const snap = this.snapshot;
+    const now = snap.music.now;
+    const was = this.#lastNow;
+    this.#lastNow = now;
+    const drift = now && was && snap.music.playing
+      ? Math.abs(now.progressMs - (was.progressMs + (now.sampledAt - was.sampledAt)))
+      : 0;
+    if (HouseAudio.#pollKey(snap) === this.#lastPoll && drift < 3_000) return;
+    this.#publish();
   }
 
   // ---- the music service, always best effort ----------------------------
@@ -287,7 +328,7 @@ export class HouseAudio {
       // coming back, slow enough not to be the reason it stays down.
       this.#quietUntil = Date.now() + Math.min(60_000, 5_000 * 2 ** this.#failures);
     }
-    this.#publish();
+    this.#publishIfChanged();
   }
 
   /**
