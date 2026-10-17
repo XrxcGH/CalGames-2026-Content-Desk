@@ -12,6 +12,24 @@
  *    without anyone noticing, and never show an error state on the broadcast.
  */
 
+/*
+ * Every face and weight fonts.css declares, asked for as the page loads.
+ * The faces are font-display: block (a fallback face would overflow the
+ * condensed layouts), so text stays INVISIBLE until its file arrives, and a
+ * browser only fetches a weight the first time something uses it. The
+ * explainer's bold word appeared after the page had settled and showed as a
+ * blank gap in the middle of its sentence until Saira Condensed 700 loaded.
+ * Asking for all of them up front means a weight is already there when a
+ * screen first needs it.
+ */
+if (typeof document !== 'undefined' && document.fonts?.load) {
+  for (const face of ['600 1em "Saira Condensed"', '700 1em "Saira Condensed"',
+    '700 1em Chivo', '900 1em Chivo', '800 1em Archivo', '400 1em "JetBrains Mono"',
+    '600 1em "JetBrains Mono"']) {
+    document.fonts.load(face).catch(() => { /* the face stays blocked, as before */ });
+  }
+}
+
 export const REBUILT = {
   AUTO_START: -20, TELEOP_START: 0, TRANSITION_END: 10,
   SHIFT_SECONDS: 25, SHIFT_COUNT: 4, ENDGAME_START: 110, MATCH_END: 140,

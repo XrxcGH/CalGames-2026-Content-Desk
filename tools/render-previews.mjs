@@ -123,6 +123,14 @@ const upcoming = emit => emit({
  * over a camera plate; a shot that ever does should ask for ?key=alpha. See
  * applyDisplayMode.
  */
+// Phone pages render 500 px wide, not 430. Headless Chrome will not lay a
+// window out narrower than about 500 px, so a 430 px capture showed a page
+// laid out at 500 with its right edge cut off: the Follow button, the last
+// team in a row and the footer all looked clipped on a phone when they were
+// not. 500 is still a phone width, and what the image shows is what the
+// layout did.
+const PHONE_W = 500;
+
 const SHOTS = [
   // ---- program overlay, one per screen ----
   {
@@ -279,7 +287,7 @@ const SHOTS = [
   {
     name: 'phone-gp-shoutout',
     url: '/s/gp',
-    width: 430, height: 932,
+    width: PHONE_W, height: 932,
     note: 'The Gracious Professionalism shout-out form. Everything submitted ' +
       'goes through a human moderator at the desk before any screen sees it.',
     setup: async () => {
@@ -393,9 +401,9 @@ const SHOTS = [
   },
 
   // ---- audience phone pages ----
-  { name: 'phone-when-do-we-play', url: '/s/next', width: 430, height: 932,
+  { name: 'phone-when-do-we-play', url: '/s/next', width: PHONE_W, height: 932,
     note: 'The phone page: per-team schedule with honest start estimates.' },
-  { name: 'phone-trivia-play', url: '/s/quiz', width: 430, height: 932,
+  { name: 'phone-trivia-play', url: '/s/quiz', width: PHONE_W, height: 932,
     note: 'What the crowd plays trivia on.' },
 
   // ---- operator consoles ----
@@ -421,7 +429,7 @@ const SHOTS = [
     note: 'Robot cutout uploads for the alliance overview.' },
   { name: 'console-post-match-cards', url: '/s/cards', auth: true, height: 1400,
     note: '1080x1080 result graphics, built when a score posts.' },
-  { name: 'phone-remote', url: '/s/remote', auth: true, width: 430, height: 1400,
+  { name: 'phone-remote', url: '/s/remote', auth: true, width: PHONE_W, height: 1400,
     note: 'Run the show from a phone: screens, cameras, music, cues.' },
   { name: 'index', url: '/', note: 'The page every screen is picked from.' },
   { name: 'watch-chooser', url: '/s/watch', height: 1200,

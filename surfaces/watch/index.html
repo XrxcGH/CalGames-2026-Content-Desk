@@ -97,6 +97,10 @@ body { background: transparent; }
   background-size: var(--tex-perf-size), cover, cover, cover;
   padding: 40px 32px 60px; box-sizing: border-box; }
 .menu-in { max-width: 900px; margin: 0 auto; }
+/* The chooser is usually opened on the very TV it sets up, and read from a
+   couple of metres away: on a TV-sized screen the whole thing scales up a
+   quarter, which still fits a 1080-line screen top to bottom. */
+@media (min-width: 1700px) { .menu-in { zoom: 1.25; } }
 h1 { margin: 0 0 6px; font-family: var(--font-cond); font-weight: 700; font-size: 34px;
   letter-spacing: .18em; text-indent: .18em; text-transform: uppercase; color: var(--cg-gold); }
 .lead { color: var(--cg-white-dim); font-size: 16px; line-height: 1.6; margin: 0 0 26px;
