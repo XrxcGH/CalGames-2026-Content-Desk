@@ -9,7 +9,10 @@
 <link rel="stylesheet" href="/shared/broadcast.css">
 <style>
 /* Strokes only, over whatever the switcher has underneath. Never renders the
-   frozen frame itself. That's the replay feed's job, not ours. */
+   frozen frame itself. That's the replay feed's job, not ours. Opened alone
+   in a browser it is ink on black, for a luma key (see applyDisplayMode);
+   with ?key=fill it draws the backdrop, and the standby lines say what this
+   layer is for until somebody draws. */
 #ink { position: absolute; inset: 0; z-index: 50; }
 
 #chip {
@@ -23,13 +26,26 @@
 <div id="stageWrap"><div id="stage">
   <canvas id="ink" width="1920" height="1080"></canvas>
   <span class="chip chip--accent" id="chip">Analysis</span>
+  <!-- Only in fill, a screen that is the whole picture: under OBS or a keyer this layer
+       must carry nothing but ink. Under the ink, so a stroke reads over it. -->
+  <div class="standby" id="idle" hidden>
+    <div class="sb-title">Telestrator</div>
+    <div class="sb-tick"></div>
+    <div class="sb-line">The analyst&rsquo;s drawings appear here, on top of the replay,
+      when somebody draws on the telestrator pad. Nothing is drawn right now.</div>
+  </div>
 </div></div>
 
 <script type="module">
 import { connect, applyDisplayMode, fitStage, startTicker } from '/shared/desk-client.js';
 import { StrokeBook, render } from '/shared/telestrator.js';
 
-applyDisplayMode();
+// Alone in a browser it is ink on black (luma), never a white page: a
+// switcher's luma key cuts the black out, as it does for the program. In
+// OBS or framed it stays the transparent layer it always was, and ?key=fill
+// gives it the backdrop and the words below. See applyDisplayMode.
+applyDisplayMode({ alone: 'luma' });
+const FILL = document.documentElement.dataset.key === 'fill';
 const $ = id => document.getElementById(id);
 const desk = connect('tele');
 
@@ -65,6 +81,10 @@ desk.on('telestrator.clear', () => book.clear());
 startTicker(() => {
   const hidden = desk.state?.telestrator?.hidden ?? false;
   book.prune(fadeMs());
+
+  // Says what this is for whenever there is no ink on it, in fill only.
+  const quiet = !FILL || (!hidden && !book.empty);
+  if ($('idle').hidden !== quiet) $('idle').hidden = quiet;
 
   if (hidden) { ctx.clearRect(0, 0, 1920, 1080); $('chip').removeAttribute('data-on'); return; }
   render(ctx, book, { fadeMs: fadeMs() });

@@ -73,11 +73,26 @@ function Copy-Into([string]$src, [string]$dstRoot, [string]$relative) {
 # ---- stage the payload ----------------------------------------------------
 
 Step 'Staging the desk'
-New-Item -ItemType Directory -Path $Stage -Force | Out-Null
 
 Push-Location $RepoRoot
-try { $tracked = & git ls-files } finally { Pop-Location }
+try {
+    $tracked = & git ls-files
+    # Files the desk needs that git does not know about yet. The payload is
+    # what git tracks, so a new module left out of git builds an exe that
+    # stops at start with ERR_MODULE_NOT_FOUND, on the AV table, with nobody
+    # who can fix it. Refused here, by name, rather than found there. Tests
+    # are not shipped code, so a new *.test.ts alone does not stop a build.
+    $untracked = @(& git ls-files --others --exclude-standard -- apps surfaces packages QUICK-START.md QUICK-START.pdf |
+        Where-Object { $_ -notmatch '\.test\.ts$' })
+} finally { Pop-Location }
 if (-not $tracked -or $tracked.Count -eq 0) { throw "git ls-files returned nothing. Run this from inside the repo." }
+if ($untracked.Count -gt 0) {
+    $list = $untracked -join "`n  "
+    throw "These files are not in git, so the exe would be built without them and the desk would not start:`n  $list`nRun git add -N on each one (or git add them), then build again."
+}
+# Made only once the checks above have passed, so a refused build leaves
+# nothing behind in TEMP.
+New-Item -ItemType Directory -Path $Stage -Force | Out-Null
 
 # Tracked, but never shipped. harness.mjs is a Cheesy Arena WRITER: it opens
 # /match_play/websocket and the scoring panels and sends toggleBypass,
@@ -151,25 +166,51 @@ foreach ($name in $thirdParty.Keys) {
 }
 
 # A first-run note the volunteer sees if they open the folder before the desk.
+# It sends them to the one-page QUICK-START first: the 43-page handbook was the
+# only help on a test night when a screen stuck on white, and the volunteers
+# gave up rather than troubleshoot through it. So it promises nothing to read
+# beyond that page, and nothing to edit: the desk finds the field and the
+# switcher itself, and the codes change on a page. No dollar signs in it: this
+# is a double-quoted here-string, which would expand them.
 $readme = @"
 CalGames 2026 Content Desk
 ==========================
+
+START WITH QUICK-START.pdf IN THIS FOLDER. It is one page: the five things
+only a person can do, and where the desk itself explains anything that looks
+wrong. (QUICK-START.md is the same text.)
 
 Double-click START-DESK.cmd to run the desk for real.
 Double-click START-PRACTICE.cmd to try it with a pretend match instead.
 
 Nothing appears for up to a minute the first time. Then your web browser
-opens by itself on the desk's front page. The "Start here" box at the top
+opens by itself on the desk's front page. It says what this computer is for,
+what the desk found (the field, the video switcher, the screens), and what to
+do if something is not working. The "Start here" box under the big buttons
 shows this desk's address on the network and the PIN: write both on the
-whiteboard. Type that address into any pit monitor, laptop or phone on the
-same network to see the screens.
+whiteboard.
+
+The desk finds the field and the video switcher by itself once this laptop
+is on the field network, and keeps looking until it does. Nothing needs
+editing and nothing needs restarting.
+
+The video switcher: on the computer that feeds its overlay input (the one
+that showed Cheesy Arena's score overlay), open that address with s/program
+on the end and press F11. A projector or TV: on the computer whose HDMI
+cable goes to it, open the address with s/watch on the end, click the card
+for that display (Program for the projector), and press F11. OBS is not
+needed.
+
+Before doors, change the desk PIN, the settings code and the awards code:
+"Change the codes" in the Start here box opens the page that does it.
 
 There is no other window, on purpose. If something goes wrong, a red error
 box says what. Lost the browser tab, or something looks stuck? Double-click
 again: if the desk is running it just reopens it, and it never stops a show.
-To start it fresh instead (for example once the field is on the network, so it
-looks for the field again), stop it first: Task Manager (Ctrl+Shift+Esc), find
-"CalGames 2026 Content Desk", End task, then double-click again.
+To start it fresh instead (for example to run a newer copy of the exe), stop
+it first:
+Task Manager (Ctrl+Shift+Esc), find "CalGames 2026 Content Desk", End task,
+then double-click again.
 
 To check every screen before there is a show, press "Fill the screens with
 sample data" in the Start here box. You do not need to restart anything
@@ -177,13 +218,12 @@ afterwards: the sample clears itself from every screen when the first real
 match loads. To clear it sooner, press "Clear sample data" in the Sample
 data section of the desk console.
 
-Do not delete config.json or data/trivia.json: those are yours, and the
-launcher leaves them alone when it updates everything else.
+Do not delete config.json, desk-pin.txt or the data folder: those are
+yours (the codes and connections changed on the settings page are kept
+there), and the launcher leaves them alone when it updates everything else.
 
-New to this? Open RUN-THE-DESK.pdf in this folder. It is the whole job,
-written for somebody who has never used any of it: starting the desk,
-setting up OBS, the side screens, running the show, and what to do when
-something breaks.
+RUN-THE-DESK.pdf in this folder is the full handbook, for reference only:
+nobody needs to read it to run the show.
 
 The rest of the documentation is in the docs folder.
 "@

@@ -22,10 +22,12 @@ import { markersSince } from './markers.ts';
 import { streamTitle } from './publish/naming.ts';
 import type { PublishQueue } from './publish/queue.ts';
 import {
-  configFileReport, launchMode, redacted, publishReadiness,
+  DEFAULTS, configFileReport, launchMode, redacted, publishReadiness,
   type Config, type ConfigFileReport, type LaunchMode,
 } from './config.ts';
 import type { CheesyAdapter } from './ingest/cheesy/adapter.ts';
+import { ScreenRegistry, isProgramPage, plainAddr } from './screens.ts';
+import { DEFAULT_CODES, Settings, SettingsError, type CodeName, type ConnectionsPatch } from './settings.ts';
 import { ALLOWED_PATHS, ALLOWED_SOCKETS } from './ingest/cheesy/client.ts';
 import type { CueEngine } from './cue/engine.ts';
 import type { ObsClient } from './cue/obs.ts';
@@ -41,7 +43,11 @@ import type { Awards } from './awards.ts';
 import { DESK_EDITABLE_SECTIONS, type EventContent } from './content.ts';
 import type { Slides } from './slides.ts';
 import { CONTROL_ACTIONS, controlGroups } from './control-map.ts';
-import { configFileVital, modeVital, type Vitals } from './vitals.ts';
+import {
+  configFileVital, forAnotherComputer, modeVital, screensVital, switcherVital, whereIs,
+  type AtemView, type FieldView, type Vitals,
+} from './vitals.ts';
+import { matchUnderway } from './publish/queue.ts';
 
 /** How many people the panel graphic can render and still be readable. */
 const PANEL_MAX = 6;
@@ -72,51 +78,197 @@ const MIME: Record<string, string> = {
   '.aac': 'audio/aac', '.opus': 'audio/ogg',
 };
 
-/** Surfaces, grouped the way an operator thinks about them. */
+/**
+ * Every screen the desk serves, for the full list at the bottom of the front
+ * page and the startup log.
+ *
+ * The notes are read by a volunteer who has never seen any of this, so they
+ * say what each page is FOR in plain words. They used to say "OBS Browser
+ * Source" on the first row of the page, which is jargon to anyone and wrong
+ * for an event with no OBS: the AV coordinator opened that row in a browser,
+ * got a transparent page, which a browser paints white, and gave up. OBS
+ * wording now lives only in the front page's "If you use OBS" note.
+ */
 export const SURFACES = [
-  { id: 'program', group: 'On air', name: 'Program overlay', note: 'The broadcast graphic. One OBS Browser Source, 1920x1080. Holds every screen: alliance overview, live match, final score, alliance selection board, the how-to-watch explainer loop, analysis strap and arcade bumper. They switch on their own, or take one by hand from the desk.' },
-  { id: 'tele',    group: 'On air', name: 'Telestrator render', note: 'The analyst\'s drawings, transparent. Layer it over the replay in OBS.' },
+  { id: 'program', group: 'On air', name: 'Program overlay', note: 'The broadcast graphic, 1920x1080: every match screen, the final score, alliance selection, awards and slides, switching on their own or taken by hand from the desk. In a plain browser it draws on black, for a video switcher to key.' },
+  { id: 'tele',    group: 'On air', name: 'Telestrator render', note: "The analyst's drawings, to lay over the replay." },
   { id: 'arcade',  group: 'On air', name: 'Arcade overlay',  note: 'Game sets and standings for the gaps between matches.' },
-  { id: 'trivia',  group: 'On air', name: 'Trivia overlay',  note: 'Crowd trivia: question, countdown, answers, leaderboard.' },
-  { id: 'side',    group: 'On air', name: 'Side screen',     note: 'For the venue TVs: who plays next, current rankings. Rotates on its own.' },
+  { id: 'trivia',  group: 'On air', name: 'Trivia overlay',  note: 'Crowd trivia: question, countdown, answers, leaderboard. Draws its own background.' },
+  { id: 'side',    group: 'On air', name: 'Side screen',     note: 'Who plays next and the rankings, rotating on its own. Draws its own background.' },
   { id: 'desk',    group: 'Run the show', name: 'Desk console', note: 'The main control panel. Runs everything, keyboard-first, even with no field connection.' },
-  { id: 'talent',  group: 'Run the show', name: 'Talent view', note: 'The announcer\'s tablet: teams, ranks, live RP progress in words, local pronunciation notes.' },
+  { id: 'talent',  group: 'Run the show', name: 'Talent view', note: "The announcer's tablet: teams, ranks, live ranking-point progress in words, and how to say each name." },
   { id: 'replay',  group: 'Run the show', name: 'Replay console', note: 'Cut replays off the match timeline. Interesting moments are already marked.' },
-  { id: 'draw',    group: 'Run the show', name: 'Telestrator pad', note: 'For the analyst\'s tablet. Draw on the frame the audience is seeing.' },
+  { id: 'draw',    group: 'Run the show', name: 'Telestrator pad', note: "For the analyst's tablet. Draw on the picture the audience is seeing." },
   { id: 'arcadedesk', group: 'Run the show', name: 'Arcade console', note: 'Score the game sets by hand. 2 players versus, 3-4 free-for-all.' },
-  { id: 'triviadesk', group: 'Run the show', name: 'Trivia host', note: 'Open a question, reveal the answer, next. That\'s the whole job.' },
-  { id: 'house',   group: 'Run the show', name: 'House audio player', note: 'Open this ON THE MUSIC MACHINE, the one wired to the PA and to nothing else. It plays the walk-ups and stingers the desk fires. Never add it to OBS: it refuses to play there, because its audio belongs to the room and never to the stream.' },
-  { id: 'var',     group: 'Run the show', name: 'Head referee review', note: 'Frame-step the recording. Read-only: no cut, no air, no publish, no route to the field.' },
-  { id: 'media',   group: 'Before the event', name: 'Team media', note: 'Upload robot photos for the pre-match overview. Missing photos fall back gracefully.' },
-  { id: 'cards',   group: 'Before the event', name: 'Post-match cards', note: 'Square result graphics for social. They build themselves when a score posts.' },
-  { id: 'awards', group: 'Run the show', name: 'Judge Advisor: awards', note: 'For the JA only. Unlocks with the awards code, not the desk PIN: load each award\u2019s winner as judging wraps up, and hand the code to the desk right before the ceremony. Winners stay off every feed until the reveal.' },
-  { id: 'setup', group: 'Before the event', name: 'Event settings', note: 'For the content lead. Unlocks with the settings code, not the desk PIN: the event name, sponsors, run of show, scoring thresholds and accessibility services, edited live. Seeds from config.json; credentials never appear here.' },
-  { id: 'testcard', group: 'Before the event', name: 'Screen test card', note: 'Full-screen this on any display being installed: the LED wall, a projector, a pit TV. Crop marks, the broadcast safe areas, a stretch circle, color and gray ramps, and a live clock so a frozen signal shows itself.' },
-  { id: 'quiz',    group: 'For the audience', name: 'Trivia play', note: 'The phone page the crowd joins from. The trivia overlay shows this URL.' },
+  { id: 'triviadesk', group: 'Run the show', name: 'Trivia host', note: "Open a question, reveal the answer, next. That's the whole job." },
+  { id: 'house',   group: 'Run the show', name: 'House audio player', note: 'Open this ON THE MUSIC MACHINE, the one wired to the PA and to nothing else. It plays the walk-ups and stingers the desk fires. Never add it to OBS: it refuses to play there, because its music belongs to the room and never to the stream.' },
+  { id: 'var',     group: 'Run the show', name: 'Head referee review', note: 'Step through the recording frame by frame. It can only look: it cannot cut, put anything on screen, publish or reach the field.' },
+  { id: 'media',   group: 'Before the event', name: 'Team media', note: 'Upload robot photos for the pre-match overview. A team with no photo gets its number instead.' },
+  { id: 'cards',   group: 'Before the event', name: 'Post-match cards', note: 'Square result graphics for social media. They make themselves when a score posts.' },
+  { id: 'awards', group: 'Run the show', name: 'Judge Advisor: awards', note: "For the Judge Advisor only. Opens with the awards code, not the desk PIN: load each award's winner as judging wraps up, and hand the code to the desk right before the ceremony. Winners stay off every screen until the reveal." },
+  { id: 'setup', group: 'Before the event', name: 'Event settings', note: 'For the content lead. Opens with the settings code, not the desk PIN: the codes, the field and switcher addresses, the event name, sponsors, run of show, scoring thresholds and accessibility services, changed live. No code or password is ever shown back.' },
+  { id: 'testcard', group: 'Before the event', name: 'Screen test card', note: 'Full-screen this on any display being set up: the LED wall, a projector, a pit TV. Edges, safe areas, a circle that must look round, color and gray ramps, and a live clock so a frozen picture shows itself.' },
+  { id: 'quiz',    group: 'For the audience', name: 'Trivia play', note: 'The phone page the crowd joins from. The trivia screen shows its address.' },
   // The shout-out form was missing from this list entirely, which made it the
   // one audience page nobody could find: no row here, no QR anywhere.
   { id: 'gp',      group: 'For the audience', name: 'Send a shout-out', note: 'Anyone in the building thanks a volunteer, a team, a mentor. Every one is read at the desk before it goes near a screen. The side screens show its QR whenever a slide is up.' },
   { id: 'poster',  group: 'Before the event', name: 'QR posters', note: 'Printable signs for the doors, stands and pits: send a shout-out, play trivia, when do we play. Print from the desk machine once it is on the event network, so the codes carry the right address.' },
-  { id: 'watch',   group: 'On a pit monitor', name: 'Pick a screen', note: 'Every screen below, in one place, with the desk\'s address on this network. Hand this to whoever is setting up a monitor.' },
-  // One row per screen a pit TV can show, so the exact URL can be copied
+  { id: 'watch',   group: 'On a pit monitor', name: 'Pick a screen', note: "Every full-screen picture below, in one place, with the desk's address on this network. Open it on the computer feeding a projector or TV." },
+  // One row per screen a display can show, so the exact URL can be copied
   // rather than assembled. `path` carries the query string the index would
-  // otherwise have no way to express.
-  { id: 'watch', path: '/s/watch?screen=program', group: 'On a pit monitor', name: 'Program, with the field feed',
-    note: 'The broadcast picture: field feed with the live overlay on top. What the stream shows, without OBS.' },
+  // otherwise have no way to express. Word for word what the /s/watch chooser
+  // says (its PIT_SCREENS), which front-page.test.ts holds them to.
+  { id: 'watch', path: '/s/watch?screen=program', group: 'On a pit monitor', name: 'Program',
+    note: 'The main show picture: who is playing, the live score, the final score. It changes on its own as the field runs.' },
   { id: 'watch', path: '/s/watch?screen=side', group: 'On a pit monitor', name: 'Side screen',
-    note: 'On deck and rankings, rotating. Built to be read from across the room.' },
-  { id: 'watch', path: '/s/watch?screen=arcade', group: 'On a pit monitor', name: 'Arcade',
-    note: 'The side tournament, over the game capture.' },
+    note: 'Who is on deck and the current rankings, rotating. Built to be read from across the room.' },
+  { id: 'watch', path: '/s/watch?screen=next', group: 'On a pit monitor', name: 'When do we play?',
+    note: 'When each team plays next, with start times that follow the field running early or late. Also fine on a phone.' },
   { id: 'watch', path: '/s/watch?screen=trivia', group: 'On a pit monitor', name: 'Trivia',
     note: 'The crowd game. Shows the join code between questions.' },
-  { id: 'watch', path: '/s/watch?screen=next', group: 'On a pit monitor', name: 'When do we play?',
-    note: 'Per-team schedule with drift-adjusted start times. Also fine on a phone.' },
-  { id: 'next',    group: 'For the audience', name: 'When do we play?', note: 'Per-team schedule on any phone, with honest drift-adjusted start estimates. Side screens show its QR.' },
-  { id: 'remote',  group: 'Run the show', name: 'Phone remote', note: 'Run the show from a phone. Big targets, asks for the event PIN.' },
+  { id: 'watch', path: '/s/watch?screen=arcade', group: 'On a pit monitor', name: 'Arcade',
+    note: 'Scores from the side tournament, for a TV beside the game consoles.' },
+  { id: 'next',    group: 'For the audience', name: 'When do we play?', note: 'When each team plays next, on any phone, with start times that follow the field running early or late. Side screens show its QR.' },
+  { id: 'remote',  group: 'Run the show', name: 'Phone remote', note: 'Run the show from a phone. Big targets, asks for the desk PIN.' },
 ] as const;
 
 /** Where a surface actually lives. Most are /s/{id}; some carry a query. */
 export const surfacePath = (s: { id: string; path?: string }): string => s.path ?? `/s/${s.id}`;
+
+/** Text made safe for the front page, which prints the event's own words (a match name). */
+const escHtml = (t: string): string => t.replace(/[&<>"]/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+/**
+ * How the full list on the front page is grouped, titled and ordered.
+ *
+ * The keys are SURFACES' own group names, which surfaces/watch/index.html
+ * also names, so only the words a volunteer reads change here. The order puts
+ * the full-screen pictures first and the see-through OBS layers last: the
+ * layers were first, and a browser paints a page with no background white.
+ */
+export const SCREEN_GROUPS: readonly { group: string; title: string; intro: string }[] = [
+  { group: 'On a pit monitor', title: 'On a projector or TV',
+    intro: 'Full-screen pictures with their own background. Open one on the computer whose HDMI '
+      + 'goes to that screen, then press F11. No PIN.' },
+  { group: 'Run the show', title: 'Run the show',
+    intro: 'Control pages for the crew. Each asks for the desk PIN, except the Judge Advisor page, '
+      + 'which has its own code.' },
+  { group: 'Before the event', title: 'Before the event',
+    intro: 'Robot photos, social media cards, event settings, door signs, and a test picture for '
+      + 'each display being set up.' },
+  { group: 'For the audience', title: 'On phones in the stands',
+    intro: 'Open to anyone, no PIN. The side screens and the posters show QR codes for these.' },
+  // Not "layers" for the whole group: trivia and the side screen paint their
+  // own background in every mode, OBS included, so they are pictures to cut
+  // to. Their rows say so, and the intro points at those words rather than
+  // naming pages a later edit could move.
+  //
+  // In a plain browser these draw on black (C8): a switcher's luma key drops
+  // the black out, and a projector shows graphics on black, so the one
+  // address is safe in either place. Only OBS gets them see-through.
+  { group: 'On air', title: 'Graphics for a video switcher or OBS',
+    intro: 'Made to sit over a camera picture. In a plain browser they draw on black, which a video '
+      + "switcher's key drops out; in OBS they are see-through by themselves. The ones that say "
+      + '"Draws its own background" are full pictures to cut to. For a projector or TV, use the '
+      + 'first list instead: it puts the same pictures on a full-screen background.' },
+];
+
+/**
+ * The few big choices at the top of the front page: what a first-timer is
+ * most likely here to do, in their words rather than the desk's. Everything
+ * else is in the full list further down, folded away.
+ */
+export const FRONT_CHOICES: readonly { href: string; title: string; text: string }[] = [
+  { href: '/s/desk', title: 'This laptop runs the show',
+    text: 'The desk console: matches, screens, replays and walk-up music, all in one place. '
+      + 'Asks for the desk PIN.' },
+  // The AV kit's case: a computer's HDMI goes through a converter into the
+  // switcher, which keys it over the cameras. That computer used to show
+  // Cheesy Arena's own score overlay, and it still can: the program page
+  // keeps Cheesy's loaded behind it and hands over by itself whenever the
+  // desk stops answering (C7), so opening this costs the stream nothing.
+  { href: '/s/program', title: 'Put the graphics into the video switcher',
+    text: "On the computer that feeds the switcher's overlay input (the one that shows Cheesy Arena's "
+      + 'score overlay today), open this and press F11 for full screen. While the desk is working, its '
+      + "graphics replace Cheesy's overlay, and Cheesy's comes back by itself if the desk stops, as long as "
+      + 'that computer is on the field network. No PIN.' },
+  { href: '/s/watch', title: 'Put the show on a projector or TV',
+    text: 'Open this on the computer whose HDMI cable goes to that screen, pick what to show, '
+      + 'then press F11 for full screen. No PIN.' },
+  { href: '/s/talent', title: 'Announcer tablet',
+    text: 'Who is playing, their ranks, and how to say each name, live. Asks for the desk PIN.' },
+  { href: '/s/awards', title: 'Judge Advisor',
+    text: 'Load the award winners. Opens with the awards code, not the desk PIN, and keeps every '
+      + 'winner off the screens until the reveal.' },
+];
+
+/**
+ * "Something not working?" on the front page: what a volunteer actually runs
+ * into, as what they see and then what to do, in a line or two each.
+ *
+ * It replaces "see the handbook, chapter 11" as the only help. The handbook is
+ * a 43-page PDF, and the AV crew who met a white screen on a test night gave
+ * up trying to troubleshoot through it. Each answer here was checked against
+ * the code it describes; change the code, change the answer. Every id is an
+ * anchor (/#help-white), so another page can link straight to one.
+ *
+ * Shown to everyone on the venue Wi-Fi, so nothing here may name a code.
+ *
+ * `deskLabels` lists the desk console's own words an answer quotes, so a test
+ * can hold the two together: an answer that names a button the console no
+ * longer has sends a volunteer looking for something that is not there.
+ */
+export const FRONT_HELP: readonly {
+  id: string; see: string; fix: string; deskLabels?: readonly string[];
+}[] = [
+  { id: 'white', see: 'A white page instead of the show',
+    fix: 'That is a see-through graphic made for OBS, opened in a plain browser: the address has '
+      + '<code>?key=alpha</code> on it, which is only for OBS. Take that off, and the graphics draw on '
+      + 'black, ready for a video switcher. For a projector or TV, use '
+      + '<a href="/s/watch">Put the show on a projector or TV</a> instead.' },
+  { id: 'empty', see: 'The screen is dark, or shows only the backdrop',
+    fix: 'It is working and waiting for a match. The field has not loaded one yet (its Test Match '
+      + 'does not count): ask the scorekeeper. With no field, open the desk console, then '
+      + '<b>Field down? Run matches by hand</b>, then <b>Load a match by hand</b>. To check a screen '
+      + 'now, <a href="/s/desk#sec-sample">fill the screens with sample data</a>.',
+    deskLabels: ['Field down? Run matches by hand', 'Load a match by hand', 'id="sec-sample"'] },
+  { id: 'stuck', see: 'The screen stays on one picture and does not follow the match',
+    fix: 'Somebody picked a screen by hand, which holds it there. In the desk console, next to '
+      + '<b>Main screen</b>, press <b>Auto</b>.',
+    deskLabels: ['Main screen'] },
+  { id: 'reach', see: 'A TV, phone or other laptop cannot open the address',
+    fix: 'Type the address from the Start here box, never localhost: localhost only works on the desk '
+      + 'laptop itself. On the desk laptop, when Windows asks about Node.js, press <b>Allow access</b>. '
+      + 'If that box was missed, search Start for <b>Allow an app through Windows Firewall</b>, press '
+      + '<b>Change settings</b>, and tick <b>Node.js JavaScript Runtime</b>. Guest Wi-Fi often keeps '
+      + "devices apart: use the event's own network or a cable." },
+  // No command prompt and no flag any more: the desk looks for the field by
+  // itself while it runs (the finder), and the address, when the search
+  // cannot find it, is typed on the settings page.
+  { id: 'field', see: 'Field: searching, not connected, or not answering (the status at the top of this page)',
+    fix: 'Searching: the desk looks for the field by itself and connects as soon as the field is up; '
+      + 'nothing needs restarting. Still searching once the field is running: ask the FTA for the '
+      + "field's address and type it on <a href=\"/s/setup#connections\">Event settings</a> (the settings code "
+      + 'opens it). Not connected and not searching: end the desk in Task Manager (Ctrl+Shift+Esc, '
+      + '<b>CalGames 2026 Content Desk</b>, <b>End task</b>) and double-click the exe again; nothing is '
+      + 'lost. Not answering: check the field network cable. Meanwhile, use '
+      + '<b>Field down? Run matches by hand</b> in the desk console.',
+    deskLabels: ['Field down? Run matches by hand'] },
+  { id: 'pin', see: 'A page asks for a PIN',
+    fix: 'The desk PIN is in the Start here box on the desk laptop, and only there. The Judge Advisor '
+      + 'page takes the awards code and Event settings the settings code instead. After too many wrong '
+      + 'tries, wait a minute, then type it once, carefully. After a desk restart every console asks '
+      + 'once more: that is normal.' },
+  { id: 'stopped', see: 'Screens stop updating, a console says reconnecting, or this page will not load',
+    fix: 'The desk stopped: the laptop slept, restarted or was closed. Double-click the exe again '
+      + '(<code>START-DESK.cmd</code> in the CalGames2026-ContentDesk folder in Downloads works too); '
+      + 'it never stops a desk that is '
+      + 'still running. The day comes back by itself, and every screen reconnects on its own.' },
+  { id: 'outline', see: 'A score with an UNOFFICIAL tag over it',
+    fix: 'On purpose: that number was typed at the desk (or is sample data), not sent by the field, '
+      + 'and a guess must never look official. The tag goes when the field posts the real score.' },
+];
 
 export interface ServerOpts {
   bus: EventBus;
@@ -129,8 +281,40 @@ export interface ServerOpts {
   clips?: ClipStore | null;
   publish?: PublishQueue | null;
   config?: Config | null;
-  /** Absent unless the bridge was started with --cheesy. */
+  /**
+   * Whether the desk has a field bridge, read at the moment of asking (C3).
+   * The finder attaches one whenever it finds the field, which can be long
+   * after the server started, so nothing here may keep the adapter it saw
+   * first.
+   */
+  field?: FieldView | null;
+  /**
+   * A bridge fixed at start, for a test or tool with no FieldLink. Read only
+   * when `field` is absent, as a field link that was attached from the start.
+   */
   cheesy?: CheesyAdapter | null;
+  /** Every open page's own report of where it is showing (C2). One is made when absent. */
+  screens?: ScreenRegistry | null;
+  /**
+   * The codes and connections from the settings page (C4). Absent (a test, a
+   * tool), the server loads its own from `root`, so the codes resolve exactly
+   * as before: environment, then config.json, then the shipped defaults.
+   */
+  settings?: Settings | null;
+  /** The read-only switcher watcher, for the settings page and the front page. */
+  atem?: AtemView | null;
+  /**
+   * How the restart route ends the process, after answering. Defaults to
+   * process.exit; only a test passes its own, which cannot let the suite die.
+   */
+  exit?: (code: number) => void;
+  /**
+   * Whether something will start the desk again after it exits with 75: the
+   * launcher does (C9), and it starts the desk with --exit-with-parent, which
+   * is the default's test. A desk started by hand has nobody to bring it back,
+   * so the restart route refuses rather than switch the show off.
+   */
+  restartable?: boolean;
   cues?: CueEngine | null;
   obs?: ObsClient | null;
   arcade?: ArcadeStore | null;
@@ -209,18 +393,55 @@ export interface ServerOpts {
   mode?: LaunchMode | null;
   /** How config.json loaded. Defaults to what loadConfig found; a test says instead. */
   configFile?: () => ConfigFileReport;
+  /**
+   * How long after the start the front page's status strip still reads a
+   * missing field or OBS connection as "connecting". Nothing in the running
+   * desk passes this (see SETTLING_MS); only the test that checks the "not
+   * answering" wording, which cannot wait out the real twenty seconds.
+   */
+  statusSettleMs?: number;
 }
 
 export function startServer(opts: ServerOpts) {
   const { bus, media, root, port, host, recorder = null, clips = null,
-          publish = null, config = null, cheesy = null, cues = null, obs = null,
+          publish = null, config = null, cues = null, obs = null,
           arcade = null, trivia = null, audio = null, audioClips = null,
           profiles = null, coverage = null, vitals = null, cardLedger = null,
           rundown = null, sponsors = null, awards = null, slides = null,
           lanBase = null, content = null, seedSample = null, clearSample = null,
           chapterSeed = null, lockoutBaseMs, lockoutClock,
-          configFile = configFileReport } = opts;
+          configFile = configFileReport, statusSettleMs } = opts;
   const mode = opts.mode === undefined ? launchMode() : opts.mode;
+
+  /*
+   * The field, read at the moment of asking (C3). A desk with no FieldLink (a
+   * test, a tool) gets one that holds its fixed adapter, so every reader below
+   * goes through the same three getters and nothing keeps a stale copy.
+   */
+  const fixedCheesy = opts.cheesy ?? null;
+  const field: FieldView = opts.field
+    ?? { adapter: fixedCheesy, host: null, searching: false };
+  /** The bridge now, or null. A getter that throws reads as no bridge. */
+  const bridge = (): CheesyAdapter | null => {
+    try { return field.adapter; } catch { return null; }
+  };
+  /** Whether the field is connected now: a bridge, and it says so. */
+  const fieldUp = (): boolean => !!bridge() && !!bus.state.connected.cheesy;
+  const fieldHost = (): string | null => {
+    try { return field.host ?? null; } catch { return null; }
+  };
+  const fieldSearching = (): boolean => {
+    try { return !!field.searching; } catch { return false; }
+  };
+  const screens = opts.screens ?? new ScreenRegistry();
+  const settings = opts.settings ?? Settings.load(root, config ?? structuredClone(DEFAULTS));
+  const atem = opts.atem ?? null;
+  /** The switcher's status, or null when there is no watcher or it cannot be read. */
+  const atemStatus = () => {
+    try { return atem ? atem.status : null; } catch { return null; }
+  };
+  const exitProcess = opts.exit ?? ((code: number) => process.exit(code));
+  const restartable = opts.restartable ?? process.argv.includes('--exit-with-parent');
 
   // Crash policy lives in index.ts, in the ONE uncaughtException handler for
   // the whole process: fatal during boot, log-and-continue once the show is
@@ -423,21 +644,20 @@ export function startServer(opts: ServerOpts) {
   });
 
   /**
-   * The shipped default PIN. It is in the repo, so anyone who has read the
-   * code knows it: every event should set its own REMOTE_PIN.
-   */
-  const DEFAULT_PIN = '0864';
-
-  /**
-   * The shared event PIN.
+   * The shared event PIN, live.
    *
-   * Unset falls back to the shipped default, so a deployment that forgets
-   * the variable is gated rather than wide open. An explicit REMOTE_PIN=""
+   * Resolved by settings.ts: a change on the settings page, then REMOTE_PIN
+   * (the launcher reads desk-pin.txt and passes it there), then desk-pin.txt,
+   * then the shipped default. Unset falls back to the default, so a desk that
+   * forgets it is gated rather than wide open. An explicit REMOTE_PIN=""
    * still turns the gate off: that is the escape hatch for a laptop on a
-   * kitchen table with no network. `??` gives exactly that split, because an
-   * empty string is not nullish. Do not tidy it into ||.
+   * kitchen table with no network, and settings.ts keeps the empty string.
+   *
+   * A `let`, never a const: the settings page changes it while the show runs
+   * (POST /api/settings/code), and every check below reads this binding at
+   * the moment it checks. See applyCodes for what a change also does.
    */
-  const REMOTE_PIN = process.env['REMOTE_PIN'] ?? DEFAULT_PIN;
+  let REMOTE_PIN = settings.resolved.codes.desk;
 
   /**
    * Trivia joins per source address, for the mint-loop guard on
@@ -609,7 +829,7 @@ export function startServer(opts: ServerOpts) {
    * trade: the alternative is persisting a secret to disk on a machine that
    * gets passed between volunteers all weekend.
    */
-  const SESSION = randomUUID();
+  let SESSION = randomUUID();
   const AUTH_COOKIE = 'desk_auth';
   /** The desk cookie's browser lifetime: the whole event weekend. See /api/auth. */
   const DESK_COOKIE_MAX_AGE_S = 4 * 24 * 60 * 60;
@@ -662,11 +882,13 @@ export function startServer(opts: ServerOpts) {
    * An explicitly empty JA_PIN env var also disables it, which is what the
    * preview renderer uses.
    */
-  // String() because config.json is hand-edited and "pin": 2468 (no quotes) is
-  // the natural way to write a four-digit code. A number has no .trim(), and
-  // this line runs at boot: the desk crashed before it served a single page.
-  const JA_PIN = String(process.env['JA_PIN'] ?? config?.awards?.pin ?? '1357').trim();
-  const JA_SESSION = randomUUID();
+  // Resolved by settings.ts: the settings page's change, then JA_PIN, then
+  // data/settings.json, then config.json, then the default. settings.ts
+  // coerces with String() because config.json is hand-edited and "pin": 2468
+  // (no quotes) is the natural way to write a four-digit code: a number has no
+  // .trim(), and this line runs at boot. Live, like REMOTE_PIN above.
+  let JA_PIN = settings.resolved.codes.awards;
+  let JA_SESSION = randomUUID();
   const JA_COOKIE = 'ja_auth';
 
   /**
@@ -678,10 +900,44 @@ export function startServer(opts: ServerOpts) {
    * content lead and the Judge Advisor are different people with different
    * secrets. Explicitly empty collapses it onto the desk PIN.
    */
-  // Coerced for the same reason as JA_PIN above: an unquoted number in config.
-  const SETUP_PIN = String(process.env['SETUP_PIN'] ?? config?.setup?.pin ?? '4567').trim();
-  const SETUP_SESSION = randomUUID();
+  // Resolved and coerced the same way as JA_PIN above, and live like it.
+  let SETUP_PIN = settings.resolved.codes.settings;
+  let SETUP_SESSION = randomUUID();
   const SETUP_COOKIE = 'setup_auth';
+
+  /*
+   * A code changed: take the new one at once, and sign out everybody who got
+   * in with the old one.
+   *
+   * Changing a code is what a lead does when it has leaked (a PIN read off the
+   * whiteboard by the wrong person, a Judge Advisor's tablet left open), so a
+   * session made with the old code must not outlive it. A new session token
+   * per changed tier is that: every cookie issued before reads as signed out,
+   * and the desk's sockets, which authenticated once and would otherwise keep
+   * their write access for as long as they stay open, are closed. Each
+   * reconnects by itself, finds its cookie stale, and its page goes to the
+   * sign-in screen (desk-client.js, checkSignIn).
+   *
+   * Driven by the settings' own 'change' event, so a change made anywhere
+   * (the routes below, or index.ts) lands here the same way.
+   */
+  function applyCodes(): void {
+    const c = settings.resolved.codes;
+    if (c.desk !== REMOTE_PIN) {
+      REMOTE_PIN = c.desk;
+      SESSION = randomUUID();
+      signOutDeskSockets();
+    }
+    if (c.awards !== JA_PIN) { JA_PIN = c.awards; JA_SESSION = randomUUID(); }
+    if (c.settings !== SETUP_PIN) { SETUP_PIN = c.settings; SETUP_SESSION = randomUUID(); }
+  }
+  const onSettingsChange = (keys: string[]): void => {
+    if (!keys.some(k => k.startsWith('codes.'))) return;
+    try { applyCodes(); } catch (err) {
+      console.warn(`[auth] a code change could not be applied (${(err as Error)?.name ?? 'error'})`);
+    }
+  };
+  settings.on('change', onSettingsChange);
 
   const hasSetupSession = (req: IncomingMessage): boolean =>
     !!SETUP_PIN && cookie(req.headers.cookie, SETUP_COOKIE) === SETUP_SESSION;
@@ -700,6 +956,23 @@ export function startServer(opts: ServerOpts) {
   const isJa = (req: IncomingMessage): boolean =>
     JA_PIN ? hasJaSession(req) : isAuthed(req);
 
+  /**
+   * Is this request from a browser on the desk laptop itself, naming the desk
+   * by a local name?
+   *
+   * Both halves, always. The local address alone is not enough: a web page
+   * open on the desk machine could point its own domain at 127.0.0.1 (DNS
+   * rebinding) and read whatever this guards; the connection is local, but the
+   * Host it names is the attacker's. This is the Start here box's rule, and it
+   * also guards changing the desk PIN and restarting the desk.
+   */
+  const isDeskMachine = (req: IncomingMessage): boolean => {
+    const ip = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+    const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+    return (ip === '127.0.0.1' || ip === '::1')
+      && (host === 'localhost' || host === '127.0.0.1' || host === '[::1]');
+  };
+
   const isAuthed = (req: IncomingMessage): boolean => {
     if (!REMOTE_PIN) return true;
     if (cookie(req.headers.cookie, AUTH_COOKIE) === SESSION) return true;
@@ -715,6 +988,194 @@ export function startServer(opts: ServerOpts) {
     noteAuthFail(addr);
     return false;
   };
+
+  // ---- the settings page's codes, connections and restart (C5) ------------
+
+  /** Which lockout counter guards each code: the same doors its sign-in uses. */
+  const CODE_DOOR: Record<CodeName, string> = { desk: 'desk', awards: 'ja', settings: 'setup' };
+  const CODE_WORDS: Record<CodeName, string> = {
+    desk: 'desk PIN', awards: 'awards code', settings: 'settings code',
+  };
+  const liveCode = (which: CodeName): string =>
+    which === 'desk' ? REMOTE_PIN : which === 'awards' ? JA_PIN : SETUP_PIN;
+  const SETTINGS_LOCKED = 'This is behind the settings code, which the content lead holds. '
+    + 'Unlock Event settings (/s/setup) first.';
+
+  /**
+   * Change one code: the current one must be right, the new one 4 to 8 digits
+   * and not one of the other two codes. Shared by the settings page (desk PIN,
+   * settings code) and the Judge Advisor page (awards code).
+   *
+   * Every guess goes through the PIN damper, on the door of the code it is a
+   * guess at, with the same lockout and the same delay as signing in, so this
+   * is never a cheaper way to guess a code than the sign-in it guards.
+   *
+   * That includes the new code. "Not one of the other two" is a question
+   * about codes the caller may not hold: a settings-code holder who could ask
+   * it freely could walk 0000 to 9999 and learn the awards code from which
+   * answer differed, and the awards code is the one that opens the staged
+   * winners. So a new code that matches another code is counted as a wrong
+   * guess at THAT code's door, and the answer never says which one it hit.
+   *
+   * A slot is reserved on all three doors before the body is read (see
+   * authReserve: concurrent requests must see one another), and each is
+   * resolved exactly once: failed, passed, or released.
+   */
+  async function changeCode(req: IncomingMessage, res: ServerResponse, fixed: 'awards' | null): Promise<void> {
+    const addr = req.socket.remoteAddress ?? 'unknown';
+    const doors = ['desk', 'ja', 'setup'];
+    if (doors.some(d => authBlocked(addr, d))) {
+      return json(res, 429, { error: 'Too many wrong codes. Wait a minute, then try again.' });
+    }
+    const pending = new Set(doors);
+    for (const d of doors) authReserve(addr, d);
+    const failed = (door: string): void => { noteAuthFail(addr, door); pending.delete(door); };
+    const passed = (door: string): void => { noteAuthPass(addr, door); pending.delete(door); };
+    const slow = (): Promise<void> => new Promise(r => setTimeout(r, FAIL_DELAY_MS));
+    try {
+      let body: Record<string, unknown>;
+      try {
+        body = parsePinBody(await readBody(req, 4 * 1024)) as Record<string, unknown>;
+      } catch {
+        return json(res, 400, { error: 'Body must be JSON, like {"which":"settings","current":"1234","next":"5678"}.' });
+      }
+      const asked = fixed ?? body['which'];
+      if (fixed === null && asked === 'awards') {
+        return json(res, 400, { error: 'The awards code is changed on the Judge Advisor page (/s/awards), '
+          + 'by whoever holds it.' });
+      }
+      if (asked !== 'desk' && asked !== 'settings' && asked !== 'awards') {
+        return json(res, 400, { error: 'Which code? "desk" or "settings".' });
+      }
+      const which: CodeName = asked;
+      // The desk PIN opens every control in the building, so it is changed
+      // only by someone standing at the desk laptop, by the same rule that
+      // keeps the PIN itself on that laptop's screen alone.
+      if (which === 'desk' && !isDeskMachine(req)) {
+        return json(res, 403, { error: 'The desk PIN can only be changed on the desk laptop itself: open '
+          + 'Event settings there, at localhost.' });
+      }
+      const now = liveCode(which);
+      if (which !== 'desk' && !now) {
+        return json(res, 404, { error: `This desk has no separate ${CODE_WORDS[which]}: the desk PIN covers it.` });
+      }
+      const current = typeof body['current'] === 'string' || typeof body['current'] === 'number'
+        ? String(body['current']).trim() : '';
+      const next = typeof body['next'] === 'string' || typeof body['next'] === 'number'
+        ? String(body['next']).trim() : '';
+      if (!safeEqual(current, now)) {
+        failed(CODE_DOOR[which]);
+        console.warn(`[auth] a wrong current ${CODE_WORDS[which]} was given to change it, from ${addr}`);
+        await slow();
+        return json(res, 401, { error: `That is not the current ${CODE_WORDS[which]}, so nothing was changed.` });
+      }
+      passed(CODE_DOOR[which]);
+      if (!/^\d{4,8}$/.test(next)) {
+        return json(res, 400, { error: 'A new code is 4 to 8 digits.' });
+      }
+      const clash = (['desk', 'awards', 'settings'] as const)
+        .find(o => o !== which && liveCode(o) !== '' && safeEqual(next, liveCode(o)));
+      if (clash) {
+        failed(CODE_DOOR[clash]);
+        await slow();
+        return json(res, 409, { error: 'That code cannot be used here: pick a different one.' });
+      }
+      try {
+        settings.setCode(which, next);
+      } catch (err) {
+        if (err instanceof SettingsError) {
+          return json(res, err.name === 'SettingsSaveError' ? 503 : 400, { error: err.message });
+        }
+        throw err;
+      }
+      // applyCodes has run (the settings' change event): the new code is live
+      // and every session made with the old one is gone. The person who made
+      // the change proved both codes, so their own browser gets a fresh
+      // session for the tier they are on rather than a sign-in screen.
+      if (which === 'settings' && SETUP_PIN) {
+        res.setHeader('Set-Cookie',
+          `${SETUP_COOKIE}=${SETUP_SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
+      } else if (which === 'awards' && JA_PIN) {
+        res.setHeader('Set-Cookie',
+          `${JA_COOKIE}=${JA_SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=57600`);
+      } else if (which === 'desk' && !SETUP_PIN) {
+        // No separate settings code: this page is on the desk session itself,
+        // which the change just ended. Without a fresh one the page that made
+        // the change would sign itself out mid-sentence. With a settings code
+        // the caller's tier was not touched, so nothing is issued: every
+        // desk session goes with the old PIN, as the change means.
+        res.setHeader('Set-Cookie',
+          `${AUTH_COOKIE}=${SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${DESK_COOKIE_MAX_AGE_S}`);
+      }
+      // The code's name only, never the code: this line is desk-log.txt.
+      console.log(`[auth] the ${CODE_WORDS[which]} was changed; everyone signed in with the old one `
+        + 'is signed out');
+      return json(res, 200, { ok: true });
+    } finally {
+      for (const d of pending) authRelease(addr, d);
+    }
+  }
+
+  /**
+   * What the settings page shows (GET /api/settings). Never a code and never a
+   * whole key: whether each code is still the shipped default, whether a Nexus
+   * key is set, and at most its last four characters so the lead can tell
+   * which key it is.
+   *
+   * "Still the default" is a default-code warning, and those go only to the
+   * desk laptop (isDeskMachine), for the same reason the Start here box keeps
+   * them there: a shipped default is a public code, so telling a settings-code
+   * holder on another computer that the awards code is still the default is
+   * telling them the awards code. Elsewhere those two read null ("not said
+   * here"); the settings code's own is always said, since the caller holds it.
+   */
+  function settingsView(req: IncomingMessage) {
+    const desk = isDeskMachine(req);
+    const r = settings.resolved;
+    const key = r.connections.nexusKey;
+    const st = atemStatus();
+    return {
+      codes: {
+        desk: { isDefault: desk ? REMOTE_PIN === DEFAULT_CODES.desk : null },
+        awards: { isDefault: desk ? JA_PIN === DEFAULT_CODES.awards : null },
+        settings: { isDefault: SETUP_PIN === DEFAULT_CODES.settings },
+      },
+      connections: {
+        fieldHost: r.connections.fieldHost,
+        atemHost: r.connections.atemHost,
+        // Four characters of a key under eight is half the key: no hint then.
+        nexusKey: { set: !!key, hint: key.length >= 8 ? key.slice(-4) : null },
+      },
+      graphicsInput: r.graphicsInput,
+      deskMachine: desk,
+      field: { host: fieldHost(), connected: fieldUp(), searching: fieldSearching() },
+      atem: st
+        ? {
+          state: st.state, host: st.host, model: st.model, videoMode: st.videoMode,
+          inputs: st.inputs.map(i => ({ id: i.id, longName: i.longName })),
+        }
+        : { state: 'off', host: null, model: null, videoMode: null, inputs: [] },
+    };
+  }
+
+  let restarting = false;
+  /**
+   * End the process so the launcher starts it again (exit code 75, C9).
+   *
+   * The ordinary shutdown's flushes first, capped like it: the event log's
+   * tail is what the next start rebuilds the day from, and the recorder's last
+   * segment is unplayable if ffmpeg is killed mid-file. Whatever happens, the
+   * process exits: a restart that hangs is a desk that is neither up nor down.
+   */
+  async function restartNow(): Promise<void> {
+    try {
+      console.log('[core] restarting the desk, as asked on the Event settings page');
+      const flushes: Promise<unknown>[] = [bus.closeLog()];
+      if (recorder) flushes.push(recorder.stop());
+      await Promise.race([Promise.allSettled(flushes), new Promise(r => setTimeout(r, 5000))]);
+    } catch { /* exit regardless */ }
+    exitProcess(75);
+  }
 
   const http = createServer(async (req, res) => {
     // Host is client-supplied junk until proven otherwise. `??` keeps an
@@ -780,9 +1241,11 @@ export function startServer(opts: ServerOpts) {
       // A Judge Advisor session opens the awards routes and NOTHING else:
       // the JA code is award-scoped, not a second desk PIN.
       const jaException = path.startsWith('/api/awards') && hasJaSession(req);
-      // Same shape for the settings session: it opens /api/setup* and
-      // nothing else on the desk.
-      const setupException = path.startsWith('/api/setup') && hasSetupSession(req);
+      // Same shape for the settings session: it opens /api/setup* and the
+      // settings page's own codes-and-connections routes (/api/settings*),
+      // and nothing else on the desk.
+      const setupException = (path.startsWith('/api/setup') || path === '/api/settings'
+        || path.startsWith('/api/settings/')) && hasSetupSession(req);
       if (needsAuth({ method: req.method ?? 'GET', path }) && !isAuthed(req)
           && !jaException && !setupException) {
         // A page gets the sign-in screen, so an operator opening a bookmark
@@ -818,7 +1281,35 @@ export function startServer(opts: ServerOpts) {
       // rehearsal on Friday night would otherwise run the show that way with
       // nothing said. Open, because the launcher holds no PIN, and harmless:
       // the mode is on the Start here box for anyone who opens the page.
-      if (path === '/api/info') return json(res, 200, { mode: mode ?? 'normal' });
+      //
+      // It also says where the field is (C6), for the program page on the
+      // switcher feed: when the desk cannot be reached, that page swaps to
+      // Cheesy Arena's own score overlay, loaded straight from the field, and
+      // it can only do that if it learned the field's address while the desk
+      // was up. The address is not a secret (it is the FRC convention, and
+      // every field display already loads from it); nothing else is added.
+      if (path === '/api/info') {
+        return json(res, 200, { mode: mode ?? 'normal', field: { host: fieldHost() } });
+      }
+      // Every open page, as each last described itself (C2). Desk PIN, like
+      // the other desk reads: the addresses are the AV table's computers.
+      if (path === '/api/screens') return json(res, 200, { screens: screens.list() });
+      // What the switcher has on air, as the read-only watcher last heard it,
+      // with the graphics input from the settings page, for the desk
+      // console's kit strip. Desk PIN, like /api/screens. With no watcher it
+      // is the same shape, switched off, so the console has one thing to read.
+      if (path === '/api/atem') {
+        const st = atemStatus();
+        let graphicsInput: number | null = null;
+        try { graphicsInput = settings.resolved.graphicsInput; } catch { graphicsInput = null; }
+        return json(res, 200, {
+          ...(st ?? {
+            state: 'off', host: null, model: null, protocol: null, videoMode: null, program: null,
+            preview: null, inputs: [], keyers: [], since: null, lastHeard: null, error: null,
+          }),
+          graphicsInput,
+        });
+      }
       // The LAN-reachable base URL: what phone-facing QR codes must encode
       // (a surface's own location.host may be localhost on the desk box).
       // Open, because every QR code and every pit monitor needs it, and it
@@ -1233,6 +1724,83 @@ export function startServer(opts: ServerOpts) {
         return json(res, 200, { ok: true });
       }
 
+      // ---- the settings page: codes, connections, restart (C5) -------------
+      // Behind the settings session (or the desk session when that tier is
+      // collapsed), exactly like /api/setup. Every body is a JSON POST, so no
+      // code or key ever rides in a query string, an access log or a history.
+      if (path === '/api/settings' && req.method !== 'POST') {
+        if (!isSetup(req)) {
+          return json(res, 403, { error: SETTINGS_LOCKED, locked: true, separate: !!SETUP_PIN });
+        }
+        return json(res, 200, settingsView(req));
+      }
+
+      if (path === '/api/settings/connections' && req.method === 'POST') {
+        if (!isSetup(req)) return json(res, 403, { error: SETTINGS_LOCKED });
+        let body: Record<string, unknown> | undefined;
+        try {
+          body = await readJsonObject(req, res, 8 * 1024);
+        } catch {
+          return json(res, 400, { error: 'Body must be JSON, like {"atemHost":"10.0.100.40"}.' });
+        }
+        if (!body) return;
+        const KNOWN = ['fieldHost', 'atemHost', 'nexusKey', 'graphicsInput'];
+        // Refused by name rather than ignored: a code sent here by mistake
+        // must not read as saved.
+        const unknown = Object.keys(body).filter(k => !KNOWN.includes(k));
+        if (unknown.length) {
+          const names = unknown.slice(0, 3).map(k => `"${k.replace(/[^\w.-]/g, '').slice(0, 32)}"`).join(', ');
+          return json(res, 400, { error: `Not something this page sets: ${names}.` });
+        }
+        const patch: Record<string, unknown> = {};
+        for (const k of KNOWN) if (Object.hasOwn(body, k)) patch[k] = body[k] === '' ? null : body[k];
+        try {
+          const restartNeeded = settings.setConnections(patch as ConnectionsPatch,
+            { fieldAttached: bridge() ? fieldHost() : null });
+          return json(res, 200, { ok: true, restartNeeded });
+        } catch (err) {
+          if (err instanceof SettingsError) {
+            return json(res, err.name === 'SettingsSaveError' ? 503 : 400, { error: err.message });
+          }
+          throw err;
+        }
+      }
+
+      if (path === '/api/settings/code' && req.method === 'POST') {
+        if (!isSetup(req)) return json(res, 403, { error: SETTINGS_LOCKED });
+        return await changeCode(req, res, null);
+      }
+
+      // Under /api/awards on purpose: the awards code opens /api/awards* and
+      // nothing else, so the Judge Advisor can change their own code without
+      // the desk PIN, and nobody else can.
+      if (path === '/api/awards/code' && req.method === 'POST') {
+        if (!isJa(req)) {
+          return json(res, 403, { error: 'Only the Judge Advisor page, unlocked with the awards code, '
+            + 'changes the awards code.' });
+        }
+        return await changeCode(req, res, 'awards');
+      }
+
+      if (path === '/api/settings/restart' && req.method === 'POST') {
+        if (!isSetup(req)) return json(res, 403, { error: SETTINGS_LOCKED });
+        if (!isDeskMachine(req)) {
+          return json(res, 403, { error: 'The desk can only be restarted from the desk laptop itself.' });
+        }
+        if (!restartable) {
+          return json(res, 409, { error: 'This desk was not started by the CalGames exe, so nothing would '
+            + 'start it again. Close it and start it the way you started it.' });
+        }
+        // Answered first, then the exit, so the page can say "restarting"
+        // rather than "the desk did not answer".
+        json(res, 200, { ok: true });
+        if (!restarting) {
+          restarting = true;
+          setTimeout(() => { void restartNow(); }, 200);
+        }
+        return;
+      }
+
       // The ceremony: title and definition up while the GA reads it, winner
       // revealed on a button. The winner is held OUT of the bus until the
       // reveal: every open surface reads the fan-out, and a spoiler in a
@@ -1577,7 +2145,9 @@ export function startServer(opts: ServerOpts) {
       // it can be polled by a panel and printed before doors.
       if (path === '/api/vitals') {
         if (!vitals) return json(res, 503, { error: 'Vitals are not available.' });
-        return json(res, 200, await vitals.report());
+        // Default-code warnings only to the desk laptop: see forAnotherComputer.
+        const report = await vitals.report();
+        return json(res, 200, isDeskMachine(req) ? report : forAnotherComputer(report));
       }
 
       // ---- coverage ---------------------------------------------------------
@@ -1781,7 +2351,9 @@ export function startServer(opts: ServerOpts) {
         if (!seedSample) {
           return json(res, 503, { error: 'Sample data is not available on this desk.' });
         }
-        if (cheesy) {
+        // The bridge NOW, not at start: a field the finder attached at noon is
+        // just as much an event as one the launcher found at eight.
+        if (bridge()) {
           return json(res, 409, {
             error: 'The field bridge is running, so this desk is at an event. '
               + 'Sample data would put invented teams on every screen. Stop the '
@@ -2085,6 +2657,7 @@ export function startServer(opts: ServerOpts) {
       // docs/10 promises the FTA a printable list of every request we make.
       // This is that list, plus the allowlist it is constrained to.
       if (path === '/api/cheesy') {
+        const cheesy = bridge();
         return json(res, 200, {
           bridged: !!cheesy,
           connected: cheesy?.client.connected ?? false,
@@ -2095,7 +2668,7 @@ export function startServer(opts: ServerOpts) {
       }
 
       if (path === '/api/cheesy/audit') {
-        const rows = cheesy?.client.audit ?? [];
+        const rows = bridge()?.client.audit ?? [];
         if (url.searchParams.get('format') === 'text') {
           const text = rows.map(r =>
             `${new Date(r.ts).toISOString()}  ${r.method.padEnd(4)} ${r.status}  ${r.url}`).join('\n');
@@ -2462,16 +3035,11 @@ export function startServer(opts: ServerOpts) {
    * address on a projector.
    */
   function startPanel(req: IncomingMessage): string {
-    const ip = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
-    // And only to a browser that asked for the desk BY a local name. A web
-    // page open on the desk machine could otherwise point its own domain at
-    // 127.0.0.1 (DNS rebinding) and read the PIN off this page: the
-    // connection is local, but the Host it names is the attacker's.
-    const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
-    const local = (ip === '127.0.0.1' || ip === '::1')
-      && (host === 'localhost' || host === '127.0.0.1' || host === '[::1]');
-    const esc = (t: string): string => t.replace(/[&<>"]/g,
-      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+    // And only to a browser that asked for the desk BY a local name: see
+    // isDeskMachine, which is this box's rule and also guards changing the
+    // desk PIN.
+    const local = isDeskMachine(req);
+    const esc = escHtml;
     // Asked for on every load, so the address written on the whiteboard is the
     // one the desk has NOW. No restart: plug in, wait a few seconds, reload.
     const base = currentLanBase();
@@ -2489,23 +3057,34 @@ export function startServer(opts: ServerOpts) {
     if (!local) return `<div class="start">${modeLine}${addr}</div>`;
     // The commonest reason the address works here and nowhere else, said
     // where the address is: the desk cannot see the firewall's answer, and
-    // the volunteer at a blank pit TV has no other clue to go on.
+    // the volunteer at a blank pit TV has no other clue to go on. The link
+    // goes to the steps on this same page, not to a handbook chapter.
     const reach = base
       ? `<p class="hint">If other screens cannot open this address, it is the Windows
-          Firewall on this laptop or a Wi-Fi that keeps devices apart (handbook,
-          chapter 11).</p>` : '';
+          Firewall on this laptop or a Wi-Fi that keeps devices apart:
+          <a href="#help-reach">what to do</a>.</p>` : '';
     // Desk-only like the codes beside it, because it is about the file that
     // holds them. A broken file is why every code below reads as a default.
-    const file = configFileVital(configFile());
+    // A report that cannot be read leaves the line out rather than the page:
+    // this box is how a first-timer finds the address at all.
+    let file: ReturnType<typeof configFileVital> = null;
+    try { file = configFileVital(configFile()); } catch { file = null; }
     const fileBad = !!file && (file.level === 'fail' || file.level === 'warn');
     const fileLine = file && fileBad
       ? `<p class="${file.level === 'fail' ? 'bad' : 'warn'}"><b>${esc(file.detail)}</b>
           ${esc(file.fix ?? '')}</p>` : '';
     const defaults = [
-      REMOTE_PIN === DEFAULT_PIN ? 'desk PIN' : '',
-      JA_PIN === '1357' ? 'awards code' : '',
-      SETUP_PIN === '4567' ? 'settings code' : '',
+      REMOTE_PIN === DEFAULT_CODES.desk ? 'desk PIN' : '',
+      JA_PIN === DEFAULT_CODES.awards ? 'awards code' : '',
+      SETUP_PIN === DEFAULT_CODES.settings ? 'settings code' : '',
     ].filter(Boolean);
+    // Where to change them is a link to a page, never a file to edit or a
+    // flag to type: the desk PIN and the settings code on Event settings
+    // (the PIN only from this laptop, which is where this box shows), and
+    // the awards code by the Judge Advisor on their own page.
+    const change = `<a href="/s/setup#codes">Change the codes</a> on Event settings (the settings code opens it)`
+      + (defaults.includes('awards code')
+        ? '; the Judge Advisor changes the awards code on <a href="/s/awards">their own page</a>.' : '.');
     return `<div class="start">
       <h2 style="margin-top:0">Start here</h2>
       ${modeLine}
@@ -2517,32 +3096,227 @@ export function startServer(opts: ServerOpts) {
         address, and the crew running the consoles need the PIN.</p>
       ${defaults.length ? `<p class="warn">Still on the shipped default: ${defaults.join(', ')}.
         ${file?.level === 'fail'
-          ? 'config.json is not in use (see above), so no code set in it can apply until it is fixed.'
-          : 'Fine for practice. Change before doors (handbook, chapter 2).'}</p>` : ''}
+          ? 'config.json is not in use (see above), so no code set in it applies. '
+          : 'Fine for practice; change them before doors. '}${change}</p>` : ''}
       <p>New to this? <a href="/s/desk#sec-sample">Fill the screens with sample data</a>,
-        then open the screens below to see them working.
+        then open the choices above to see them working.
         Signs for the doors: <a href="/s/poster">print the QR posters</a>.</p>
       <p class="hint">Only this computer sees the PIN on this page. Other devices on
         the network see the address alone.</p>
     </div>`;
   }
 
+  /** When this server started, so a status line can tell "still connecting" from "not answering". */
+  const startedAt = Date.now();
+  /**
+   * How long after the start a missing connection still reads as "connecting".
+   * The launcher opens the browser on this page the moment the desk answers,
+   * which is before the field bridge or OBS has had time to finish its own
+   * handshake, so the first load would otherwise say "not answering" about a
+   * connection that is a second away from working.
+   */
+  const SETTLING_MS = statusSettleMs ?? 20_000;
+
+  /**
+   * The status strip at the top of the front page: the field and OBS, in
+   * plain words, as they stand when the page loads.
+   *
+   * Built only from what this process already holds in memory (the bridge,
+   * the OBS client, the bus state): no probe and no await. This page is the
+   * first thing a first-timer sees, and a status line that waited on a field
+   * that is not there would be a blank page all over again. Each row is built
+   * on its own and reads "could not be checked" if it throws, so the page
+   * renders when every check fails.
+   *
+   * Shown to everyone: the field's connection is already on the open
+   * /api/state, and nothing here names a code or a password. Addresses (the
+   * switcher's, the AV table's computers') and the switcher's own words go
+   * only to the desk laptop (isDeskMachine); everyone else gets the same rows
+   * without them.
+   *
+   * The switcher and the screens rows say the same words as the doors check
+   * (switcherVital, screensVital in vitals.ts), so the two never disagree.
+   */
+  function frontStatus(req: IncomingMessage): string {
+    const local = isDeskMachine(req);
+    type Level = 'ok' | 'warn' | 'off' | 'unknown';
+    const row = (label: string, build: () => { level: Level; text: string }): string => {
+      let r: { level: Level; text: string };
+      try { r = build(); } catch {
+        r = { level: 'unknown', text: 'could not be checked just now. Reload this page to try again.' };
+      }
+      return `<li class="st-${r.level}"><span class="dot" aria-hidden="true"></span>`
+        + `<span><b>${label}:</b> ${r.text}</span></li>`;
+    };
+    const settling = Date.now() - startedAt < SETTLING_MS;
+    const field = row('Field', () => {
+      if (mode === 'demo') return { level: 'off', text: 'not used: practice mode plays a pretend match.' };
+      if (mode === 'replay') return { level: 'off', text: 'not used: this desk is playing back a saved event log.' };
+      // No bridge yet. The desk looks for the field by itself while it runs
+      // (the finder, C3), so the usual answer is "wait": the field connects
+      // the moment it is up. Not looking at all is a start with /no-cheesy,
+      // or a launcher from before the finder.
+      if (!bridge()) {
+        return fieldSearching()
+          ? { level: 'unknown', text: 'searching for the field by itself. It connects as soon as the '
+            + 'field is up; until then, matches are run by hand: <a href="#help-field">more</a>.' }
+          : { level: 'warn', text: 'not connected, and this desk is not looking for it, so matches are '
+            + 'run by hand: <a href="#help-field">what to do</a>.' };
+      }
+      if (!bus.state.connected.cheesy) {
+        return settling
+          ? { level: 'unknown', text: 'connecting now. Reload this page in a few seconds.' }
+          : { level: 'warn', text: 'not answering right now, so matches are run by hand until it does. '
+            + 'The desk keeps trying by itself: <a href="#help-field">what to check</a>.' };
+      }
+      // The field parked on its Test Match loads nothing the desk shows (the
+      // bridge ignores it on purpose, and holds the last real match on the
+      // screens), so the match screens wait for a real one. Said here because
+      // a waiting screen is easy to take for a broken one.
+      const match = bus.state.match;
+      return match
+        ? { level: 'ok', text: `connected. Match on the screens: ${escHtml(String(match.displayName || match.id))}.` }
+        : { level: 'ok', text: 'connected, with no match loaded yet, so the match screens wait for one. '
+          + "The field's Test Match does not count: the scorekeeper loads the first real match." };
+    });
+    // A vital's level as a dot: a failure is as loud as this strip gets.
+    const dot = (l: string): Level => (l === 'ok' || l === 'off' || l === 'unknown' ? l : 'warn');
+    const switcher = row('Switcher', () => {
+      const st = atemStatus();
+      // Elsewhere, the same row with the switcher's address left out.
+      const v = switcherVital(st && !local ? { ...st, host: null } : st,
+        { graphicsInput: settings.resolved.graphicsInput, matchRunning: matchUnderway(bus.state) });
+      return { level: dot(v.level),
+        text: escHtml(local && v.fix ? `${v.detail} ${v.fix}` : v.detail) };
+    });
+    const screensRow = row('Screens', () => {
+      const list = screens.list();
+      const program = list.filter(isProgramPage);
+      // Every page reconnects by itself after a start, a few seconds apart;
+      // "none open" in that window would send somebody to fix nothing.
+      if (!program.length && settling) {
+        return { level: 'unknown', text: 'waiting for the screens to reconnect. Reload this page in a '
+          + 'few seconds.' };
+      }
+      const v = screensVital(list, { atem: atemStatus(), fieldConnected: fieldUp(), obs: !!obs });
+      if (local) return { level: dot(v.level), text: escHtml(v.fix ? `${v.detail} ${v.fix}` : v.detail) };
+      if (!program.length) {
+        return { level: 'warn', text: 'no program page is open anywhere yet: see <b>Put the graphics into '
+          + 'the video switcher</b>, below.' };
+      }
+      const places = new Set(program.map(p => whereIs(p.addr))).size;
+      return { level: dot(v.level), text: `the program graphics are open on ${places} `
+        + `${places === 1 ? 'computer' : 'computers'}.`
+        + (v.level === 'ok' ? '' : ' One of them needs a look: the desk laptop says which.') };
+    });
+    const obsRow = row('OBS', () => {
+      // Gray and short: most venues have no OBS now, and that is not a fault.
+      if (!obs) return { level: 'off', text: 'not used on this setup.' };
+      if (obs.connected) return { level: 'ok', text: 'connected.' };
+      return settling
+        ? { level: 'unknown', text: 'connecting now. Reload this page in a few seconds.' }
+        // Never "edit config.json": whoever switched OBS on did it in that
+        // file and knows it, and a first-time volunteer at a venue with no
+        // OBS needs to hear that the show does not wait for it.
+        : { level: 'warn', text: 'switched on for this desk, but not answering. Using OBS: open it, then '
+          + 'Tools, WebSocket Server Settings, and check the server is on and uses the password this '
+          + 'desk was set up with. No OBS here: nothing to do, the show runs without it, and whoever set '
+          + 'this desk up for OBS can switch that off.' };
+    });
+    return `<ul class="status" aria-label="How things stood when this page loaded">${field}${switcher}`
+      + `${screensRow}${obsRow}</ul>
+<p class="again">As of when this page loaded. Reload to check again.</p>`;
+  }
+
+  /**
+   * The front page, which the exe opens: the only instructions a first-timer
+   * should need.
+   *
+   * It opened with "Core is running. Open a surface below, or point an OBS
+   * Browser Source at it." over thirty links, the first of them the program
+   * overlay, a transparent page that a browser paints white. With no OBS at
+   * the venue, that was the white page the AV coordinator got stuck on. Now:
+   * a few plain choices, the Start here box, what to do when something is
+   * wrong, and the full list folded away underneath.
+   *
+   * Every part is built on its own and a part that throws is left out (the
+   * Start here box falls back to a line saying so), so the page always goes
+   * out. Nothing here is secret except what startPanel guards.
+   *
+   * The OBS note keeps the see-through graphics (obs-over) apart from the
+   * full pictures (obs-full). It once said trivia stayed see-through in OBS;
+   * trivia paints its own background in every mode, so an operator who laid
+   * it over a camera covered the camera. front-page.test.ts checks each list
+   * against the page's own markup.
+   */
   function sendIndex(res: ServerResponse, req: IncomingMessage): void {
-    const groups = [...new Set(SURFACES.map(s => s.group))];
-    const sections = groups.map(g =>
-      `<h2>${g}</h2><div class="rows">` + SURFACES.filter(s => s.group === g).map(s =>
-        `<a class="row" href="${surfacePath(s)}"><b>${s.name}</b><code>${surfacePath(s)}</code><i>${s.note}</i></a>`,
-      ).join('') + '</div>').join('');
+    const part = (what: string, build: () => string, fallback = ''): string => {
+      try { return build(); } catch {
+        // The part's name only: an error message is not something this page
+        // should copy into desk-log.txt without knowing what it carries.
+        console.warn(`[front] the ${what} could not be built; the rest of the page went out`);
+        return fallback;
+      }
+    };
+    const status = part('status strip', () => frontStatus(req));
+    const start = part('Start here box', () => startPanel(req),
+      `<div class="start"><p class="addr warn">This desk's address could not be read just now.
+        Reload this page in a few seconds.</p></div>`);
+    const base = part('address', () => currentLanBase() ?? '');
+    const choices = FRONT_CHOICES.map(c => `<a class="choice" href="${c.href}"><b>${escHtml(c.title)}</b>`
+      + `<span>${escHtml(c.text)}</span>`
+      // The projector and the switcher feed are usually other computers,
+      // which need the whole address typed in: give it whole, rather than
+      // "the address, then /s/watch".
+      + ((c.href === '/s/watch' || c.href === '/s/program') && base
+        ? `<span class="from">From another computer, open <code>${escHtml(base)}${c.href}</code></span>` : '')
+      + '</a>').join('');
+    const help = FRONT_HELP.map(h => `<div class="q" id="help-${h.id}"><dt>${escHtml(h.see)}</dt>`
+      + `<dd>${h.fix}</dd></div>`).join('');
+    // Groups in SCREEN_GROUPS order, then any group nobody gave a title, so a
+    // row added to SURFACES is never silently left off the list.
+    const titled = new Set(SCREEN_GROUPS.map(g => g.group));
+    const groups = [...SCREEN_GROUPS, ...[...new Set(SURFACES.map(s => s.group))]
+      .filter(g => !titled.has(g)).map(g => ({ group: g, title: g, intro: '' }))];
+    const sections = groups.map(g => `<h3>${escHtml(g.title)}</h3>`
+      + (g.intro ? `<p class="intro">${escHtml(g.intro)}</p>` : '')
+      + '<div class="rows">' + SURFACES.filter(s => s.group === g.group).map(s =>
+        `<a class="row" href="${surfacePath(s)}"><b>${escHtml(s.name)}</b><code>${surfacePath(s)}</code>`
+        + `<i>${escHtml(s.note)}</i></a>`).join('') + '</div>').join('');
     const html = `<!doctype html><html lang="en" data-surface="console"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CalGames 2026 Content Desk</title>
 <link rel="stylesheet" href="/theme/tokens.css">
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
-body{padding:44px clamp(28px,4vw,84px) 80px;font-size:var(--font-ui-body)}
-h1{font-size:38px;font-variation-settings:"wdth" 118;margin:0 0 4px}
-p.sub{color:var(--text-dim);margin:0 0 26px}
-h2{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2em;
+body{margin:0;padding:36px clamp(16px,4vw,64px) 80px;font-size:var(--font-ui-body)}
+main{max-width:1180px;margin:0 auto}
+h1{font-size:clamp(28px,4vw,38px);font-variation-settings:"wdth" 118;margin:0 0 4px}
+p.sub{color:var(--text-dim);margin:0 0 16px;font-size:17px}
+h2,h3{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2em;
   text-transform:uppercase;color:var(--accent);margin:30px 0 10px}
+.status{list-style:none;margin:0;padding:0;display:grid;gap:6px;line-height:1.5}
+.status li{display:flex;gap:10px;align-items:baseline}
+.status .dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--text-dim)}
+.status .st-ok .dot{background:var(--st-ok-text)}
+.status .st-warn .dot{background:var(--st-warn)}
+.status .st-unknown .dot{background:transparent;box-shadow:inset 0 0 0 2px var(--text-dim)}
+.status .st-warn b{color:var(--st-warn)}
+.status a{color:var(--accent)}
+p.again{color:var(--text-dim);font-size:13px;margin:4px 0 22px}
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr));
+  gap:14px;margin:0 0 22px}
+.choice{display:flex;flex-direction:column;gap:8px;padding:22px 24px;background:var(--surface-raised);
+  color:var(--text);text-decoration:none;border-top:4px solid var(--accent);
+  clip-path:var(--chamfer);--ch:14px;transition:background var(--dur-tap) linear}
+.choice:hover{background:var(--btn-hover)}
+.choice:focus-visible{outline:3px solid var(--focus-ring);outline-offset:-6px}
+.choice b{font-size:21px;line-height:1.25}
+.choice span{color:var(--text-dim);font-size:15px;line-height:1.5}
+.choice .from{font-size:13px}
+.choice .from code{display:block;margin-top:2px}
+.choice code,.fold code{font-family:var(--font-mono);color:var(--accent);font-size:13px;
+  overflow-wrap:anywhere}
 .rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(540px,100%),1fr));gap:10px 14px}
 .row{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:16px 20px;
   background:var(--surface-raised);text-decoration:none;color:var(--text);
@@ -2550,23 +3324,63 @@ h2{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.2
 .row:hover{background:var(--btn-hover)}
 .row:focus-visible{outline:3px solid var(--focus-ring);outline-offset:-6px}
 .row b{font-size:19px}
-.row code{font-family:var(--font-mono);color:var(--accent);font-size:13px}
+.row code{font-family:var(--font-mono);color:var(--accent);font-size:13px;overflow-wrap:anywhere}
 .row i{grid-column:1/-1;color:var(--text-dim);font-style:normal;font-size:13px}
 .start{padding:18px 22px;margin:0 0 8px;background:var(--surface-raised);
   clip-path:var(--chamfer);--ch:12px;border-left:6px solid var(--accent)}
 .start p{margin:6px 0}
-.start .addr b{font-family:var(--font-mono);color:var(--accent);font-size:22px}
+.start .addr b{font-family:var(--font-mono);color:var(--accent);font-size:22px;overflow-wrap:anywhere}
 .start .warn{color:var(--st-warn-text,var(--st-warn))}
 .start .bad{color:var(--st-bad-text)}
 .start .mode{margin:0 0 12px;padding:12px 16px;background:var(--st-warn);color:#000;
   clip-path:var(--chamfer);--ch:8px}
 .start .hint{color:var(--text-dim);font-size:13px}
 .start a{color:var(--accent)}
-</style></head><body>
+.help{margin-top:22px;background:var(--surface)}
+.help h2{margin-top:0}
+.help dl{margin:0;display:grid;gap:14px}
+.help dt{font-weight:700;font-size:16px}
+.help dd{margin:4px 0 0;color:var(--text-dim);line-height:1.55}
+.help a{color:var(--accent)}
+.help dd b{color:var(--text);font-weight:600}
+.help code{font-family:var(--font-mono);color:var(--accent);font-size:13px;overflow-wrap:anywhere}
+.help .q:target dt{color:var(--accent)}
+p.intro{color:var(--text-dim);margin:0 0 12px;line-height:1.5}
+.fold{margin:16px 0 0;background:var(--surface);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.fold>summary{cursor:pointer;padding:16px 22px;font-weight:700;font-size:16px}
+.fold>summary:focus-visible{outline:3px solid var(--focus-ring);outline-offset:-4px}
+.fold-in{padding:0 22px 20px}
+.fold-in h3:first-child{margin-top:4px}
+.fold-in p{line-height:1.55}
+</style></head><body><main>
 <h1>CalGames 2026 Content Desk</h1>
-<p class="sub">Core is running. Open a surface below, or point an OBS Browser Source at it.</p>
-${startPanel(req)}
-${sections}</body></html>`;
+<p class="sub">The desk is running. Pick what this computer is for.</p>
+${status}
+<nav class="choices" aria-label="What this computer is for">${choices}</nav>
+${start}
+<section class="help" id="help" aria-labelledby="help-title">
+<h2 id="help-title">Something not working?</h2>
+<p class="intro">What you see, then what to do.</p>
+<dl>${help}</dl>
+</section>
+<details class="fold" id="all"><summary>Every screen, with its address (${SURFACES.length})</summary>
+<div class="fold-in">${sections}</div></details>
+<details class="fold" id="obs"><summary>If you use OBS</summary><div class="fold-in">
+<p>OBS is optional. Most venues now put the graphics into a video switcher or onto a projector
+  straight from a browser, with the choices at the top of this page.</p>
+<p>With OBS, add each graphic as a Browser Source, 1920x1080, at this desk's address.</p>
+<p class="obs-over">These stay see-through and sit over your cameras: <code>/s/program</code> for
+  the match graphics, <code>/s/tele</code> over the replay, and <code>/s/arcade</code> between
+  matches.</p>
+<p class="obs-full">These are full pictures with their own background, to cut to rather than lay
+  over a camera: <code>/s/trivia</code> and <code>/s/side</code>.</p>
+<p>To let the desk switch OBS scenes and watch the stream, set <code>"enabled": true</code> under
+  <code>"obs"</code> in config.json, then restart the desk.</p>
+<p>In a plain browser, outside OBS, the same graphics draw on black, which a video switcher's
+  luma key drops out: that is <b>Put the graphics into the video switcher</b>, above.</p>
+<p>Never add the House audio player to OBS: its music is for the room and must stay off the stream.</p>
+</div></details>
+</main></body></html>`;
     res.writeHead(200, { 'Content-Type': MIME['.html']!, 'Cache-Control': 'no-store' });
     res.end(html);
   }
@@ -2590,8 +3404,25 @@ ${sections}</body></html>`;
    * can reach the desk: without it, anyone on the same Wi-Fi can take the
    * broadcast.
    */
-  const authed = new WeakSet<WebSocket>();
+  let authed = new WeakSet<WebSocket>();
+  /** The shortest gap between two hello frames from one socket that is taken. */
+  const HELLO_FLOOR_MS = 200;
   const mayWrite = (ws: WebSocket): boolean => !REMOTE_PIN || authed.has(ws);
+
+  /**
+   * The desk PIN changed: close every socket that got in with the old one.
+   * Each page reconnects by itself, its cookie no longer matches the new
+   * session, and desk-client.js sends it to sign in. A socket that is not
+   * signed in (an overlay, a pit TV) is left alone: it never had the PIN.
+   */
+  function signOutDeskSockets(): void {
+    const was = authed;
+    authed = new WeakSet<WebSocket>();
+    for (const ws of wss.clients) {
+      if (!was.has(ws)) continue;
+      try { ws.close(4001, 'signed out: the desk PIN changed'); } catch { ws.terminate(); }
+    }
+  }
 
   // App-level heartbeat. Between matches the bus can go quiet for minutes,
   // and a silently dropped path (a Wi-Fi roam, an unplugged switch port)
@@ -2641,6 +3472,13 @@ ${sections}</body></html>`;
     // it is never asked twice. The phone remote, which can be opened straight
     // to its own page, still authenticates over the socket below.
     if (cookie(req.headers.cookie, AUTH_COOKIE) === SESSION) authed.add(ws);
+    // Where this page is, for the doors check and /api/screens (C2). The
+    // registry's own id, never one the page chose; the handshake's tag is its
+    // name until the page's hello says more.
+    const screenId = randomUUID();
+    try { screens.add(screenId, { surface: who, addr: plainAddr(addr) }); } catch { /* never block a socket */ }
+    ws.on('close', () => { try { screens.remove(screenId); } catch { /* already gone */ } });
+    let lastHello = 0;
     // The server's clock first, then the snapshot. A surface that has never
     // heard a beat derives its clock skew from state.updatedAt, the last
     // EVENT's time, and after a restart that can be a state restored from
@@ -2663,6 +3501,23 @@ ${sections}</body></html>`;
       // handler logs and carries on from once the show is up. A frame that is
       // not an object is as meaningless as one that is not JSON: ignore it.
       if (notAnObject(msg) !== null) return;
+
+      // A page describing itself (C1): size, full screen, refresh rate, and
+      // whose graphics it is showing. No PIN, because an overlay cannot type
+      // one, and harmless, because it changes nothing: checked field by field
+      // in screens.ts, kept against this one socket, never put on the bus and
+      // never sent to another socket. No answer either; no client waits for one.
+      if (msg.t === 'hello') {
+        // A page says hello on open and then at most about once a second
+        // (desk-client.js debounces it). Anything faster is not the desk's
+        // client, and each hello wakes the registry's listeners, so a flood
+        // is dropped here rather than paid for there.
+        const now = Date.now();
+        if (now - lastHello < HELLO_FLOOR_MS) return;
+        lastHello = now;
+        try { screens.hello(screenId, msg); } catch { /* a page's report is never worth a socket */ }
+        return;
+      }
 
       if (msg.t === 'auth') {
         if (authBlocked(addr)) {
@@ -2849,7 +3704,11 @@ ${sections}</body></html>`;
   });
 
   return {
-    close: () => { clearInterval(heartbeat); unsubscribe(); unsubChapters(); wss.close(); http.close(); },
+    close: () => {
+      clearInterval(heartbeat); unsubscribe(); unsubChapters();
+      settings.off('change', onSettingsChange);
+      wss.close(); http.close();
+    },
     broadcastCount: () => wss.clients.size,
     /** For index.ts, whose automatic sample clear (a real match loading)
      *  changes the media map with no route of this server involved. */

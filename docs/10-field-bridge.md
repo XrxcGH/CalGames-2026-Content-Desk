@@ -205,6 +205,15 @@ whatever fits. The only line is the allowlist above.
 > **Load:** one websocket per endpoint, one HTTP request at a time, 60s polling plus one extra
 > refresh ~1.5s after a score posts, exponential backoff capped at 60s on failure.
 >
+> **Finding the field:** until it is found, the desk looks for it every 30 s with the launcher's
+> check: a TCP connect to port 8080 (nothing sent) and, where that answers, one `GET /api/rankings`.
+> `10.0.100.5` and any address the event typed in are tried alone first; only then the rest of the
+> `/24`, at no more than about 50 knocks a second. Once found, it stops for good.
+>
+> **The fallback display:** the browser feeding the video switcher's graphics input also loads the
+> arena's own `/displays/audience` page, as display `contentdesk-backup`, exactly as a real
+> audience display does, and shows it only while the desk cannot give a score.
+>
 > **Isolation:** nothing of ours runs on the FMS machine. Separate host, separate UPS, separate
 > switch. No default gateway or DNS on the field NIC; Windows discovery protocols disabled.
 >

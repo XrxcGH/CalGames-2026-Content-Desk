@@ -79,6 +79,95 @@ export function clockDisplayFor(state, c) {
   return state?.matchEndedAt ? '0:00' : '0:20';
 }
 
+/**
+ * A clock for durations: performance.now() where there is one. Date.now()
+ * jumps when a venue laptop's clock is corrected, and the program's handoff
+ * (see program.js) times a silence in seconds, which a jump would fake.
+ */
+export function monotonic() {
+  const perf = globalThis.performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+/** How long the screen's own report (helloFrame) waits for things to settle. */
+const HELLO_DEBOUNCE_MS = 1000;
+/** How long the refresh rate is watched for: about two seconds of frames. */
+const HZ_SAMPLE_MS = 2000;
+const SHOWING = ['desk', 'cheesy'];
+const BACKUP = ['none', 'ready', 'bad'];
+const MAX_PX = 32_768;
+
+/**
+ * Frames counted over a span, as a refresh rate, or null when there is not
+ * enough to say. Rounded: a 59.94 Hz video output reads 60, which is what
+ * a volunteer would call it.
+ */
+export function hzOf(frames, spanMs) {
+  if (!(frames >= 1) || !(spanMs > 0)) return null;
+  const hz = Math.round((frames * 1000) / spanMs);
+  return hz >= 1 && hz <= 500 ? hz : null;
+}
+
+/**
+ * The hello frame: what this screen tells the desk about itself, so the desk
+ * can say what each display is doing without anybody walking over to it
+ * (a projector at 30 Hz, a switcher input that is not full screen, the
+ * program showing the field's own score). The desk keeps it against this
+ * one socket and nowhere else; it is never on the bus.
+ *
+ *   key       what the page paints behind itself (see KEY_MODES), or null
+ *             for a page that does not use one (a console)
+ *   embedded  framed inside another page (/s/watch)
+ *   full      the page fills the screen: the Fullscreen API, or a window
+ *             the size of the screen, which is what F11 leaves (it sets no
+ *             fullscreenElement)
+ *   w, h      the window, in CSS pixels; sw, sh the screen; dpr the ratio
+ *   hz        the refresh rate measured from animation frames, or null
+ *             while the page is hidden or not yet measured
+ *   showing   'desk' or 'cheesy' on a program that can hand off to the
+ *             field's own display (see program.js), null everywhere else
+ *   backup    on that same program, whether the field's display is ready
+ *             to stand in: 'ready', 'bad' (the desk named a field and this
+ *             computer cannot show its display) or 'none' (no field named);
+ *             null everywhere else. An addition to the agreed fields: a
+ *             desk that does not know it drops it and keeps the rest
+ *
+ * Pure, so a test can ask it about any window. Nothing here can carry a
+ * code: it reads the window and nothing else.
+ */
+export function helloFrame(win = globalThis, { surface = '', showing = null, hz = null, backup = null } = {}) {
+  const doc = win.document;
+  const int = (v, max) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) ? Math.min(max, Math.max(0, n)) : 0;
+  };
+  // The same ceilings the desk checks a frame against (screens.ts), which
+  // drops a frame whole if any one value is out of range.
+  const w = int(win.innerWidth, MAX_PX);
+  const h = int(win.innerHeight, MAX_PX);
+  const sw = int(win.screen?.width, MAX_PX);
+  const sh = int(win.screen?.height, MAX_PX);
+  const ratio = Number(win.devicePixelRatio);
+  const dpr = Number.isFinite(ratio) && ratio > 0 ? Math.round(Math.min(ratio, 16) * 100) / 100 : 1;
+  let full = false;
+  try {
+    full = !!doc?.fullscreenElement
+      || !!win.matchMedia?.('(display-mode: fullscreen)')?.matches
+      || (sw > 0 && sh > 0 && Math.abs(w - sw) <= 2 && Math.abs(h - sh) <= 2);
+  } catch { /* a browser that will not say is reported as not full screen */ }
+  const key = doc?.documentElement?.dataset?.key;
+  return {
+    t: 'hello',
+    surface: String(surface ?? '').slice(0, 32),
+    key: KEY_MODES.includes(key) ? key : null,
+    embedded: framedPage(win),
+    full, w, h, sw, sh, dpr,
+    hz: Number.isInteger(hz) && hz > 0 ? hz : null,
+    showing: SHOWING.includes(showing) ? showing : null,
+    backup: BACKUP.includes(backup) ? backup : null,
+  };
+}
+
 class DeskClient extends EventTarget {
   state = null;
   media = {};
@@ -93,15 +182,26 @@ class DeskClient extends EventTarget {
   #skewFromBeat = false;
   /** Last frame time, for the half-open watchdog. */
   #lastSeen = 0;
+  /** The same, on the monotonic clock, for the program's handoff. */
+  #heardAt = null;
+  /** A snapshot has arrived over the socket that is open now. */
+  #synced = false;
   #watchdog = null;
   #ws = null;
   #backoff = 250;
   #name;
+  /** What the hello frame reports; see helloFrame. */
+  #showing = null;
+  #backup = null;
+  #hz = null;
+  #hzFrame = 0;
+  #helloTimer = null;
 
   constructor(name) {
     super();
     this.#name = name;
     this.#connect();
+    this.#watchScreen();
     // One REST read for the first frame. The websocket snapshot is the source
     // of truth, but it loses a race the venue actually runs: a headless
     // capture screenshots, and a cold pit monitor paints, before the socket
@@ -120,11 +220,20 @@ class DeskClient extends EventTarget {
     ws.onopen = () => {
       this.connected = true;
       this.#backoff = 250;
+      // Counted from the open, not from the last socket's last frame: a
+      // fresh socket is not a silent one. The snapshot is still owed.
+      this.#heardAt = monotonic();
+      this.#synced = false;
+      // First, before anybody reacts to the link: the desk learns what this
+      // screen is the moment it can. Nothing waits for an answer, because an
+      // older desk ignores a frame type it does not know.
+      this.#sendHello();
       this.dispatchEvent(new CustomEvent('link', { detail: true }));
     };
 
     ws.onmessage = e => {
       this.#lastSeen = Date.now();
+      this.#heardAt = monotonic();
       const msg = JSON.parse(e.data);
       if (msg.t === 'snapshot') {
         this.media = msg.media ?? {};
@@ -133,6 +242,7 @@ class DeskClient extends EventTarget {
         // silently stops working mid-show because the socket blipped is worse
         // than one that never worked.
         if (this.needsPin && this.#pin) this.authenticate(this.#pin);
+        this.#synced = true;
         this.#apply(msg.state);
         this.dispatchEvent(new CustomEvent('ready'));
         // A snapshot follows every reconnect, which is how a desk restart
@@ -199,6 +309,7 @@ class DeskClient extends EventTarget {
     if (this.#ws !== ws) return;         // an old socket's late close event
     this.#ws = null;
     this.connected = false;
+    this.#synced = false;
     // The skew is NOT reset here. The last beat-derived answer, even a
     // reconnect-old one, beats re-deriving from `updatedAt`, which on a
     // quiet desk is minutes stale and put a visibly wrong countdown on the
@@ -234,6 +345,104 @@ class DeskClient extends EventTarget {
     const started = this.state?.matchStartedAt;
     if (!started) return this.state?.matchClock ?? null;
     return (Date.now() + this.#skew - started) / 1000 + REBUILT.AUTO_START;
+  }
+
+  /**
+   * When the desk last said anything on this socket (any frame, the 10 s
+   * heartbeat included), on the monotonic clock, or null before the first
+   * socket opens. The program's handoff reads a silence from it directly
+   * rather than waiting on the watchdog, which only acts every 5 s.
+   */
+  get heardAt() { return this.#heardAt; }
+
+  /** A snapshot has arrived since the socket now open opened. */
+  get synced() { return this.#synced; }
+
+  /**
+   * What a program that can hand off to the field's own display is showing
+   * ('desk' or 'cheesy'), for the hello frame. Null on every other page.
+   */
+  setShowing(showing) {
+    const next = SHOWING.includes(showing) ? showing : null;
+    if (next === this.#showing) return;
+    this.#showing = next;
+    // With no socket open the next open reports it, at once.
+    if (this.#ws?.readyState === WebSocket.OPEN) this.#helloSoon();
+  }
+
+  /**
+   * On that same program, whether the field's display is ready to stand in
+   * ('ready', 'bad', 'none'), for the hello frame. Null on every other page.
+   */
+  setBackup(backup) {
+    const next = BACKUP.includes(backup) ? backup : null;
+    if (next === this.#backup) return;
+    this.#backup = next;
+    if (this.#ws?.readyState === WebSocket.OPEN) this.#helloSoon();
+  }
+
+  /**
+   * Tell the desk what this screen is (see helloFrame). Best effort, and
+   * never allowed to break the page: a report that fails to go is simply
+   * not there, and the show carries on.
+   */
+  #sendHello() {
+    try {
+      const ws = this.#ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(helloFrame(globalThis, {
+        surface: this.#name, showing: this.#showing, hz: this.#hz, backup: this.#backup,
+      })));
+    } catch { /* see above */ }
+  }
+
+  /** Again, once things have stopped changing for a second. */
+  #helloSoon() {
+    try {
+      clearTimeout(this.#helloTimer);
+      this.#helloTimer = setTimeout(() => { this.#helloTimer = null; this.#sendHello(); }, HELLO_DEBOUNCE_MS);
+    } catch { /* no timers: the next open still reports */ }
+  }
+
+  /**
+   * Re-report whenever what the hello frame says can have changed: the
+   * window resized (or moved to another display, which can change the
+   * refresh rate too), went full screen or back, or was hidden or shown.
+   */
+  #watchScreen() {
+    try {
+      globalThis.addEventListener?.('resize', () => { this.#measureHz(); this.#helloSoon(); });
+      const doc = globalThis.document;
+      doc?.addEventListener?.('fullscreenchange', () => this.#helloSoon());
+      doc?.addEventListener?.('visibilitychange', () => { this.#measureHz(); this.#helloSoon(); });
+      this.#measureHz();
+    } catch { /* a browser without these reports less; nothing else changes */ }
+  }
+
+  /**
+   * The refresh rate, from about two seconds of animation frames. Only while
+   * the page is visible: a hidden page gets no frames, so it reports null
+   * rather than a number from some other moment. Once, not continuously, so
+   * a screen that is only standing by is not kept busy measuring itself.
+   */
+  #measureHz() {
+    try { if (this.#hzFrame) cancelAnimationFrame(this.#hzFrame); } catch { /* none to cancel */ }
+    this.#hzFrame = 0;
+    if (globalThis.document?.hidden || typeof requestAnimationFrame !== 'function') {
+      this.#hz = null;
+      return;
+    }
+    const stamps = [];
+    const step = t => {
+      this.#hzFrame = 0;
+      if (globalThis.document?.hidden) { this.#hz = null; return; }
+      stamps.push(t);
+      const span = t - stamps[0];
+      if (span < HZ_SAMPLE_MS) { this.#hzFrame = requestAnimationFrame(step); return; }
+      this.#hz = hzOf(stamps.length - 1, span);
+      this.#helloSoon();
+    };
+    this.#hzFrame = requestAnimationFrame(step);
   }
 
   /**
@@ -320,15 +529,101 @@ export async function signInIfSignedOut() {
 }
 
 /**
- * Reads ?key= onto <html>, so one URL configures a surface for OBS alpha vs.
- * a Blackmagic luma key. A surface's own markup default (e.g. the side screen
- * shipping luma) holds unless the URL says otherwise.
+ * What a screen paints behind itself, set on <html data-key>:
+ *
+ *   alpha  nothing. For a layer something else puts a picture under: an OBS
+ *          Browser Source over a camera, or /s/watch over its field feed.
+ *   luma   black, for a hardware keyer that cuts the black out (a luma key
+ *          on a Blackmagic or Roland switcher).
+ *   fill   the CalGames backdrop, for a screen that IS the picture: a
+ *          browser full screen on a projector or a TV, or an HDMI input on a
+ *          video switcher that is cut to rather than keyed.
+ *
+ * Fill exists because the venues stopped using OBS. A transparent page in a
+ * plain browser is a WHITE page (the browser paints its own default behind
+ * it), and the program overlay sits on its empty screen until a real match
+ * loads, so an AV coordinator testing the desk against a field parked on its
+ * Test Match saw pure white, for good, and the volunteers gave up.
+ *
+ * No chroma (green) mode, on purpose. The brand palette carries WRRF green
+ * (#006549) and FIRST blue, so a green or a blue key eats pieces of the
+ * graphic, and every switcher that can chroma key can also luma key, which
+ * the graphics are already built and tested for.
  */
-export function applyDisplayMode() {
+export const KEY_MODES = ['alpha', 'luma', 'fill'];
+
+/**
+ * Which of those a screen uses, decided in this order:
+ *
+ *   1. ?key= in the address, whenever it names a mode. An address somebody
+ *      typed on purpose beats any guess.
+ *   2. A screen that has no "alone" look (the side screen, trivia, the
+ *      telestrator pad) keeps its markup default, exactly as before.
+ *   3. Inside OBS, the markup default: alpha for the program overlay, so a
+ *      Browser Source pointed at /s/program keeps working as it always has.
+ *   4. Framed inside another page (/s/watch frames the program over its
+ *      field feed), the markup default too, so the feed still shows through.
+ *   5. Otherwise this is a browser on its own, on a projector, a TV or an
+ *      HDMI input, and the screen gets its alone look.
+ *
+ * An unknown ?key= is ignored rather than written through: it used to land
+ * on <html> as is, match no style, and leave the page transparent, which in
+ * a plain browser is the white page again.
+ *
+ * Pure, so the tests can ask it every case without a browser.
+ */
+export function displayModeFor({ asked = null, markup = null, alone = null, inObs = false, embedded = false } = {}) {
+  const named = String(asked ?? '').trim().toLowerCase();
+  if (KEY_MODES.includes(named)) return named;
+  const fallback = markup || 'alpha';
+  if (!alone || inObs || embedded) return fallback;
+  return alone;
+}
+
+/**
+ * Running inside OBS. The same two tells the house audio player uses
+ * (surfaces/house/index.html, which explains them): the injected `obsstudio`
+ * object, which only reaches the top frame of a Browser Source, and
+ * `OBS/<version>` in the user agent, which reaches every frame.
+ */
+export function insideObs(win = globalThis) {
+  const hasObsObject = typeof win.obsstudio === 'object' && win.obsstudio !== null;
+  return hasObsObject || /\bOBS\/[\d.]+/.test(win.navigator?.userAgent ?? '');
+}
+
+/**
+ * Framed inside another page. Comparing `top` with `self` is allowed even
+ * across origins; if a browser ever refuses, the answer is "framed", which
+ * keeps the old transparent behaviour. Outside a browser there is no `top`
+ * at all, and nothing frames a page that is not in one.
+ */
+export function framedPage(win = globalThis) {
+  try {
+    return win.top != null && win.top !== win.self;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Sets <html data-key> (see displayModeFor) and returns the address's
+ * query, so one URL configures a screen for OBS, a hardware keyer or a
+ * projector. `alone` is the mode a screen wants when it is the whole
+ * picture; a screen that passes nothing keeps its markup default (the side
+ * screen ships luma) unless the URL says otherwise.
+ */
+export function applyDisplayMode({ alone = null } = {}) {
   const p = new URLSearchParams(location.search);
   const root = document.documentElement;
-  root.dataset.key = p.get('key') || root.dataset.key || 'alpha';
+  root.dataset.key = displayModeFor({
+    asked: p.get('key'), markup: root.dataset.key, alone,
+    inObs: insideObs(globalThis), embedded: framedPage(globalThis),
+  });
   if (p.get('surface')) root.dataset.surface = p.get('surface');
+  // ?safe=1: a TV that overscans (crops the picture's edges). The score bar
+  // then keeps its text above the 3.5% action-safe line instead of centering
+  // it; the stream and an LED wall show the whole frame and need nothing.
+  if (p.get('safe') === '1') root.dataset.safe = 'action';
   return p;
 }
 

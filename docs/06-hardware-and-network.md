@@ -108,7 +108,10 @@ rules enforce this:
    minute, and switches those sources off. This is deliberate: keep the naming convention.
 2. **On the ATEM DSK**, only one fill is ever keyed: ours. The Cheesy audience display machine
    feeds the *venue projector* (the field's own screen), **never** the stream chain. This rule is
-   absolute, because the scorekeeper cannot soften it for you: see below.
+   absolute, because the scorekeeper cannot soften it for you: see below. The one exception is
+   built into the desk and keeps the rule's point: `/s/program`, on the keyed input, holds Cheesy's
+   audience display loaded but unseen, and shows it **in place of** ours only while the desk cannot
+   give a score, never with it ([13-deployment.md](13-deployment.md), *How a screen decides*).
 3. **Do not rely on "Blank" mode.** An earlier version of this rule asked the scorekeeper to keep
    the audience display blanked on any machine in the stream chain. That is not a promise anybody
    can keep. Cheesy Arena sets the audience display to `match` *unconditionally* inside its

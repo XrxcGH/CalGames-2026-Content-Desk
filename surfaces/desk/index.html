@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-surface="console">
+<html lang="en" data-surface="console" data-view="simple">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +7,28 @@
 <link rel="icon" href="/favicon.svg?l=D">
 <link rel="stylesheet" href="/theme/tokens.css">
 <link rel="stylesheet" href="/shared/fonts.css">
+<!--
+  Which view, decided here and before the first paint. desk.js is a module
+  and runs after the page has drawn, so a volunteer who chose Simple would
+  watch every panel flash up and fold away on each reload. Simple is the
+  default in the markup above, so blocked storage still gets the short page.
+  desk.js switches the view from then on and is the only thing that writes
+  the remembered choice; ?view= opens one view for this load without
+  touching it, which is how the previews photograph both.
+-->
+<script>
+  (function () {
+    var root = document.documentElement;
+    var view = '';
+    try {
+      view = new URLSearchParams(location.search).get('view') || localStorage.getItem('desk.view') || '';
+    } catch (e) { /* storage blocked: the markup default stands */ }
+    if (view === 'simple' || view === 'everything') root.setAttribute('data-view', view);
+    try {
+      if (localStorage.getItem('desk.obsShown') === '1') root.setAttribute('data-obs-shown', '');
+    } catch (e) { /* storage blocked: OBS controls stay folded while OBS is off */ }
+  })();
+</script>
 <style>
 /* Operator surface: viewed at 2 feet, exempt from the broadcast type floors.
    Keyboard-first. The producer must be able to run the whole show from here
@@ -83,6 +105,147 @@ h1 { font-size: 26px; font-variation-settings: "wdth" 118; margin: 0; }
   text-decoration: none; }
 .vlink:hover { color: var(--text); }
 .vlink:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+
+/*
+ * Simple and Everything.
+ *
+ * Twenty-five panels on one page is the console an experienced crew runs a
+ * broadcast from, and it is also what a first-time AV coordinator met with
+ * nothing on the projector: they could not find the few controls they
+ * needed among the many they did not, and gave up. Simple keeps the panels
+ * a match day needs; Everything is the whole console, one click away. Only
+ * what is SHOWN changes: every panel, every key and every poll keeps running
+ * in both views, which is why a shortcut for a panel Simple leaves out still
+ * fires.
+ *
+ * The stylesheet is the one place that decides what a view hides. The head
+ * script sets data-view before the first paint, and desk.js reads the result
+ * back (offPage) to keep the jump strip to panels that are on the page.
+ * A panel joins Simple by carrying data-simple; a fold that holds one carries
+ * it too, and desk.js holds that fold open, so Simple reads as plain cards
+ * with nothing to unfold. A fold's summary steps aside unless it carries
+ * data-simple as well, and then it is a plain heading: desk.js stops a click
+ * on it shutting the fold, and the rules below take away the chevron and
+ * the pointer that would promise one.
+ *
+ * The field-down kit ("Field down? Run matches by hand": Load a match by
+ * hand, the sample data, scoring by hand) is the one part of Simple that
+ * follows the field. It is clutter while the field runs the matches, and the
+ * first thing anybody needs the moment the field is gone, so Simple shows it
+ * only while desk.js has data-field="down"; Everything always has it. Simple
+ * shows only Load a match, as one row across the band: with the sample data
+ * beside it the band was 640px at 1080p and pushed Match steps, the card a
+ * hand-run match needs next, off the bottom of the screen. It lives in its own band
+ * (#fieldBand) above the cards rather than among them. Inside the card flow
+ * its coming and going rebalanced every column of a wide monitor: Safety
+ * message jumped from the top of one column to below the fold of another at
+ * the moment the field dropped, which is when somebody reaches for it. Above
+ * the flow it only moves the cards down, together, and each card stays in its
+ * own column. Before the desk has said anything (data-field unset) Simple
+ * leaves it out: a reload mid-show, with the field up, must not draw the band
+ * and then pull every card back up a moment later.
+ */
+html[data-view="simple"] .grid section:not([data-simple]),
+html[data-view="simple"] #fieldBand section:not([data-simple]),
+html[data-view="simple"]:not([data-field="down"]) #fieldBand,
+html[data-view="simple"] details.group:not([data-simple]),
+html[data-view="simple"] details.group > summary:not([data-simple]) { display: none; }
+html[data-view="simple"] [data-when-view="everything"],
+html[data-view="everything"] [data-when-view="simple"] { display: none; }
+html[data-view="simple"] details.group > summary[data-simple] { cursor: default; }
+html[data-view="simple"] details.group > summary[data-simple]::before { display: none; }
+html[data-view="simple"] details.group > summary[data-simple]:hover { color: var(--text-dim); }
+/*
+ * Recording, from the doors check's Recording row: desk.js sets
+ * data-recording="off" when this desk records nothing (no ffmpeg and no
+ * cameras listed). Replays, match videos, the segment cut and the head
+ * referee's frame-by-frame review are all made from that recording, so their
+ * controls only promise what cannot happen: the replay marker, Make a video,
+ * the two video lists, and the nav strip's Replay and Ref review links (the
+ * strip is shared, so its links are picked out by address). Unset, before
+ * the check has answered, shows them as before.
+ */
+html[data-recording="off"] [data-rec-only],
+html[data-recording="off"] .opnav a[href="/s/replay"],
+html[data-recording="off"] .opnav a[href="/s/var"] { display: none; }
+/*
+ * OBS, which most venues no longer run: the picture is a browser full screen
+ * on a projector or a hardware switcher. desk.js sets data-obs from the
+ * stream poll, "off" when this desk has no OBS set up at all. Its controls
+ * then fold behind one line (#sec-obs) instead of sitting there as dead
+ * buttons. A desk with OBS set up, connected or not, shows them exactly as
+ * before; so does a desk that has not answered yet.
+ */
+html[data-obs="off"]:not([data-obs-shown]) [data-obs-only],
+html[data-obs="off"] [data-when-obs="on"],
+html:not([data-obs="off"]) [data-when-obs="off"] { display: none; }
+
+.viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: -6px 0 12px; }
+.viewbar .btn { min-width: 112px; }
+/* The chosen view lit from the page attribute rather than aria-pressed, so
+   it is right in the first paint, before desk.js has run to set the state. */
+html[data-view="simple"] [data-view-pick="simple"],
+html[data-view="everything"] [data-view-pick="everything"] {
+  --btn-face: var(--accent); background: var(--accent); color: var(--text-on-accent);
+  font-weight: 700; }
+.viewbar .hint { flex: 1 1 320px; }
+#sec-obs { padding: 12px 20px; }
+#sec-obs p { margin: 0 0 8px; }
+
+/*
+ * The setup strip: what this desk found, a sentence or two each, at the top of both
+ * views. The field, the switcher, the graphics screens, and the access codes
+ * when they still need changing. A row stays off the page until the desk can
+ * say something about it (an older desk has no switcher or screens to ask
+ * about), and the strip goes with its last row. Each row's words carry its
+ * state; the dot only repeats it.
+ *
+ * Kept short on purpose: it sits above every show control. Each row is one
+ * run of text (the dot and the name inline, the words wrapping under them)
+ * rather than a column beside the name, which on a 1280px laptop squeezed
+ * the words into 180px and stood each row five lines tall.
+ */
+.kit { display: flex; flex-wrap: wrap; gap: 5px 8px; margin: -8px 0 12px; }
+.kit-row { flex: 1 1 330px; padding: 5px 10px; font-size: 13px; line-height: 1.45;
+  background: var(--surface-raised); clip-path: var(--chamfer); --ch: 8px; }
+.kit-row > b { font-family: var(--font-cond); font-weight: 700; font-size: 13px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--text-dim); }
+.kit-row > span { overflow-wrap: anywhere; }
+.kit-row .kdot { display: inline-block; width: 10px; height: 10px; vertical-align: -1px;
+  clip-path: var(--chamfer); --ch: 3px; background: var(--text-dim); }
+.kit-row[data-l="ok"] .kdot { background: var(--st-ok); }
+.kit-row[data-l="warn"] .kdot { background: var(--st-warn); }
+.kit-row[data-l="fail"] .kdot { background: var(--st-bad); }
+/* Gray: hardware this setup does not have, or a search still going. Never
+   red: nothing is wrong with a kit that has no switcher. */
+.kit-row[data-l="off"] > span, .kit-row[data-l="wait"] > span { color: var(--text-dim); }
+.kit-go { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.kit-go:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.kit-warn { flex: 1 1 100%; list-style: none; margin: 0; padding: 0; }
+.kit-warn li { padding: 5px 12px; margin-bottom: 4px; font-size: 13px; line-height: 1.45;
+  background: var(--surface-sunken); border-left: 4px solid var(--st-warn); }
+.kit-warn li[data-l="fail"] { border-left-color: var(--st-bad); }
+.kit[hidden], .kit-row[hidden], .kit-go[hidden] { display: none; }
+
+/* The field-down kit's band: above the card flow (see Simple and Everything
+   above), its cards side by side at the flow's own column width. */
+.more { margin: 0 0 10px; }
+.more > summary { cursor: pointer; font-size: 13px; color: var(--text-dim); padding: 2px 0; }
+.more > summary:hover { color: var(--text); }
+.more > summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+#fieldBand .band-cards { display: grid; margin-top: 12px; column-gap: 20px; align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr)); }
+html[data-view="simple"] #fieldBand .band-cards { grid-template-columns: minmax(0, 1fr); }
+/* Load a match's three boxes and its button: stacked in Everything's card,
+   one row across the band in Simple, so the band costs one card's header
+   and a row of inputs rather than a whole card's height. */
+.mrow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 12px; }
+.mrow > div { flex: 1 1 100%; min-width: 0; }
+.mrow > .mgo { margin: 12px 0 10px; }
+html[data-view="simple"] #fieldBand .mrow > div { flex: 1 1 200px; }
+html[data-view="simple"] #fieldBand .mrow > .mgo { flex: 0 0 auto; margin: 0 0 0; }
+html[data-view="simple"] #fieldBand section { margin-bottom: 12px; }
 
 /*
  * ONE flow of cards, not a show column beside a sidebar.
@@ -370,16 +533,57 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 <div class="wrap">
   <header>
     <h1>Desk console</h1>
-    <span class="hint">Keyboard-first. This runs the show with everything else dead.</span>
+    <span class="hint">Runs what every screen in the venue shows. The key on a button works
+      from anywhere on this page.</span>
     <a class="vlink" href="#vitalsSection"><span class="vdot" id="vitalsMirror" aria-hidden="true"></span><span id="vitalsMirrorText">doors check: not run yet</span></a>
     <span class="link" role="status" aria-live="polite"><span class="dot" id="dot" aria-hidden="true"></span><span id="linkText">connecting</span></span>
   </header>
+
+  <!-- What this desk found, in both views, so nobody has to open anything
+       to learn what is on air. desk.js fills it from the desk state, the
+       doors check, the switcher watcher and the screens that have said hello,
+       and leaves a row off the page until it has something to say. Only the
+       problems line is announced: the rows change with the show. -->
+  <div class="kit" id="kit" role="group" aria-label="What this desk found" hidden>
+    <!-- Whitespace between the dot, the name and the words: it spaces them
+         on screen, and without it a screen reader reads "Fieldconnected". -->
+    <div class="kit-row" id="kitField" hidden>
+      <i class="kdot" aria-hidden="true"></i> <b>Field</b> <span id="kitFieldSay"></span>
+      <a class="kit-go" id="kitFieldGo" href="#fieldDownKit" hidden>Run matches by hand</a>
+    </div>
+    <div class="kit-row" id="kitSwitcher" hidden>
+      <i class="kdot" aria-hidden="true"></i> <b>Switcher</b> <span id="kitSwitcherSay"></span>
+    </div>
+    <div class="kit-row" id="kitGraphics" hidden>
+      <i class="kdot" aria-hidden="true"></i> <b>Graphics</b> <span id="kitGraphicsSay"></span>
+    </div>
+    <div class="kit-row" id="kitCodes" hidden>
+      <i class="kdot" aria-hidden="true"></i> <b>Access codes</b> <span id="kitCodesSay"></span>
+      <a class="kit-go" href="/s/setup#codes">Change the codes</a>
+    </div>
+    <ul class="kit-warn" id="kitWarn" aria-live="polite" aria-label="Problems the desk found"></ul>
+  </div>
+
+  <!-- Above the jump strip, where a first-timer's eye starts. Two buttons
+       rather than a switch: each one says what it gives you. No aria-pressed
+       in the markup: desk.js sets it as it loads, and a hard-coded "true" on
+       Simple lit it gold through the first paint of an Everything page, then
+       faded it out (the previews photographed it mid-fade, both lit). -->
+  <div class="viewbar" role="group" aria-label="How much of the desk to show">
+    <button class="btn" type="button" data-view-pick="simple">Simple</button>
+    <button class="btn" type="button" data-view-pick="everything">Everything</button>
+    <span class="hint" data-when-view="simple">What a match day needs. <b>Everything</b> adds
+      music, show automation, scoring by hand when the field is down, and the end-of-day
+      tools. The keys work the same in both.</span>
+    <span class="hint" data-when-view="everything">Every panel on the desk. <b>Simple</b> keeps
+      only what a match day needs. The keys work the same in both.</span>
+  </div>
 
   <nav class="jump" aria-label="Jump to a section">
     <a href="#sec-match">Match</a>
     <a href="#sec-cameras">Cameras</a>
     <a href="#sec-cues">Automation</a>
-    <a href="#sec-audio">Audio</a>
+    <a href="#sec-audio">Music</a>
     <a href="#sec-status">Delay card</a>
     <a href="#sec-oncamera">On camera</a>
     <a href="#sec-slides">Slides</a>
@@ -387,15 +591,142 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
     <a href="#sec-awards">Awards</a>
     <a href="#vitalsSection">Doors check</a>
     <!-- The Start here box sends a first-timer here, and the section lives
-         inside the field-down fold, far down the page. -->
+         inside the field-down fold, which can start shut. -->
     <a href="#sec-sample">Sample data</a>
     <a href="#emergSection" class="danger">Safety</a>
   </nav>
 
+  <!-- Above the card flow, not in it: see "Simple and Everything" in the
+       stylesheet. desk.js sets data-field from the desk state. -->
+  <div id="fieldBand">
+      <!-- The degraded-mode kit. Closed on a normal day in Everything so
+           nobody scrolls past hand-scoring buttons; desk.js swings it open the
+           moment the field bridge drops, which is exactly when it matters. In
+           Simple it is there only while the field is down. -->
+      <!-- data-simple on the fold, its heading and Load a match: Simple
+           shows them, held open, with this heading as a plain one (see the
+           stylesheet). Never the sample data or the hand scoring, which is
+           why Load a match names the scoring keys and the view they live in. -->
+      <details class="group" id="fieldDownKit" data-simple>
+        <summary data-simple>Field down? Run matches by hand</summary>
+        <div class="band-cards">
+<section data-simple>
+        <h2>Load a match by hand</h2>
+        <p class="hint" data-when-view="everything">Puts a match's teams on the screens when
+          the field cannot.</p>
+        <!-- Grey examples, never filled-in values. These are real Bay Area
+             team numbers, loading a match takes the program screen, and this
+             kit unfolds itself the moment the field bridge drops: one press
+             by a panicking first-timer put an invented "Qualification 42"
+             alliance overview on program and every TV in the venue. desk.js
+             refuses an empty form for the same reason the lower third does. -->
+        <!-- One row across the band in Simple (see .mrow in the stylesheet),
+             stacked as before in Everything's narrower card. -->
+        <div class="mrow">
+          <div><label for="mName">Match name</label>
+            <input id="mName" placeholder="Qualification 42"></div>
+          <div><label for="mRed">Red alliance: team numbers</label>
+            <input id="mRed" placeholder="846 1868 253"></div>
+          <div><label for="mBlue">Blue alliance: team numbers</label>
+            <input id="mBlue" placeholder="100 115 670"></div>
+          <div class="mgo"><button class="btn needs-link" id="loadMatch">Load</button></div>
+        </div>
+        <!-- What Load did, right under it. -->
+        <p class="hint" id="loadHint" aria-live="polite"></p>
+        <!-- Simple leaves Score by hand out, so a volunteer running matches
+             by hand would otherwise post a 0 to 0 final on every screen with
+             no idea the score could be typed. The keys work in either view. -->
+        <!-- Under the boxes, not above them: on a laptop at 150% the band
+             starts halfway down the screen, and the boxes and Load are what
+             must be on it. And the match steps by their keys too: the band can
+             push the Match steps card below the bottom edge, and the keys
+             reach it from here without scrolling. -->
+        <p class="hint" data-when-view="simple" id="loadScoreHint">Fill in the boxes and press
+          <b>Load</b> to put the match's teams on the screens. Then step the screens through the match
+          with <b>Match steps</b> below, or the keys <b>1</b> to <b>5</b>.
+          To type the score as it happens, press <b>Everything</b> and use <b>Score by
+          hand</b>, or the keys <b>Q W E</b> (red) and <b>A S D</b> (blue). Every key works
+          from anywhere on this page.</p>
+        <p class="hint" data-when-view="everything">With the field connected, names fill in
+          from its team list on their own. Without it, numbers alone are enough for the
+          overview to build itself.</p>
+      </section>
+
+<!-- Not data-simple: Sample data is for testing, and the desk refuses it
+     while a field is connected. In Simple it pushed the cards a whole card
+     lower at the moment the field dropped, which is when somebody needs the
+     match steps; the Start here box's link to it opens Everything. -->
+<section id="sec-sample">
+        <h2>Sample data <span class="hint">for testing, not for the show</span></h2>
+        <!--
+          A desk with no field attached and no match loaded draws nothing at
+          all, on every screen. That reads as broken rather than as idle, so
+          the first question anyone evaluating this asks is whether the
+          overlays work, and the only answer used to be "start it again with
+          --demo", which means a restart and a match loop running underneath
+          you while you try to look at a still graphic.
+        -->
+        <p class="hint">Fills every screen with invented teams, scores, rankings,
+          slides, a sponsor, an analysis panel, a card call, an award plate and two
+          stand-in robot photos, so you can walk the screen buttons above and see
+          what each one looks like. For setting up a monitor, showing somebody the
+          graphics, or checking a projector before doors. <b>Not for the show.</b></p>
+        <!-- The fine print folds: this card now sits in the field-down band
+             beside Load a match by hand, and at full length it was the tallest
+             thing in the band, pushing every other card below the fold of a
+             1080p monitor at the moment the field went away. -->
+        <details class="more">
+        <summary>How it keeps out of the show</summary>
+        <p class="hint">Everything it emits is tagged as demo: scores carry an
+          <b>UNOFFICIAL</b> tag, nothing can be published, and the event log names the source.
+          Every word of it says <b>SAMPLE</b>, so if any of it reaches a projector by
+          accident the room can tell at a glance.</p>
+        <p class="hint"><b>Nothing is written to disk, and it clears itself.</b> The
+          sample disappears from every screen the moment a real match loads, from the
+          field or from this console, so a forgotten sample never reaches the event.
+          <b>Clear sample data</b> does the same by hand. The button refuses while the
+          desk is connected to a field, so it cannot reach the event.</p>
+        <p class="hint">Three things it deliberately leaves alone, because each one
+          would hide the screens you are trying to look at: the <b>delay card</b> and
+          the <b>safety message</b> paint over everything, and the <b>countdown</b> takes
+          over the side screens completely. Each has its own panel on this console (the
+          countdown is in <b>Everything</b>). And no award winner, ever.</p>
+        </details>
+        <div class="row">
+          <button class="btn" id="sampleGo">Fill the screens with sample data</button>
+          <button class="btn" id="sampleClear">Clear sample data</button>
+        </div>
+        <p class="hint" id="sampleNote" role="status"></p>
+      </section>
+
+<section>
+        <h2>Score by hand <span style="color:var(--st-warn)">· estimated</span></h2>
+        <p class="hint">For when the field cannot send the score. Typed points go out as
+          <b>estimated</b> and show with an <b>UNOFFICIAL</b> tag on screen. We don't present
+          a guess as official.</p>
+        <div class="row">
+          <button class="btn" data-score="red:fuel:1" aria-label="Red plus 1 fuel (keyboard shortcut Q)">Red +1 fuel<kbd aria-hidden="true">Q</kbd></button>
+          <button class="btn" data-score="red:fuel:5" aria-label="Red plus 5 fuel (keyboard shortcut W)">Red +5<kbd aria-hidden="true">W</kbd></button>
+          <button class="btn" data-score="red:tower:10" aria-label="Red climb level 1 (keyboard shortcut E)">Red climb L1<kbd aria-hidden="true">E</kbd></button>
+          <button class="btn" data-score="red:tower:20" aria-label="Red climb level 2">L2</button>
+          <button class="btn" data-score="red:tower:30" aria-label="Red climb level 3">L3</button>
+        </div>
+        <div class="row">
+          <button class="btn" data-score="blue:fuel:1" aria-label="Blue plus 1 fuel (keyboard shortcut A)">Blue +1 fuel<kbd aria-hidden="true">A</kbd></button>
+          <button class="btn" data-score="blue:fuel:5" aria-label="Blue plus 5 fuel (keyboard shortcut S)">Blue +5<kbd aria-hidden="true">S</kbd></button>
+          <button class="btn" data-score="blue:tower:10" aria-label="Blue climb level 1 (keyboard shortcut D)">Blue climb L1<kbd aria-hidden="true">D</kbd></button>
+          <button class="btn" data-score="blue:tower:20" aria-label="Blue climb level 2">L2</button>
+          <button class="btn" data-score="blue:tower:30" aria-label="Blue climb level 3">L3</button>
+        </div>
+      </section>
+        </div>
+      </details>
+  </div>
+
   <div class="grid">
     <div>
-<section>
-        <h2>Now</h2>
+<section data-simple>
+        <h2>On the field now</h2>
         <div class="now">
           <div>
             <span class="sr-only">Red alliance score</span>
@@ -415,8 +746,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <div class="hint" id="nMatch" aria-live="polite">No match loaded</div>
       </section>
 
-<section id="sec-match">
-        <h2>Match</h2>
+<section id="sec-match" data-simple>
+        <h2>Match steps</h2>
         <div class="row">
           <button class="btn" data-emit="match.preview" aria-label="Preview (keyboard shortcut 1)">Preview<kbd aria-hidden="true">1</kbd></button>
           <button class="btn" data-emit="match.armed" aria-label="Arm (keyboard shortcut 2)">Arm<kbd aria-hidden="true">2</kbd></button>
@@ -425,10 +756,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <button class="btn" data-emit="match.score_posted" aria-label="Post score (keyboard shortcut 5)">Post score<kbd aria-hidden="true">5</kbd></button>
           <button class="btn" data-emit="match.aborted" aria-label="Abort (keyboard shortcut 0)">Abort<kbd aria-hidden="true">0</kbd></button>
         </div>
-        <p class="hint"><b>Arm</b> flips program to the score bar. Hit it when the field
-          goes green, before the announcer starts the countdown. With the Cheesy bridge up,
-          it fires on its own the moment every robot links.</p>
-        <label>Card call</label>
+        <p class="hint">The screens follow each match through these steps. With the field
+          connected they happen on their own: press one only to put the screens right.
+          <b>Arm</b> puts the score bar up; it fires by itself the moment every robot links,
+          or press it when the field goes green, before the countdown.</p>
+        <label>Card call: a yellow or red card on screen</label>
         <p class="hint">Puts the card on screen so the announcer has something on air
           while they explain it. Do it between the buzzer and the score reveal.</p>
         <div class="row">
@@ -438,7 +770,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           </select>
           <select id="ccTeamSel" aria-label="Team the card is for" style="flex:1 1 150px"></select>
           <input id="ccReasonIn" aria-label="Reason for the card"
-            placeholder="What for, in the GA's words" style="flex:3 1 240px">
+            placeholder="What for, in the announcer's words" style="flex:3 1 240px">
         </div>
         <div class="row">
           <button class="btn btn--go" id="ccShow">Put the card up</button>
@@ -446,7 +778,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <p class="hint" id="ccHint" aria-live="polite"></p>
 
-        <label id="screenRowLabel">Program screen: one press takes it</label>
+        <label id="screenRowLabel">Main screen (program): one press puts it up</label>
         <!-- Direct buttons, not a dropdown-and-Take: the two-step select hid
              the live screen inside a closed control, could not even LIST the
              runtime screens (award, sponsor, card call), and mid-ceremony
@@ -455,23 +787,39 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
              The row is built from the control map so it cannot drift from
              what a Stream Deck sees, and the live screen is always lit. -->
         <div class="row" id="screenRow" role="group" aria-labelledby="screenRowLabel"></div>
-        <p class="hint"><b>B</b> takes blank instantly, from anywhere on this page. A manual take
-          holds until you pick <b>Auto</b>, so the next match loading will not move it.</p>
+        <p class="hint"><b>B</b> blanks the main screen at once, from anywhere on this page. A
+          screen you pick here stays up, even when the next match loads, until you press
+          <b>Auto</b> to hand it back to the match.</p>
       </section>
 
-<section id="sec-cameras">
-        <h2>Cameras <span class="hint" id="sceneNote" aria-live="polite">·</span></h2>
+<!-- The stand-in for the OBS panels when this desk has no OBS: one line
+     where the camera row used to sit, instead of a panel of buttons that cut
+     nothing and a stream panel that cannot start. Shown by the stylesheet
+     only while desk.js has data-obs="off"; Everything only, since Simple
+     leaves the camera panels out anyway. -->
+<section id="sec-obs" data-when-obs="off">
+        <p class="hint">This desk is not set up to drive OBS, so its camera and stream
+          controls have nothing to cut or stream.</p>
+        <button class="btn" type="button" id="obsToggle" aria-expanded="false"
+          aria-controls="sec-cameras">Using OBS? Show the camera controls</button>
+      </section>
+
+<section id="sec-cameras" data-obs-only>
+        <h2>Cameras in OBS <span class="hint" id="sceneNote" aria-live="polite">·</span></h2>
         <div class="row" id="sceneRow"></div>
-        <p class="hint">The shot, not the graphic. Screens follow the match on their own,
-          so a late cut leaves the graphics right. Autopilot never cuts away from the field
-          mid-match; you always can. Arm the automatic cuts in <b>Show automation</b>
-          below.</p>
+        <p class="hint">Cuts OBS to another camera shot. The graphics are separate and follow
+          the match on their own, so a late cut leaves them right. Autopilot never cuts away
+          from the field mid-match; you always can. Arm the automatic cuts in <b>Show
+          automation</b> below.</p>
       </section>
 
 <section id="sec-cues">
         <h2>Show automation <span class="hint" id="cueNote" aria-live="polite">·</span></h2>
-        <p class="hint">A cue is the desk doing one thing by itself: cutting to the field
-          when the match arms, ducking the music when the announcer talks. Every cue starts
+        <!-- The camera half of the example only where there are cameras to cut. -->
+        <p class="hint">A cue is the desk doing one thing by itself: <span
+          data-when-obs="on">cutting to the field</span><span data-when-obs="off">putting
+          the score bar up</span> when the match arms, ducking the music when the announcer
+          talks. Every cue starts
           <b>off</b>, and an off cue still counts what it <i>would</i> have done, so you can
           watch it be right before you trust it. <b>Run now</b> fires one by hand whatever
           its setting.</p>
@@ -482,18 +830,21 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <div id="cueList" class="pbook" style="max-height:340px"></div>
       </section>
 
-<section>
-        <h2>Replay markers</h2>
+<!-- data-rec-only: off the page on a desk that records nothing (see the
+     stylesheet). The Space key still drops a marker either way. -->
+<section data-rec-only>
+        <h2>Mark a moment for replay</h2>
         <div class="row">
           <button class="btn needs-link" id="mark" aria-label="Mark replay moment (keyboard shortcut space bar)" style="width:100%">Mark<kbd aria-hidden="true">SPACE</kbd></button>
         </div>
-        <p class="hint">Drops a marker at <b>now − 2s</b>, because human reaction time
-          is real. Automation catches the scoring; a human catches the interesting.</p>
+        <p class="hint">Leaves a marker the replay operator can jump to, set two seconds
+          back (<b>now − 2s</b>) because human reaction time is real. Automation catches
+          the scoring; a human catches the interesting.</p>
         <div id="markers" class="hint"></div>
       </section>
 
 <section id="sec-audio">
-        <h2>House audio <span class="hint" id="audioWho">·</span></h2>
+        <h2>Music in the room <span class="hint" id="audioWho">·</span></h2>
         <div class="now-audio">
           <div>
             <div class="ah-title" id="audioTitle">Nothing playing</div>
@@ -535,9 +886,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           team.</p>
       </section>
 
-<section id="sec-status">
-        <h2>Delay &amp; status card</h2>
-        <p class="hint">Puts a "why we're waiting" card on program and the side screens.
+<section id="sec-status" data-simple>
+        <h2>Delay card: why we are waiting</h2>
+        <p class="hint">Puts a "why we're waiting" card on the main screen and the side screens.
           An unexplained stoppage reads as dead air; a named one reads as process.</p>
         <div class="row">
           <button class="btn" data-status="delay:Field delay">Field delay</button>
@@ -566,8 +917,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="statusHint" aria-live="polite"></p>
       </section>
 
-<section>
-        <h2>Lower third</h2>
+<section data-simple>
+        <h2>Name on screen (lower third)</h2>
+        <p class="hint">Puts a name and a title along the bottom of the main screen.</p>
         <label for="t1">Line 1</label>
         <input id="t1" placeholder="Priya Raman">
         <label for="t2">Line 2</label>
@@ -581,7 +933,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
 <section id="sec-oncamera">
-        <h2>On camera</h2>
+        <h2>Names for the people on camera</h2>
+        <p class="hint">Puts a name under each person at the analysis desk or in an
+          interview, in the order they sit.</p>
         <label for="panelTitle">Segment</label>
         <input id="panelTitle" placeholder="Analysis desk">
         <div class="panel-cols">
@@ -621,15 +975,15 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
 <section>
-        <h2>Telestrator</h2>
+        <h2>Telestrator: drawing on a replay</h2>
         <label for="analyst">Analyst name (shown on the ANALYSIS chip)</label>
         <input id="analyst" placeholder="Priya Raman">
         <label for="frame">Frozen frame URL</label>
         <input id="frame" placeholder="/media/teams/... or any image URL">
         <p class="hint">The analyst draws on the frame the audience is seeing, not a
           blank sheet. The replay console's <b>Send frame to analyst</b> pushes one
-          automatically; this field is the manual fallback. <b>Hide</b> kills the
-          render surface instantly without clearing the analyst's pad, and
+          automatically; this field is the manual fallback. <b>Hide</b> takes the
+          drawing off the broadcast at once without clearing the analyst's pad, and
           <b>Show again</b> is the way back from it.</p>
         <!-- "Send frame" and "Go live" told the operator nothing about which
              was which, and "Go live" read as "put the telestrator on air" when
@@ -638,7 +992,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
           <button class="btn needs-link" id="teleSend"
             title="Freezes the image in the box above onto the analyst's pad.">Send this URL</button>
           <button class="btn needs-link" id="teleLive"
-            title="Puts the render back after Hide. The frozen frame and the ink are left alone.">Show again</button>
+            title="Puts the drawing back after Hide. The frozen frame and the ink are left alone.">Show again</button>
           <button class="btn needs-link" id="teleClear"
             title="Wipes the analyst's drawing. The frozen frame stays.">Clear ink</button>
           <button class="btn needs-link" id="teleHide"
@@ -649,7 +1003,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
     </div>
 
     <div>
-<section id="emergSection">
+<section id="emergSection" data-simple>
         <h2>Safety message</h2>
         <p class="hint">Goes on every screen at once and stays there until you clear it.
           It covers the match graphic. Use it for the room, not for a delay.</p>
@@ -672,10 +1026,11 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="emergState" aria-live="assertive" role="alert"></p>
       </section>
 
-<section id="sec-slides">
+<section id="sec-slides" data-simple>
         <h2>Slides &amp; shout-outs</h2>
-        <p class="hint">Recognition and info slides. <b>Next</b> steps through the deck
-          on program; the side screens also rotate the whole deck on their own.</p>
+        <p class="hint">Thank-you and information slides for the main screen. <b>Next</b>
+          steps through the deck there; the side screens also rotate the whole deck on
+          their own.</p>
         <div id="slList" class="pbook" style="max-height:180px"></div>
         <div class="row" style="margin-top:8px">
           <select id="slKindSel" aria-label="Slide kind" style="flex:0 1 150px">
@@ -704,9 +1059,9 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 
       <section id="sec-sponsor">
         <h2>Sponsors</h2>
-        <p class="hint">The rotation the broadcast owes the people who paid.
-          <b>Next sponsor</b> steps through the plan on program; every airing
-          is counted for the post-event report.</p>
+        <p class="hint">Puts the sponsors' cards on the main screen, one at a time.
+          <b>Next sponsor</b> steps through the plan; every airing is counted for the
+          post-event report.</p>
         <!-- Dead until the list exists, and saying so. A shipped config has no
              sponsors, so these two read as working controls and the first
              press answered "No sponsors are configured." with nowhere to go
@@ -720,7 +1075,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
 <section id="sec-timer">
-        <h2>Event timer</h2>
+        <h2>Countdown on the side screens</h2>
         <p class="hint">Counts down huge on the side screens: turn one to face the
           field for robot setup. It clears itself the moment a match starts.</p>
         <div class="row">
@@ -737,8 +1092,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="tmHint" aria-live="polite"></p>
       </section>
 
-<section id="sec-awards">
-        <h2>Awards</h2>
+<section id="sec-awards" data-simple>
+        <h2>Awards ceremony</h2>
 
         <!-- The lock. When a Judge Advisor code is configured, the whole
              panel is behind it: not just winner entry but the reveal, so the
@@ -748,22 +1103,24 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
              has the key. -->
         <div id="awLock" hidden>
           <p class="hint">Awards are locked behind the <b>Judge Advisor's
-            code</b>, which is not the desk PIN. The JA loads winners from
-            their own page all day and hands the code to the desk right before
-            the ceremony. Nothing award-related can go on screen until then.</p>
+            code</b>, which is not the desk PIN. The Judge Advisor loads
+            winners from their own page all day and hands the code to the desk
+            right before the ceremony. Nothing award-related can go on screen
+            until then.</p>
           <div class="row">
             <input id="awCode" type="password" autocomplete="off"
               aria-label="Judge Advisor awards code"
-              placeholder="Awards code from the JA" style="flex:2 1 180px">
+              placeholder="Awards code from the Judge Advisor" style="flex:2 1 180px">
             <button class="btn" id="awUnlock">Unlock awards</button>
           </div>
           <p class="hint" id="awLockHint" aria-live="polite"></p>
         </div>
 
         <div id="awPanel">
-        <p class="hint">Show puts the title and definition up for the GA to read.
-          A winner the JA loaded rides along automatically; the winner box here
-          is only for last-second corrections. Everything stays OFF every feed
+        <p class="hint">Runs the awards on the screens. <b>Show</b> puts the award's
+          title and definition up for the announcer to read. A winner the Judge
+          Advisor loaded rides along automatically; the winner box here is only
+          for last-second corrections. Everything stays OFF every feed
           until you press <b>Reveal</b>. Presented awards tick off.</p>
         <!-- Tall enough for a whole ceremony without scrolling: twelve awards
              and two ceremony headings. At the old 180px the list clipped mid
@@ -778,7 +1135,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
         <div class="row">
           <input id="awWinnerIn" aria-label="Award winner"
-            placeholder="Winner (blank = use the JA's loaded one)" style="flex:3 1 200px">
+            placeholder="Winner (blank = the Judge Advisor's)" style="flex:3 1 200px">
           <input id="awTeamIn" aria-label="Winning team number"
             placeholder="Team #" inputmode="numeric" style="flex:0 1 90px">
         </div>
@@ -792,9 +1149,12 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
       <section id="sec-rundown">
-        <h2>Run of show</h2>
-        <p class="hint">The day as a list, timed from measured pace. The side
-          screens count down to whatever is next.</p>
+        <h2>Run of show: the day's schedule</h2>
+        <!-- No screen reads the run of show (the reducer drops rundown.updated
+             and only this console fetches /api/rundown), so this says so
+             rather than promising a countdown nobody will see. -->
+        <p class="hint">The day as a list, timed from how fast matches are really
+          running. It is this console's own list: no screen shows it.</p>
         <p class="hint" id="rdNow" aria-live="polite">No run of show yet. The content lead
           builds the day at <b>/s/setup</b>, behind the settings code.</p>
         <!-- Enabled by desk.js once there are segments to advance through. It
@@ -807,11 +1167,12 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="rdHint" aria-live="polite"></p>
       </section>
 
-<section>
-        <h2>Publish a segment</h2>
-        <p class="hint">Matches queue themselves when the score posts; this is for everything
-          else. Press <b>Start</b> when the segment begins and <b>Queue</b> when it ends. The
-          queue cuts it from the program recording and holds it if the length looks wrong.</p>
+<section data-rec-only>
+        <h2>Make a video of a ceremony</h2>
+        <p class="hint">Turns a ceremony, an interview or any other segment into its own
+          video; matches do this by themselves when the score posts. Press <b>Start</b> when
+          the segment begins and <b>Queue</b> when it ends. The queue cuts it from the main
+          screen's recording and holds it if the length looks wrong.</p>
         <div class="row">
           <select id="segKind" aria-label="Segment type" style="flex:1; min-width: 190px">
             <option value="selection">Alliance selection</option>
@@ -837,8 +1198,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="segState" aria-live="polite">Not marking.</p>
       </section>
 
-<section>
-        <h2>Stream</h2>
+<section id="sec-stream" data-obs-only>
+        <h2>Live stream in OBS</h2>
         <p class="hint" id="streamState" aria-live="polite">Checking OBS...</p>
         <div class="row">
           <button class="btn" id="streamStart" disabled>Start stream</button>
@@ -855,99 +1216,16 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         <p class="hint" id="streamMsg" aria-live="polite"></p>
       </section>
 
-      <!-- The degraded-mode kit. Closed on a normal day so a first-timer
-           never scrolls past hand-scoring buttons; desk.js swings it open the
-           moment the field bridge drops, which is exactly when it matters. -->
-      <details class="group" id="fieldDownKit">
-        <summary>Field-down kit: run matches by hand</summary>
-<section>
-        <h2>Load match</h2>
-        <!-- Grey examples, never filled-in values. These are real Bay Area
-             team numbers, loading a match takes the program screen, and this
-             kit unfolds itself the moment the field bridge drops: one press
-             by a panicking first-timer put an invented "Qualification 42"
-             alliance overview on program and every TV in the venue. desk.js
-             refuses an empty form for the same reason the lower third does. -->
-        <label for="mName">Match name</label>
-        <input id="mName" placeholder="Qualification 42">
-        <label for="mRed">Red alliance: team numbers</label>
-        <input id="mRed" placeholder="846 1868 253">
-        <label for="mBlue">Blue alliance: team numbers</label>
-        <input id="mBlue" placeholder="100 115 670">
-        <div class="row" style="margin-top:12px">
-          <button class="btn needs-link" id="loadMatch">Load</button>
-        </div>
-        <p class="hint">With the Cheesy bridge up, names fill in from the field's team
-          list on their own. Running desk-only, numbers alone are enough for the overview to
-          build itself.</p>
-        <p class="hint" id="loadHint" aria-live="polite"></p>
-      </section>
-
-<section id="sec-sample">
-        <h2>Sample data <span class="hint">for testing, not for the show</span></h2>
-        <!--
-          A desk with no field attached and no match loaded draws nothing at
-          all, on every screen. That reads as broken rather than as idle, so
-          the first question anyone evaluating this asks is whether the
-          overlays work, and the only answer used to be "start it again with
-          --demo", which means a restart and a match loop running underneath
-          you while you try to look at a still graphic.
-        -->
-        <p class="hint">Fills every screen with invented teams, scores, rankings,
-          slides, a sponsor, an analysis panel, a card call, an award plate and two
-          stand-in robot photos, so you can walk the screen buttons above and see
-          what each one looks like. For setting up a monitor, showing somebody the
-          graphics, or checking a projector before doors. <b>Not for the show.</b></p>
-        <p class="hint">Everything it emits is tagged as demo: scores draw
-          <b>outlined</b>, nothing can be published, and the event log names the source.
-          Every word of it says <b>SAMPLE</b>, so if any of it reaches a projector by
-          accident the room can tell at a glance.</p>
-        <p class="hint"><b>Nothing is written to disk, and it clears itself.</b> The
-          sample disappears from every screen the moment a real match loads, from the
-          field or from this console, so a forgotten sample never reaches the event.
-          <b>Clear sample data</b> does the same by hand. The button refuses entirely
-          while the field bridge is up.</p>
-        <p class="hint">Three things it deliberately leaves alone, because each one
-          would hide the screens you are trying to look at: the <b>status card</b> and
-          the <b>safety message</b> paint over everything, and the <b>timer</b> takes
-          over the side screens completely. All three are one button away on this
-          console. And no award winner, ever.</p>
-        <div class="row">
-          <button class="btn" id="sampleGo">Fill the screens with sample data</button>
-          <button class="btn" id="sampleClear">Clear sample data</button>
-        </div>
-        <p class="hint" id="sampleNote" role="status"></p>
-      </section>
-
-<section>
-        <h2>Shadow scoring <span style="color:var(--st-warn)">· estimated</span></h2>
-        <p class="hint">Typed scores publish at <b>estimated</b> confidence and render
-          <b>outlined</b> on air, never solid. We don't present a guess as official.</p>
-        <div class="row">
-          <button class="btn" data-score="red:fuel:1" aria-label="Red plus 1 fuel (keyboard shortcut Q)">Red +1 fuel<kbd aria-hidden="true">Q</kbd></button>
-          <button class="btn" data-score="red:fuel:5" aria-label="Red plus 5 fuel (keyboard shortcut W)">Red +5<kbd aria-hidden="true">W</kbd></button>
-          <button class="btn" data-score="red:tower:10" aria-label="Red climb level 1 (keyboard shortcut E)">Red climb L1<kbd aria-hidden="true">E</kbd></button>
-          <button class="btn" data-score="red:tower:20" aria-label="Red climb level 2">L2</button>
-          <button class="btn" data-score="red:tower:30" aria-label="Red climb level 3">L3</button>
-        </div>
-        <div class="row">
-          <button class="btn" data-score="blue:fuel:1" aria-label="Blue plus 1 fuel (keyboard shortcut A)">Blue +1 fuel<kbd aria-hidden="true">A</kbd></button>
-          <button class="btn" data-score="blue:fuel:5" aria-label="Blue plus 5 fuel (keyboard shortcut S)">Blue +5<kbd aria-hidden="true">S</kbd></button>
-          <button class="btn" data-score="blue:tower:10" aria-label="Blue climb level 1 (keyboard shortcut D)">Blue climb L1<kbd aria-hidden="true">D</kbd></button>
-          <button class="btn" data-score="blue:tower:20" aria-label="Blue climb level 2">L2</button>
-          <button class="btn" data-score="blue:tower:30" aria-label="Blue climb level 3">L3</button>
-        </div>
-      </section>
-      </details>
 
       <!-- Named for the job it does first. "Setup & end of day" reads like
            configuration, and the doors check, the one readout that rolls up
            every subsystem, was behind it: a volunteer without the printout
            never found it. desk.js opens this fold on a failing check and on
            any jump to the doors check. -->
-      <details class="group" id="setupGroup">
+      <!-- data-simple for the doors check, the same way as the kit above. -->
+      <details class="group" id="setupGroup" data-simple>
         <summary>Doors check, setup &amp; end of day</summary>
-<section id="vitalsSection">
+<section id="vitalsSection" data-simple>
         <h2>Doors check <span class="vdot" id="vitalsDot" aria-hidden="true"></span>
           <span id="vitalsWord">not run yet</span></h2>
         <!-- Said in words, and announced once, because dimming the rows is
@@ -964,8 +1242,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         </div>
       </section>
 
-<section>
-        <h2>Coverage <span class="hint" id="covSum">·</span></h2>
+<section data-rec-only>
+        <h2>Match videos: any missing? <span class="hint" id="covSum">·</span></h2>
         <p class="hint">Every match that reached the buzzer, against every video that
           exists. The point is the matches nothing was ever queued for: everything else
           in the pipeline reports success individually.</p>
@@ -976,7 +1254,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
 <section>
-        <h2>Day VOD chapters</h2>
+        <h2>YouTube chapters for the day</h2>
         <p class="hint">Paste-ready YouTube chapters, timed off the event log. Give it the
           wall-clock time the stream recording started.</p>
         <div class="row">
@@ -996,8 +1274,8 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
         a failure was one more of those per item, with the ids read out of a
         JSON blob. Realistically the weekend's videos never went up.
       -->
-      <section id="sec-publish">
-        <h2>Videos <span class="hint" id="pubSum">·</span></h2>
+      <section id="sec-publish" data-rec-only>
+        <h2>Videos waiting to upload <span class="hint" id="pubSum">·</span></h2>
         <p class="hint">Cut clips wait here until somebody says go. That is on
           purpose: uploading during playoffs competes with the stream for the
           same uplink. The usual answer is to press <b>Publish everything</b>
@@ -1012,7 +1290,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
       </section>
 
 <section>
-        <h2>Event content</h2>
+        <h2>Where the event's details are edited</h2>
         <p class="hint">The event's name, sponsors, run of show, thresholds and
           accessibility services are edited on their own page: <b>/s/setup</b>,
           behind the settings code the content lead holds (not the desk PIN).
@@ -1023,6 +1301,7 @@ textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2
 
 <section>
         <h2>Event log</h2>
+        <p class="hint">Everything the desk and the field did, newest first.</p>
         <ul id="log" aria-label="Event log"></ul>
       </section>
     </div>

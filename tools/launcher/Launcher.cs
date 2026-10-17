@@ -12,8 +12,11 @@
  *   2. finds a usable Node, or installs a private copy that needs no admin
  *      rights and touches nothing else on the machine
  *   3. scans the local network for Cheesy Arena, read-only, using the same
- *      allowlisted endpoint the field bridge itself uses
- *   4. starts the desk and prints the address to type into every pit monitor
+ *      allowlisted endpoint the field bridge itself uses (and when it finds
+ *      nothing, the desk keeps looking by itself: --discover)
+ *   4. starts the desk and prints the address to type into every pit monitor,
+ *      and starts it again by itself when it exits with code 75 (a restart
+ *      asked for from the Event settings page)
  *
  * Built with the C# compiler that ships inside Windows, so the build needs no
  * toolchain and the result needs no runtime install. That compiler is C# 5, so
@@ -73,6 +76,10 @@ internal static class Launcher
 
     private static Options _opt;
     private static Process _desk;
+    // What the desk being started said on stderr, for the message box when it
+    // stops before it answers. See NoteDeskError and StartFailure.
+    private static volatile string _deskSaid;
+    private static volatile bool _deskMissingFiles;
     private static StreamWriter _log;
     private static string _logDir;
     private static readonly object ConsoleLock = new object();
@@ -443,7 +450,7 @@ internal static class Launcher
         }
         if (_opt.NoCheesy)
         {
-            Detail("skipped, the desk will run without a field connection");
+            Detail("skipped, the desk will run without a field connection and will not look for one");
             return null;
         }
         if (_opt.CheesyHost != null)
@@ -473,8 +480,12 @@ internal static class Launcher
                 Ok("practice mode: the screens will show a pretend match");
                 return null;
             }
-            Detail("starting in manual mode; the producer types match numbers by hand");
-            Detail("to attach the field later, restart with:  START-DESK.cmd /cheesy-host:10.0.100.5:8080");
+            // No restart line any more. The desk keeps looking by itself (see
+            // apps/core/src/ingest/cheesy/finder.ts), so a field that is
+            // cabled in after this point attaches on its own, and "restart
+            // with /cheesy-host" was trial and error a first-timer could not do.
+            Detail("starting without it; the desk keeps looking for the field by itself,");
+            Detail("every 30 seconds, and connects on its own when the field answers");
             return null;
         }
 
@@ -770,6 +781,36 @@ internal static class Launcher
         catch { return null; }
     }
 
+    /*
+     * Exit code 75 means "start me again".
+     *
+     * The Event settings page can change things the desk only reads at start
+     * (a different field address once the bridge is attached, a restart the
+     * operator asks for), and it ends with the desk flushing its event log
+     * and exiting with 75. The volunteer at the settings page must never be
+     * told to find Task Manager and double-click something, so this window
+     * starts the desk again, with the same arguments, by itself.
+     *
+     * Capped, because a desk that exits 75 straight after starting would
+     * otherwise loop forever with the screens flickering between it and
+     * nothing: three restarts inside ten minutes and it is left stopped, with
+     * a message saying so. Any other exit code ends the launcher as before.
+     */
+    private const int RestartExitCode = 75;
+    private const int MaxRestarts = 3;
+    private static readonly TimeSpan RestartWindow = TimeSpan.FromMinutes(10);
+
+    /// One more restart allowed at this moment? Records it when so. Its own
+    /// function, with the clock passed in, so check-build.ps1 can prove the
+    /// cap against the built exe without starting a desk four times.
+    private static bool AllowRestart(List<DateTime> restarts, DateTime now)
+    {
+        restarts.RemoveAll(t => now - t > RestartWindow);
+        if (restarts.Count >= MaxRestarts) return false;
+        restarts.Add(now);
+        return true;
+    }
+
     private static int Step4Run(string installDir, string nodeExe, string fieldHost)
     {
         Step(4, "Starting the content desk");
@@ -785,6 +826,71 @@ internal static class Launcher
         if (!File.Exists(entry))
             throw new Exception("The desk files are not where they should be. Missing: " + entry);
 
+        string args = DeskArguments(entry, port, fieldHost);
+
+        // The PIN travels in the environment, never on the command line: argv is
+        // readable by every other process on the machine.
+        ResolvePin(installDir);
+        if (!StartDesk(nodeExe, args, installDir, port)) return 1;
+
+        Ok("running");
+        // On this thread, the one that waits on the desk below: see KeepAwake.
+        // Held across a restart too, because the restart happens on this same
+        // thread and the laptop must not sleep in the gap.
+        KeepAwake(true);
+        ReadyBanner(port, fieldHost, installDir);
+
+        if (!_opt.NoBrowser)
+        {
+            try { Process.Start("http://localhost:" + port + "/"); } catch { }
+        }
+
+        List<DateTime> restarts = new List<DateTime>();
+        while (true)
+        {
+            _desk.WaitForExit();
+            if (_desk.ExitCode != RestartExitCode || _stopping) break;
+
+            if (!AllowRestart(restarts, DateTime.UtcNow))
+            {
+                Console.WriteLine();
+                Fail("The desk asked to restart " + (MaxRestarts + 1) + " times inside "
+                    + (int)RestartWindow.TotalMinutes + " minutes, so it was left stopped. "
+                    + "Double-click the exe to start it again.");
+                break;
+            }
+
+            Console.WriteLine();
+            Detail("the desk asked to be restarted (Event settings); starting it again");
+            WriteLog("NOTE: the desk exited with code " + RestartExitCode + " (restart asked for); starting it again");
+
+            // Re-read, never re-written: the settings page may have just
+            // changed the desk PIN, which it saves to desk-pin.txt. A /pin
+            // typed on the original start must not overwrite that now.
+            _opt.PinGiven = false;
+            ResolvePin(installDir);
+
+            // The old desk has exited, but give the port a moment in case its
+            // listening socket is still being torn down.
+            for (int i = 0; i < 20 && !PortFree(port); i++) Thread.Sleep(250);
+
+            // Every screen and console reconnects by itself, so the browser
+            // is not opened again: a second tab on the desk laptop is clutter.
+            if (!StartDesk(nodeExe, args, installDir, port)) { KeepAwake(false); return 1; }
+            Ok("running again");
+        }
+
+        KeepAwake(false);
+        Console.WriteLine();
+        Console.WriteLine("   The content desk has stopped.");
+        Hold();
+        return _desk.ExitCode;
+    }
+
+    /// The desk's command line. Built once, so a restart (exit code 75) runs
+    /// the desk with exactly the arguments it first had.
+    private static string DeskArguments(string entry, int port, string fieldHost)
+    {
         StringBuilder args = new StringBuilder();
         args.Append("--experimental-strip-types ");
         args.Append("\"").Append(entry).Append("\" ");
@@ -792,16 +898,41 @@ internal static class Launcher
         if (fieldHost != null)
         {
             args.Append(" --cheesy --cheesy-host ").Append(fieldHost);
+        }
+        if (!_opt.Demo)
+        {
+            // The desk finds out for itself what is on this network: the
+            // field (if this scan missed it), and the ATEM switcher. Never in
+            // practice mode, whose pretend matches must not mix with a real
+            // field's.
+            args.Append(" --discover");
+            if (_opt.NoCheesy) args.Append(" --no-field-search");
+        }
+        if (fieldHost != null || (!_opt.Demo && !_opt.NoCheesy))
+        {
             // Always explicit, never left to the desk's own default: see
-            // Options.DisplayId, and docs/10 on display-ID collisions.
-            args.Append(" --display-id ").Append(_opt.DisplayId);
+            // Options.DisplayId, and docs/10 on display-ID collisions. Passed
+            // when the desk may find the field by itself later, too, so the
+            // name it registers with is still the one agreed.
+            // Quoted, so an ID with a space in it stays one argument.
+            args.Append(" --display-id \"").Append(_opt.DisplayId).Append("\"");
         }
         if (_opt.Demo) args.Append(" --demo");
         if (_opt.Rehearsal) args.Append(" --rehearsal");
         // Layer 1 of tying the desk to this window: see TieToThisWindow below.
         args.Append(" --exit-with-parent");
+        return args.ToString();
+    }
 
-        ProcessStartInfo psi = new ProcessStartInfo(nodeExe, args.ToString());
+    private static bool _exitHooks;
+
+    /// Starts one desk process and waits for it to answer. False (having said
+    /// why) when it did not come up.
+    private static bool StartDesk(string nodeExe, string args, string installDir, int port)
+    {
+        if (_stopping) return false;
+
+        ProcessStartInfo psi = new ProcessStartInfo(nodeExe, args);
         psi.WorkingDirectory = installDir;
         psi.UseShellExecute = false;
         psi.RedirectStandardOutput = true;
@@ -812,54 +943,53 @@ internal static class Launcher
         psi.CreateNoWindow = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
-        // The PIN travels in the environment, never on the command line: argv is
-        // readable by every other process on the machine.
-        ResolvePin(installDir);
         psi.EnvironmentVariables["REMOTE_PIN"] = _opt.Pin;
 
-        _desk = new Process();
-        _desk.StartInfo = psi;
-        _desk.EnableRaisingEvents = true;
-        _desk.OutputDataReceived += (s, e) => { if (e.Data != null) Relay(e.Data); };
-        _desk.ErrorDataReceived += (s, e) => { if (e.Data != null) Relay(e.Data); };
+        Process desk = new Process();
+        desk.StartInfo = psi;
+        desk.EnableRaisingEvents = true;
+        desk.OutputDataReceived += (s, e) => { if (e.Data != null) Relay(e.Data); };
+        desk.ErrorDataReceived += (s, e) => { if (e.Data != null) { NoteDeskError(e.Data); Relay(e.Data); } };
 
-        _desk.Start();
-        _desk.BeginOutputReadLine();
-        _desk.BeginErrorReadLine();
+        _deskSaid = null;
+        _deskMissingFiles = false;
+        _desk = desk;
+        desk.Start();
+        desk.BeginOutputReadLine();
+        desk.BeginErrorReadLine();
 
-        TieToThisWindow(_desk);
-        Console.CancelKeyPress += (s, e) => { e.Cancel = true; StopDesk(); };
-        AppDomain.CurrentDomain.ProcessExit += (s, e) => StopDesk();
+        TieToThisWindow(desk);
+        if (!_exitHooks)
+        {
+            // Once per launcher, not once per desk: StopDesk reads _desk, so
+            // it always stops whichever desk is running now.
+            _exitHooks = true;
+            Console.CancelKeyPress += (s, e) => { e.Cancel = true; StopDesk(); };
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => StopDesk();
+        }
 
         if (!WaitForDesk(port, TimeSpan.FromSeconds(45)))
         {
             Console.WriteLine();
-            if (_desk.HasExited)
-                Fail("The desk stopped while starting up (exit code " + _desk.ExitCode + ").");
+            if (desk.HasExited)
+            {
+                // The stderr reader can lag the exit by a moment, and the line
+                // that says why is usually among the last. Bounded, because a
+                // pipe some other process still holds would never close.
+                Thread drain = new Thread(() => { try { desk.WaitForExit(); } catch { } });
+                drain.IsBackground = true;
+                drain.Start();
+                drain.Join(2000);
+                Fail(StartFailure(desk.ExitCode));
+            }
             else
                 Fail("The desk did not answer within 45 seconds.");
             Detail("The lines above say why. The same text is in " + LogPath() + ".");
             StopDesk();
             Hold();
-            return 1;
+            return false;
         }
-
-        Ok("running");
-        // On this thread, the one that waits on the desk below: see KeepAwake.
-        KeepAwake(true);
-        ReadyBanner(port, fieldHost, installDir);
-
-        if (!_opt.NoBrowser)
-        {
-            try { Process.Start("http://localhost:" + port + "/"); } catch { }
-        }
-
-        _desk.WaitForExit();
-        KeepAwake(false);
-        Console.WriteLine();
-        Console.WriteLine("   The content desk has stopped.");
-        Hold();
-        return _desk.ExitCode;
+        return true;
     }
 
     // ---- keeping the laptop awake ------------------------------------------
@@ -976,37 +1106,47 @@ internal static class Launcher
 
     private static void TieToThisWindow(Process child)
     {
-        // Layer 2. Keep the delegate in a field: hand a collectable one to
-        // Windows and the handler stops working whenever the GC feels like it.
-        _ctrlHandler = delegate(uint ctrlType)
+        // Layer 2, once per launcher: a restarted desk (exit code 75) is the
+        // same window's desk, and StopDesk always reads the current one. Keep
+        // the delegate in a field: hand a collectable one to Windows and the
+        // handler stops working whenever the GC feels like it.
+        if (_ctrlHandler == null)
         {
-            // 0 Ctrl-C, 1 Ctrl-Break, 2 window closed, 5 logoff, 6 shutdown.
-            // Windows allows a close handler about five seconds before it
-            // terminates us regardless, which is why StopDesk is written to
-            // finish well inside that.
-            StopDesk();
-            return true;
-        };
-        try { SetConsoleCtrlHandler(_ctrlHandler, true); } catch { }
+            _ctrlHandler = delegate(uint ctrlType)
+            {
+                // 0 Ctrl-C, 1 Ctrl-Break, 2 window closed, 5 logoff, 6 shutdown.
+                // Windows allows a close handler about five seconds before it
+                // terminates us regardless, which is why StopDesk is written to
+                // finish well inside that.
+                StopDesk();
+                return true;
+            };
+            try { SetConsoleCtrlHandler(_ctrlHandler, true); } catch { }
+        }
 
         // Layer 3. Best effort: if any of this fails the first two still apply,
-        // so a machine that refuses job objects is degraded, not broken.
+        // so a machine that refuses job objects is degraded, not broken. One
+        // job for the launcher's life, and every desk it starts goes in it.
         try
         {
-            _job = CreateJobObject(IntPtr.Zero, null);
-            if (_job == IntPtr.Zero) return;
-
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
-            IntPtr mem = Marshal.AllocHGlobal(size);
-            try
+            if (_job == IntPtr.Zero)
             {
-                Marshal.StructureToPtr(info, mem, false);
-                if (SetInformationJobObject(_job, JobObjectExtendedLimitInformation, mem, (uint)size))
-                    AssignProcessToJobObject(_job, child.Handle);
+                IntPtr job = CreateJobObject(IntPtr.Zero, null);
+                if (job == IntPtr.Zero) return;
+
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+                IntPtr mem = Marshal.AllocHGlobal(size);
+                try
+                {
+                    Marshal.StructureToPtr(info, mem, false);
+                    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, mem, (uint)size)) return;
+                    _job = job;
+                }
+                finally { Marshal.FreeHGlobal(mem); }
             }
-            finally { Marshal.FreeHGlobal(mem); }
+            AssignProcessToJobObject(_job, child.Handle);
         }
         catch { }
     }
@@ -1342,6 +1482,39 @@ internal static class Launcher
 
     /// An open socket is not proof the desk is up: anything at all could be
     /// holding that port. Ask for a page only the desk serves.
+    /*
+     * What a starting desk says on stderr, kept for the message box.
+     *
+     * "The desk stopped while starting up (exit code 1)" was all a volunteer
+     * got, on the silent double-click path where nothing else is on screen.
+     * A Node stack trace would be worse, so only two things are kept: whether
+     * a module was missing, which means this copy of the exe was built
+     * without a file it needs (nothing on this computer can fix that, and
+     * nobody should try), and the desk's own last tagged line, such as
+     * "[core] the port must be ...", which is already written for people.
+     */
+    private static void NoteDeskError(string line)
+    {
+        if (line == null) return;
+        string t = line.Trim();
+        if (t.IndexOf("ERR_MODULE_NOT_FOUND", StringComparison.Ordinal) >= 0) _deskMissingFiles = true;
+        if (Regex.IsMatch(t, @"^\[[a-z][a-z-]*\] \S"))
+            _deskSaid = t.Length > 300 ? t.Substring(0, 300) : t;
+    }
+
+    /// The message for a desk that stopped before it answered.
+    private static string StartFailure(int exitCode)
+    {
+        if (_deskMissingFiles)
+            return "This copy of the desk is missing some of its own files, so it cannot start. "
+                + "Nothing on this computer needs fixing: get a new copy of the exe from the event lead "
+                + "and double-click that instead.";
+        string msg = "The desk stopped while starting up (exit code " + exitCode + ").";
+        string said = _deskSaid;
+        if (said != null) msg += " It said: " + said;
+        return msg;
+    }
+
     private static bool WaitForDesk(int port, TimeSpan limit)
     {
         DateTime deadline = DateTime.UtcNow + limit;
@@ -1430,7 +1603,8 @@ internal static class Launcher
         }
         else
         {
-            Console.WriteLine("  Field:   " + (fieldHost ?? "not connected, running in manual mode"));
+            Console.WriteLine("  Field:   " + (fieldHost
+                ?? (_opt.NoCheesy ? "not used (/no-cheesy)" : "not found yet; the desk keeps looking by itself")));
         }
         Console.WriteLine("  Files:   " + installDir);
         Console.WriteLine();
@@ -1620,7 +1794,7 @@ internal static class Launcher
         Console.WriteLine("    /cheesy-host:ip:8080   skip the scan, use this field address");
         Console.WriteLine("    /display-id:name       how this desk names itself to the field");
         Console.WriteLine("                           (default contentdesk1; agree it with the scorekeeper)");
-        Console.WriteLine("    /no-cheesy             do not look for the field at all");
+        Console.WriteLine("    /no-cheesy             do not look for the field at all, now or later");
         Console.WriteLine("    /demo                  practice mode: a pretend match on a loop, no field needed");
         Console.WriteLine("    /rehearsal             practising by hand: keeps the practice out of the day's history");
         Console.WriteLine("    /no-browser            do not open a browser window");
@@ -1687,11 +1861,24 @@ internal static class Launcher
                     o.PinGiven = o.Pin.Length > 0;
                 }
                 else if (lower.StartsWith("/dir:", StringComparison.Ordinal)) o.InstallDir = a.Substring(5);
-                else if (lower.StartsWith("/cheesy-host:", StringComparison.Ordinal)) o.CheesyHost = a.Substring(13);
+                else if (lower.StartsWith("/cheesy-host:", StringComparison.Ordinal))
+                {
+                    // Empty means "not given", never ":8080": that would skip
+                    // the scan and bridge to an address that is not one.
+                    string h = a.Substring(13).Trim();
+                    o.CheesyHost = h.Length > 0 ? h : null;
+                }
                 else if (lower.StartsWith("/display-id:", StringComparison.Ordinal))
                 {
-                    o.DisplayId = a.Substring(12);
-                    o.DisplayIdGiven = o.DisplayId.Length > 0;
+                    // An empty or unusable value keeps the default rather than
+                    // replacing it with "": the desk refuses a bare
+                    // --display-id and exits, and since the desk is now given
+                    // one on every field start, that would stop the common
+                    // "field not up yet" start too. Quotes and backslashes
+                    // cannot survive the Windows command line inside quotes,
+                    // and leading dashes would read as the next flag.
+                    string id = CleanDisplayId(a.Substring(12));
+                    if (id.Length > 0) { o.DisplayId = id; o.DisplayIdGiven = true; }
                 }
                 else if (lower.StartsWith("/port:", StringComparison.Ordinal))
                 {
@@ -1704,6 +1891,21 @@ internal static class Launcher
             // A host without a port is the common typo, and the bridge needs both.
             if (o.CheesyHost != null && !o.CheesyHost.Contains(":")) o.CheesyHost += ":" + FieldPort;
             return o;
+        }
+
+        /// The display ID with what the desk's command line cannot carry taken
+        /// out: control characters, double quotes and backslashes, then
+        /// surrounding spaces and leading dashes. Spaces inside are kept (the
+        /// value is quoted), so a name agreed with the scorekeeper survives.
+        private static string CleanDisplayId(string raw)
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (char c in raw)
+            {
+                if (char.IsControl(c) || c == '"' || c == '\\') continue;
+                sb.Append(c);
+            }
+            return sb.ToString().Trim().TrimStart('-').Trim();
         }
     }
 }

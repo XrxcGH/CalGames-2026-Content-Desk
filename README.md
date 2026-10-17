@@ -1,5 +1,7 @@
 # CalGames 2026 Content Desk
 
+**Setting up the desk or fixing a screen at the event? Read [QUICK-START.md](QUICK-START.md) first: one page.**
+
 An in-house analysis / broadcast content desk for **CalGames 2026** at Woodside High School,
 **October 16-18, 2026**, presented by the Western Region Robotics Forum (WRRF).
 
@@ -20,15 +22,22 @@ are not.
 
 ## Volunteers: read this instead
 
-If you are running the desk at an event rather than working on the code,
-**[RUN-THE-DESK.md](RUN-THE-DESK.md)** is the whole thing in one document:
-starting the desk, setting up OBS from nothing, pointing the side screens and
-pit monitors, running the show, and what to do when something breaks. It
-assumes you have never used any of it.
+If you are running the desk at an event rather than working on the code, start with
+**[QUICK-START.md](QUICK-START.md)**: one printed page with the five things only a person can do
+(plug in, double-click, open two addresses, change the codes) and where the desk itself explains
+anything that looks wrong. The desk finds the field and the video switcher by itself, and the
+front page the exe opens says what it found and what to do next. That page and the quick start
+are all a volunteer needs.
 
-A printable copy is committed alongside it as **RUN-THE-DESK.pdf**. Hand that
-to people, because a gym has worse Wi-Fi than it has photocopiers. Rebuild it
-with `npm run handbook` after editing the Markdown.
+**[RUN-THE-DESK.md](RUN-THE-DESK.md)** is the whole thing in one document, for reference:
+starting the desk, putting the show on a projector or a video switcher without OBS (or setting up
+OBS from nothing), pointing the side screens and pit monitors, running the show, and what to do
+when something breaks. It assumes you have never used any of it.
+
+Printable copies are committed alongside them as **QUICK-START.pdf** and **RUN-THE-DESK.pdf**.
+Hand those to people, because a gym has worse Wi-Fi than it has photocopiers. Rebuild both with
+`npm run handbook` after editing the Markdown; the build says so if the quick start grows past
+one page.
 
 ## Run it in two minutes
 
@@ -40,10 +49,14 @@ You do not need a terminal, and you do not need to install anything. You need on
 2. Double-click it. Nothing appears on screen: it unpacks, finds Node, looks for the field
    and starts the desk, with no window to close by accident.
 3. Wait about a minute on the first run, seconds after that.
-4. Your browser opens on an address like `http://172.22.0.23:8720/`. That page lists every
-   screen. The PIN the control screens ask for is in the Start here box on that page, on the
-   desk laptop only. Everything the launcher did is in `desk-log.txt` in the desk folder, which
-   does not contain the PIN.
+4. Your browser opens on the desk's front page. It says what each computer is for (the desk
+   console, the video switcher's overlay input through `/s/program`, a projector or TV through
+   `/s/watch`, the announcer tablet, the Judge Advisor),
+   whether the field is connected, and what to do when something is not working; every screen
+   is folded away below. The Start here box on that page shows the desk's address, like
+   `http://172.22.0.23:8720/`, and, on the desk laptop only, the PIN the control screens ask
+   for. Everything the launcher did is in `desk-log.txt` in the desk folder, which does not
+   contain the PIN.
 
 Just trying it out at a kitchen table, with no field to connect to? The launcher notices there
 is no field and asks; press **D** and every screen plays a pretend match. After the first run
@@ -102,10 +115,9 @@ That's the whole architecture. Everything else is adapters and CSS.
 renders of the real surfaces driven through the real event bus, not mockups,
 so they cannot quietly drift from the code.
 
-Two surfaces are not in there: the Judge Advisor's awards page (`/s/awards`)
-and the pit-monitor picker (`/s/watch`). The `PAGES` list in
-[tools/render-previews.mjs](tools/render-previews.mjs) is what decides, and
-neither has an entry yet. If you add one, the harness already knows how to
+One surface is not in there: the Judge Advisor's awards page (`/s/awards`).
+The `SHOTS` list in [tools/render-previews.mjs](tools/render-previews.mjs) is
+what decides, and it has no entry yet. If you add one, the harness already knows how to
 sign a page in: that is the `auth: true` flag the console entries use.
 
 ```powershell
@@ -172,13 +184,13 @@ exactly like the show because a human is driving them.
 
 | Surface | URL | Runs on |
 | --- | --- | --- |
-| Program overlay | `/s/program` | OBS Browser Source, 1920×1080 |
+| Program overlay | `/s/program` | 1920×1080. Full screen on a switcher input: graphics on black, for a luma key. In OBS: a see-through Browser Source. Projectors and TVs take it through `/s/watch`, on the CalGames backdrop |
 | Desk console | `/s/desk` | Operator laptop, keyboard-first |
 | Team media | `/s/media` | Drag-drop robot cutouts |
 | Telestrator pad | `/s/draw` | iPad + Pencil, on the production Wi-Fi |
-| Telestrator render | `/s/tele` | OBS Browser Source, layered over the replay |
+| Telestrator render | `/s/tele` | Layered over the replay in OBS; ink on black on its own, for a luma key |
 | Replay console | `/s/replay` | Match-clock timeline, markers, cut and send |
-| Arcade overlay | `/s/arcade` | OBS Browser Source: Smash sets, 4-up Kart/Pac-Man/Tetris free-for-alls, GP standings |
+| Arcade overlay | `/s/arcade` | Over the game capture in OBS, or on the arcade TV through `/s/watch`: Smash sets, 4-up Kart/Pac-Man/Tetris free-for-alls, GP standings |
 | Arcade console | `/s/arcadedesk` | Run the side tournament |
 | Side screen | `/s/side` | Venue TVs: on-deck and rankings, room-scale type |
 | Post-match cards | `/s/cards` | 1080×1080 result graphics, auto-built on score |
@@ -188,7 +200,7 @@ exactly like the show because a human is driving them.
 | Talent view | `/s/talent` | Announcer tablet: teams, ranks, RP progress in words, pronunciation notes |
 | When do we play? | `/s/next` | Per-team schedule on any phone, drift-adjusted start estimates |
 | Head referee review | `/s/var` | Frame-step the recording. Read-only: no cut, no air, no publish |
-| Pit monitor kiosk | `/s/watch` | Venue pit TVs: a full-screen browser wrapping any of the open screens (`?screen=side`, `?screen=program`, ...) |
+| Pick a screen | `/s/watch` | Every display in the venue (projector, TVs beside the field, pit TVs), full screen in a browser: a chooser, then any of the open screens (`?screen=program`, `?screen=side`, ...) |
 | Phone remote | `/s/remote` | Run the show from a phone: screens, match lifecycle, marks, cue arming |
 | House audio player | `/s/house` | Opens on the music machine: plays walk-ups and stingers, drives the playlist. Never in OBS, and it refuses to run there |
 | Judge Advisor: awards | `/s/awards` | The JA's own page. Build the ceremony list and stage each winner, behind the awards code rather than the desk PIN |
@@ -196,10 +208,15 @@ exactly like the show because a human is driving them.
 | Shout-outs | `/s/gp` | Phone page: anyone in the stands submits a Gracious Professionalism moment. Nothing reaches a screen until the desk approves it |
 | Screen test card | `/s/testcard` | Full-screen on any display being installed: crop marks, the broadcast safe areas, a stretch circle, gray ramps, and a live clock |
 
-The index page at `/` lists every surface with a one-line description. Start there.
+The front page at `/` is what the exe opens: what this computer is for, a status strip (the
+field, the video switcher, where the program graphics are showing, and OBS), the Start here box,
+help for the common problems, and every surface with a one-line description, folded away. Start
+there.
 
-OBS, mentioned throughout, is the streaming program the broadcast runs in; a "Browser Source"
-is OBS rendering one of these pages as a video layer.
+OBS, mentioned throughout, is the streaming program the broadcast can run in; a "Browser Source"
+is OBS rendering one of these pages as a video layer. It is optional: most venues now put the
+program on a projector (through `/s/watch`) or a switcher input straight from a browser, full
+screen.
 
 Recording and replay need ffmpeg. Real cameras are listed under `recording.sources` in
 `config.json` ([docs/11](docs/11-distribution.md)); add `--record --test-sources` to exercise
@@ -209,7 +226,10 @@ the whole pipeline without any:
 npm start -- --demo --record --test-sources
 ```
 
-Program takes `?key=alpha|luma`. It contains the alliance overview, live match, final score,
+Program takes `?key=alpha|luma|fill`. With no key it decides for itself: see-through inside OBS
+or framed by `/s/watch` over a feed, graphics on black on its own in a browser; `/s/watch` asks for
+`fill`, the CalGames backdrop, when it has no feed (the rule is in
+[docs/13](docs/13-deployment.md)). It contains the alliance overview, live match, final score,
 analysis-desk strap, and arcade bumper in one page. Screens switch on state, so the switcher
 operator never changes sources. One scale serves the stream and the venue projector; only the
 side screens (`/s/side`) carry their own larger room-only type. `?mode=clean` pins the match
@@ -251,6 +271,21 @@ a file copied between machines.
 ```powershell
 npm start -- --cheesy --cheesy-host 10.0.100.5:8080 --display-id contentdesk1
 ```
+
+The packaged launcher also passes `--discover` (except in practice or replay). When its own scan
+at start found nothing, the desk then keeps looking for the field by itself every 30 seconds, with
+the launcher's read-only check (a TCP knock on 8080, one `GET /api/rankings`), and attaches the
+bridge the moment it answers. A field address typed on Event settings (`/s/setup`, **Connections**) only says where to
+look first; the flag still decides whether the desk looks at all, and `--no-field-search` (the
+launcher's `/no-cheesy`) keeps it from looking.
+
+`--discover` also finds a Blackmagic ATEM switcher (the configured address first, then
+`10.0.100.0/24`, then this machine's other `/24`s) and watches it **read-only**: the client sends
+only the protocol's hello and acks, so it can see program, preview, the keyers and the video
+format and has no way to change them. That feeds the doors check's **Switcher** and **Screens**
+rows (two overlays keyed at once, the graphics input un-keyed mid-match, a program page at the
+wrong resolution or refresh rate). Code in `apps/core/src/atem/`; a switcher that is absent is
+gray, never red.
 
 Agree the display ID with the scorekeeper in advance so it can't collide with a real audience
 screen. `GET /api/cheesy/audit?format=text` prints every request the bridge has made, which is what
@@ -337,9 +372,14 @@ them as public and set your own before the event:
 
 | Code | Default | Set it with |
 | --- | --- | --- |
-| Desk PIN | `0864` | `REMOTE_PIN`, or the launcher's `/pin:` |
-| Awards code | `1357` | `JA_PIN`, or `awards.pin` in `config.json` |
-| Settings code | `4567` | `SETUP_PIN`, or `setup.pin` in `config.json` |
+| Desk PIN | `0864` | Event settings (`/s/setup`, on the desk laptop), which writes `desk-pin.txt`; `REMOTE_PIN`; or the launcher's `/pin:` |
+| Awards code | `1357` | Event settings or the Judge Advisor's `/s/awards`; `JA_PIN`; or `awards.pin` in `config.json` |
+| Settings code | `4567` | Event settings; `SETUP_PIN`; or `setup.pin` in `config.json` |
+
+The order, first match wins: the environment (tests and the preview tool set it), then what Event
+settings saved (`data/settings.json`, never logged and never served), then `config.json`, then the
+shipped default. A change on the page works at once and signs out every session that used the old
+code.
 
 ```powershell
 $env:REMOTE_PIN = "4726"; $env:JA_PIN = "9210"; $env:SETUP_PIN = "3388"; npm start -- --demo
@@ -351,8 +391,8 @@ left alone, it hands the staged winners to the gym before the ceremony. The door
 desk console says so, in amber, under **Access codes**.
 
 (The launcher takes `/pin:4726` for the desk PIN, and has no way to turn that gate off at all.
-It has no option for the other two: those come from `config.json` in the desk folder, or from
-the environment it inherits. See [docs/13-deployment.md](docs/13-deployment.md).)
+It has no option for the other two: those are changed on Event settings. See
+[docs/13-deployment.md](docs/13-deployment.md).)
 
 Sign in once at `/signin` and the session lasts the day. The PIN is only ever read from a POST
 body, never a query string, because a query string ends up in the server log and the browser
@@ -377,7 +417,7 @@ re-authenticates itself after a reconnect so it can't quietly stop working mid-s
 It sits behind the same PIN as every other control surface, `0864` until you change it. See
 "Who can drive it" above for setting the event's own.
 
-The desk prints its reachable addresses at startup, and the launcher's READY message shows the
+The desk prints its reachable addresses at startup, and the front page's Start here box shows the
 same one. On the phone, open `http://<desk-ip>:8720/s/remote`.
 
 Two things have to be true for the phone to reach it:
@@ -403,7 +443,9 @@ Note the `-Profile Private` above: don't open the port on a public profile you d
 
 Copy [config.example.json](config.example.json) to `config.json` (gitignored because it holds
 credentials) and fill it in. `npm run auth:youtube` walks through getting a YouTube refresh token.
-Only credentials and machine wiring actually live in the file: the content half of the event
+Only upload credentials and machine wiring actually live in the file; the three codes, the FRC
+Nexus key and the field and switcher addresses are set on `/s/setup` and kept in
+`data/settings.json`, and the content half of the event
 (name and year, award list, sponsors, run of show, accessibility services, the RP thresholds)
 is edited from the running desk, on two pages that are not the desk console: `/s/setup` behind
 the settings code for everything except the awards, and the Judge Advisor's own `/s/awards`

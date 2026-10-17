@@ -6,6 +6,10 @@ one is about that step, and it is written for the person who has not read the ot
 The whole setup is one file. An AV volunteer copies `CalGamesContentDesk.exe` onto a machine,
 double-clicks it, and reads one address off the screen. That is the entire procedure.
 
+The volunteer's version of this is [QUICK-START.md](../QUICK-START.md) (QUICK-START.pdf in the
+desk folder): one page, the five things only a person can do and where the desk itself explains
+anything that looks wrong. With the front page, that is all a volunteer needs.
+
 ---
 
 ## What the launcher does
@@ -16,10 +20,14 @@ Four steps, printed as it goes so nobody is watching a blank window wondering wh
 | --- | --- | --- |
 | 1 | Unpacks the desk into `Downloads\CalGames2026-ContentDesk` | Nothing else on the machine is touched |
 | 2 | Finds Node, or installs a private copy | Needs no admin rights, no PATH change, no installer |
-| 3 | Scans the local network for Cheesy Arena | Not finding it is fine; the desk runs in manual mode |
+| 3 | Scans the local network for Cheesy Arena | Not finding it is fine; the desk keeps looking by itself (`--discover`) and runs in manual mode meanwhile |
 | 4 | Starts the desk and opens a browser at the address | Raises a message box naming the reason and the log |
 
-It then opens a browser at the desk's index page, which lists every screen.
+It then opens a browser at the desk's front page: what this computer is for, what the desk found
+(the field, the video switcher, where the program graphics are showing, OBS), the Start here box
+with the address, and **Something not working?**, the
+common problems answered in a line or two each. Every screen with its address is folded away at
+the bottom.
 
 ### Why it is built this way
 
@@ -33,9 +41,10 @@ admin password attached. A private copy under the user's own profile needs no el
 with nothing already installed, and can be deleted afterwards by deleting one folder. If the
 machine already has Node 22.6 or newer, the launcher uses that instead and installs nothing.
 
-**Your files are never overwritten.** `config.json`, `data/trivia.json`, `data/event-content.json`
-(the edits made live on `/s/setup` and on the Judge Advisor's `/s/awards`), the event logs, and
-the robot photo library all survive a re-run. The operator edits the question bank from the trivia
+**Your files are never overwritten.** `config.json`, `desk-pin.txt`, `data/settings.json` (the
+codes and connections set on Event settings), `data/trivia.json`, `data/event-content.json` (the
+edits made live on `/s/setup` and on the Judge Advisor's `/s/awards`), the event logs, and the
+robot photo library all survive a re-run. The operator edits the question bank from the trivia
 console during the event, and shipping a fresh copy over the top of that would quietly delete an
 afternoon of somebody's work. Everything else is replaced, so re-running the launcher is also how
 you update the desk.
@@ -55,6 +64,17 @@ look exactly like somebody attacking the venue network.
 If more than one machine answers on 8080, the launcher checks each in candidate order and takes the
 first that replies with Cheesy Arena's JSON. Somebody's dev server on 8080 does not fool it.
 
+When the launcher's scan finds nothing, the desk keeps looking by itself, with the same check, every
+30 seconds until the field answers, and then never again: the field network can come up after the
+desk does, and nobody has to restart anything or type a flag. A field address typed on Event
+settings is the first place each sweep looks. The desk also looks for an ATEM switcher on the same
+networks (UDP 9910, at most 50 hellos a second, a sweep at most once a minute), and only ever reads
+it; see the README, *Connecting to the field*.
+
+On exit code 75, which is **Restart the desk** on Event settings, the launcher starts the desk
+again with the same arguments, at most three times in ten minutes; any other exit behaves as it
+always did.
+
 ---
 
 ## Running the event
@@ -62,10 +82,22 @@ first that replies with Cheesy Arena's JSON. Somebody's dev server on 8080 does 
 ### Friday, when the AV rack goes in
 
 1. Copy the exe onto the desk laptop. Double-click it.
-2. Note the address it prints. It looks like `http://172.22.0.23:8720/` (whatever the desk's own
-   production LAN hands out; it will not be a field address).
-3. Open that address on every pit monitor and pick a screen from the **On a pit monitor** group.
-4. Point OBS at `/s/program` as a Browser Source, 1920×1080.
+2. Note the address in the front page's **Start here** box. It looks like
+   `http://172.22.0.23:8720/` (whatever the network the laptop is plugged into hands out; on the
+   field network, a `10.0.100.x` address).
+3. On the computer that feeds the video switcher's overlay input (the one that showed Cheesy
+   Arena's score overlay), open the address with `s/program` on the end and press F11: graphics
+   on black for the switcher's luma key, standing in for Cheesy's overlay (see below).
+4. On the computer plugged into each other display (the projector, the TVs, the pit monitors),
+   open the address with `s/watch` on the end, click the card that starts *For ...*, and press
+   F11. **Program** is the one for the projector. No OBS is needed.
+5. Only if the event streams through OBS: point OBS at `/s/program` as a Browser Source,
+   1920×1080. It stays see-through in OBS, exactly as it always did.
+
+The desk does not need the field network to be up first. It looks for the field by itself, every
+30 seconds until it finds it, and connects on its own; the front page says *Field: searching*
+until then. If it cannot find it, type the field's address on Event settings (`/s/setup`), under
+**Connections**.
 
 ### Saturday morning
 
@@ -136,28 +168,79 @@ launcher finds no field it asks: press **D** and every screen plays a pretend ma
 first run there are two files in the desk folder that answer the same question by double-click:
 `START-PRACTICE.cmd` runs the pretend match, `START-DESK.cmd` runs the real thing.
 
-### Assigning the pit monitors
+### Assigning the projector, the TVs and the pit monitors
 
-The index page lists these under **On a pit monitor**. Each is a full-screen picture with no OBS in
-front of it, so a monitor needs nothing but a browser in full screen.
+Every venue display gets its picture the same way: a browser, full screen, on the computer whose
+HDMI goes to it. The front page's **Put the show on a projector or TV** button
+opens the chooser, `/s/watch` (headed **Pick a screen**), and the folded list at the bottom of the
+front page puts these first, under **On a projector or TV**. Each card leads with
+the display it is for, in the order a venue sets them up:
 
-| Screen | URL | Good for |
-| --- | --- | --- |
-| Program with the field feed | `/s/watch?screen=program` | The broadcast picture, field feed with the live overlay on top |
-| Side screen | `/s/watch?screen=side` | On deck and rankings, rotating, readable across a room |
-| Arcade | `/s/watch?screen=arcade` | The side tournament over the game capture |
-| Trivia | `/s/watch?screen=trivia` | The crowd game, showing the join code between questions |
-| When do we play? | `/s/watch?screen=next` | Per-team schedule with drift-adjusted start times |
+| For | Screen | URL | What it shows |
+| --- | --- | --- | --- |
+| The projector, or the stream | Program | `/s/watch?screen=program` | Who is playing, the live score, the final score, changing on its own as the field runs |
+| The TVs beside the field | Side screen | `/s/watch?screen=side` | On deck and rankings, rotating, readable across a room |
+| Pit TVs | When do we play? | `/s/watch?screen=next` | Per-team schedule with drift-adjusted start times |
+| The trivia monitor | Trivia | `/s/watch?screen=trivia` | The crowd game, showing the join code between questions |
+| The arcade TV | Arcade | `/s/watch?screen=arcade` | Scores from the side tournament |
 
 The field feed behind the program overlay comes from the Event settings page, `/s/setup`, under
 **Screens and stream**; the desk console links to that page but does not hold the control, and
 the page takes the settings code rather than the desk PIN. Its seed is `kiosk.fieldStreamUrl` in
 `config.json`. It
 takes a YouTube live URL, an MJPEG stream off a capture box or IP camera, or any video URL a
-browser plays on its own. Leave it blank and the overlay draws on the CalGames backdrop instead of
-a black rectangle, which is the right failure mode for a monitor nobody is watching yet.
+browser plays on its own. With no feed set, Program and Arcade fill the whole display, edge to
+edge on any screen shape, with the CalGames backdrop (that kiosk used to be solid black), and
+Program shows a line saying what it is waiting for until the first match loads.
+
+A feed is an address, not a picture, so the kiosk waits up to about four seconds for a first
+picture before it layers the overlay over it. A camera that is off, on another network or typed
+wrong gets the program on the backdrop with a yellow line, *No picture from the field feed at
+HOST*, naming only the host and port; the kiosk keeps asking and switches to the video by itself
+(one blink) when it answers. A camera that drops mid-show leaves the score on the backdrop, with no
+words and no reload. A feed address with a user name and password in it will not play: the desk
+strips them before handing the address to the displays (`/api/urls` is open to the whole venue
+Wi-Fi), and browsers refuse them in an image address anyway. Allow anonymous viewing on the camera
+on the venue network, or use a capture box.
 
 Press F11 for full screen. Chrome and Edge both remember it.
+
+### How a screen decides whether it is see-through
+
+The program overlay, the telestrator render and the arcade overlay are built to sit over a camera
+picture, and a see-through page in a plain browser is a white page. So each one decides, in this
+order:
+
+| Situation | Look |
+| --- | --- |
+| `?key=` names a mode (`alpha`, `luma` or `fill`) | That mode, always |
+| Inside OBS (the `obsstudio` object, or `OBS/` in the user agent) | See-through, exactly as before |
+| Framed by another page (`/s/watch` over a live feed) | See-through, so the feed shows through |
+| A browser on its own, full screen | Graphics on black (luma), for a switcher input with a luma key |
+
+So a projector or TV goes through `/s/watch`, which frames the program with `?key=fill` when there
+is no feed to show through: the CalGames backdrop, and one line of words while there is nothing to
+show (the handbook's chapter 4, *What the projector says*, lists them). `?key=fill` on any of the
+three forces the backdrop; `?key=luma` forces black for a hardware keyer (an ATEM or a Roland
+downstream key); `?key=alpha` forces see-through, which vMix, Wirecast, CasparCG and any other
+software that layers the page without being OBS needs written in the address. An unknown `?key=`
+is ignored. There is no chroma (green) mode: the WRRF palette carries a green and a blue, and a
+chroma key would eat parts of the graphic.
+
+On a switcher, the program on black also stands in for the field's own score display: while the
+desk cannot give a score (it stopped, or its link to the field is down), that input shows Cheesy
+Arena's audience display instead, loaded directly from the field by the browser feeding the
+switcher. So key only the program's input, not the field's overlay as well, or the stream carries
+two score bars. This needs the desk to have found the field (at start or since: the page asks
+again by itself), and that computer to reach the field's address; the doors check's **Screens**
+row warns when it cannot, while there is still time to move its cable. The timings: Cheesy's
+display after the desk has been silent for about 3 seconds, or after the desk has lost the field
+for 10; back to the desk's graphics once both have answered for 5. The page never reloads itself
+while the desk is away, because a browser error page is light and would be keyed onto the stream.
+
+This is also why a plain browser on `/s/program` gets luma rather than the backdrop: black keys out
+on a switcher and reads as graphics on black on a projector, so one address is safe in both
+places. `/s/watch` and the front page's projector choice ask for `fill` explicitly.
 
 ---
 
@@ -166,15 +249,18 @@ Press F11 for full screen. Chrome and Edge both remember it.
 **Default: `0864`.** Audience screens need no PIN. Every control surface asks for it once, and the
 session lasts the day.
 
-Change it for your event by starting the launcher with `/pin:1234`, or by setting `REMOTE_PIN`
-before `npm start`. There is no way to turn the gate off from the launcher, and that is deliberate.
+Change it for your event on Event settings (`/s/setup`), under **Access codes**, from the desk
+laptop itself; the change works at once and the launcher keeps it across restarts. Starting the
+launcher with `/pin:1234`, or setting `REMOTE_PIN` before `npm start`, still works. There is no way
+to turn the gate off from the launcher, and that is deliberate.
 
 Who needs to know it: the content desk operator, the announcer, the replay operator, the analyst,
 the trivia host, the arcade scorer, and the head referee. That is a real list of people, so treat
 it as a door code and not a secret.
 
-**There are two more doors, and neither is the PIN.** The awards code (`awards.pin` in
-`config.json`, or the `JA_PIN` env var) is held by the Judge Advisor and not by the desk crew
+**There are two more doors, and neither is the PIN.** The awards code (set on Event settings or
+the Judge Advisor's own page; `awards.pin` in `config.json` and the `JA_PIN` env var still work
+underneath) is held by the Judge Advisor and not by the desk crew
 until right before the ceremony; it opens exactly one thing, the awards system including the JA's
 own staging page at `/s/awards`, and nothing else on the desk. The settings code (`setup.pin`, or
 `SETUP_PIN`) is held by the content lead and opens `/s/setup`, where the event's content is
@@ -188,9 +274,11 @@ to an explicitly empty string is the other option: that collapses the tier onto 
 which is right for a small event where the producer is also the JA. Leaving the key out entirely
 does not do that; it keeps the shipped default.
 
-The launcher has no option for either code. The exe unpacks `config.example.json` into the desk
-folder and never overwrites an existing `config.json`, so the deployment path is: copy the
-example to `config.json` on that machine, set the two pins, restart. The **Start here** box on
+The launcher has no option for either code. The deployment path is Event settings (`/s/setup`,
+**Access codes**): each code changes there at once, with no file and no restart, and is kept in
+`data/settings.json`; the Judge Advisor can also change the awards code on `/s/awards`.
+`awards.pin` and `setup.pin` in `config.json` still work underneath, as the value used until a
+code is set on the page. The **Start here** box on
 the desk laptop names every code still on its default, and the doors check shows the same thing
 as an amber **Access codes** row. Neither the launcher nor `desk-log.txt` says which codes are
 defaults: the log is the file a crew sends to whoever is helping, and the awards code opens the
@@ -271,8 +359,11 @@ README.
 
 | What you see | What it means | What to do |
 | --- | --- | --- |
+| A white page in the browser | A see-through graphic made for OBS, opened with nothing behind it, or an address with `?key=alpha` | On that display's computer open `/s/watch`, click **Program**, press F11 |
+| The front page says *Field: searching* | The desk has not found the field yet; it keeps looking every 30 seconds by itself | Put the desk laptop on the field's network. Still searching once the field is up: type its address on Event settings, **Connections**. *Not connected, and not looking* means the desk was started with `/no-cheesy`: end it in Task Manager and double-click the exe |
+| A new exe changes nothing | A double-click on a running desk only reopens it, before anything is unpacked | End the old desk in Task Manager first, then double-click the new exe |
 | "port 8720 is already busy" | A desk is already running on this machine | Press **S** to stop it and start fresh, or **O** to open the one already running. If the launcher says the port is held by something that is not a content desk, it will not offer to kill it: start with `/port:8721` |
-| "no field found, starting in manual mode" | The scan found no Cheesy Arena | Fine for rehearsal. At the event, check the cable and re-run, or pass `/cheesy-host:` |
+| "starting without it; the desk keeps looking for the field by itself" | The launcher's first look found no Cheesy Arena | Nothing to do: the desk keeps looking every 30 seconds and connects when the field answers |
 | "The Node download does not match its published checksum" | The download was corrupted or intercepted | Try a different network. Do not work around it |
 | "This is 32-bit Windows" | The bundled Node cannot run here | Use a 64-bit machine |
 | A phone on the venue Wi-Fi cannot reach the desk | Client isolation, or the firewall | See below |

@@ -212,8 +212,11 @@ test("a write failure pauses the event log, and it comes back by itself", async 
     mock.timers.tick(EventBus.LOG_RETRY_MS);
     assert.equal(bus.logProblem, null, 'asking after the interval retried');
     assert.ok(bus.logPath, 'with no event emitted');
-    second.end();
-    made[0]!.end();
+    // Waited for, not just ended: the bus abandons a failed stream without
+    // closing it, so its last write may still be in flight. Under a loaded
+    // full test run the files were read before it landed, and this failed
+    // with the events on their way to disk.
+    await Promise.all([second, made[0]!].map(s => new Promise<void>(r => { s.end(() => r()); })));
     await bus.closeLog();
     const files = (await readdir(dir)).filter(f => f.endsWith('.ndjson'));
     const types = (await Promise.all(files.map(f => typesIn(join(dir, f))))).flat();

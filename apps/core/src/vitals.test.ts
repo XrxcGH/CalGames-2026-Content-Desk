@@ -329,13 +329,15 @@ test('an empty desk PIN on a desk only this machine can reach is a note, not a b
   }
 });
 
-test('the OBS row says how the exe turns OBS on, not a command-line flag', async () => {
+test('the OBS row is gray and short on a setup without OBS, with nothing to type or edit', async () => {
   // The packaged exe has no command line, so "(no --obs)" pointed a
-  // first-time crew at something they can never type.
+  // first-time crew at something they can never type; and a venue whose kit
+  // is a hardware switcher has no OBS at all, so telling it to edit
+  // config.json to turn OBS on read as a fault to fix.
   const off = find(await new Vitals(base()).report(), 'obs');
   assert.equal(off.level, 'off');
-  assert.match(off.detail, /"obs": \{ "enabled": true \} in config\.json/);
-  assert.doesNotMatch(off.detail, /--obs/);
+  assert.equal(off.detail, 'not used on this setup');
+  assert.equal(off.fix, undefined);
 });
 
 test('"not streaming" is fine on Friday and an emergency during a match', async () => {
@@ -455,10 +457,13 @@ test('the Recording row says which half of its setup is missing, and never holds
     return row.detail;
   };
 
+  // Neither half is a kit that records on its own hardware: gray, plain,
+  // and no chapter of a manual to go and read.
   const neither = await rowFor(false, cfg());
+  assert.match(neither, /^not used on this setup/);
   assert.match(neither, /ffmpeg is not installed/);
   assert.match(neither, /no cameras are listed under "recording" in config\.json/);
-  assert.match(neither, /chapter 4, step 9/);
+  assert.doesNotMatch(neither, /chapter|handbook/);
 
   const noFfmpeg = await rowFor(false, camera);
   assert.match(noFfmpeg, /ffmpeg is not installed/);
@@ -479,11 +484,10 @@ test('the Recording row says which half of its setup is missing, and never holds
 test('the Field bridge row says what the exe can do, not a flag it cannot take', async () => {
   const off = find(await new Vitals(base({ mode: null })).report(), 'field');
   assert.equal(off.level, 'off');
-  assert.doesNotMatch(off.detail, /--cheesy/);
-  assert.match(off.detail, /did not find the field when it started/);
+  assert.doesNotMatch(off.detail, /--cheesy|cheesy-host|START-DESK|chapter/);
+  assert.match(off.detail, /not looking for the field/);
   assert.match(off.detail, /restart the desk/);
-  assert.match(off.detail, /START-DESK\.cmd \/cheesy-host:ADDRESS:8080/);
-  assert.match(off.detail, /chapter 9/);
+  assert.match(off.detail, /finds the field by itself/);
 
   // Practice runs without the field on purpose; restarting would not help.
   const demo = find(await new Vitals(base({ mode: 'demo' })).report(), 'field');

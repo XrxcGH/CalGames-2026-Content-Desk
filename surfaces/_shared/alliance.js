@@ -110,7 +110,7 @@ export function availablePool(selection, limit = 24) {
  *
  * WHO IS AHEAD and WHETHER THAT IS A RESULT are two questions. They used to be
  * one flag ('!estimated && r > b'), so while the desk shadow-scored neither
- * alliance was ever ahead and the 'Leading, unofficial' wording could never
+ * alliance was ever ahead and the 'Leading' wording could never
  * appear: a clearly decided match showed two outlined totals and no words.
  *
  * The leader is worked out regardless. `won` (the gold cap) is the claim that
@@ -129,8 +129,10 @@ export function finalVerdict(state) {
   const official = !estimated ? state?.officialWinner : null;
   const leader = official ?? (r > b ? 'red' : b > r ? 'blue' : 'tie');
   const words = side => {
-    if (leader === side) return estimated ? 'Leading, unofficial' : 'Winner';
-    if (leader === 'tie') return estimated ? 'Level, unofficial' : 'Tie';
+    // No "unofficial" on air (the event asked for no such tag). What keeps a
+    // guess from being called the result is that it never says Winner or Tie.
+    if (leader === side) return estimated ? 'Leading' : 'Winner';
+    if (leader === 'tie') return estimated ? 'Level' : 'Tie';
     return '';
   };
   return {

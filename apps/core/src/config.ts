@@ -84,10 +84,13 @@ export interface Config {
     credit: string;
     copyright: string;
   };
-  // The Cheesy Arena bridge is deliberately NOT configured here. It is a
-  // launch flag (`--cheesy`). It needs FTA sign-off, so switching it on should
-  // be an explicit act at the point of use rather than something inherited
-  // from a file copied between machines. See docs/10-field-bridge.md.
+  // The Cheesy Arena bridge is deliberately NOT configured here, and neither
+  // is the video switcher. The desk finds both on the network by itself
+  // (--discover, which the launcher passes), and an address the search cannot
+  // find is typed on the Event settings page, which keeps it in
+  // data/settings.json (settings.ts): never in a file copied between
+  // machines, and never something a volunteer edits by hand. The bridge stays
+  // receive-only and GET-only either way. See docs/10-field-bridge.md.
   /**
    * Who paid for this, and what they were promised.
    *

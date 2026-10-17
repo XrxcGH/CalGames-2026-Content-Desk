@@ -109,7 +109,15 @@ RUN-THE-DESK.html
 .handbook.tmp.html
 
 # The launcher remembers the desk PIN here, in the desk folder. Never commit it.
+# The settings page writes it too, when the desk PIN is changed there.
 desk-pin.txt
+desk-pin.txt.tmp
+
+# What the settings page saved: the awards and settings codes, the field and
+# switcher addresses and the Nexus API key. Codes and a credential, so never
+# committed, and never served (no route reads data/ to a browser).
+data/settings.json
+data/settings.json.tmp
 
 # Which cues the crew armed, kept across a restart. Event-specific runtime state.
 data/cues.json

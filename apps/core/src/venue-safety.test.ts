@@ -413,7 +413,7 @@ async function raise(p: Page, name: string, e: Emergency | null): Promise<void> 
 /** Open surfaces that are not an audience screen, and why none of them paints it. */
 const NOT_A_SCREEN_THE_CROWD_READS: Record<string, string> = {
   watch: 'a kiosk wrapper: every screen it frames draws the message itself (checked below)',
-  tele: 'the telestrator render: it draws strokes over the program feed, never text',
+  tele: 'the telestrator render: strokes over the replay; alone in a browser it shows one line saying what it is for, never the safety message',
   testcard: 'a test pattern with no state',
   awards: 'the Judge Advisor sign-in shell, not an audience screen',
   setup: 'the settings sign-in shell, not an audience screen',

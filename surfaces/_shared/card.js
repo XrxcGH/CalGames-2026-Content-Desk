@@ -125,7 +125,7 @@ export function drawCard(ctx, card) {
 
   // ---- score blocks -----------------------------------------------------
   // The field's answer when it gave one. Falling back to the totals keeps a
-  // desk with no field working, and that case is already stamped unofficial.
+  // desk with no field working, and that case never says WINNER.
   const won = card.winner ?? (
     (card.red?.score ?? 0) > (card.blue?.score ?? 0) ? 'red'
       : (card.blue?.score ?? 0) > (card.red?.score ?? 0) ? 'blue' : 'tie');
@@ -167,27 +167,21 @@ export function drawCard(ctx, card) {
     trackedCenter(ctx, label.toUpperCase(), x + blockW / 2, blockY + 74, 5);
 
     ctx.font = num(900)(150);
-    if (card.estimated) {
-      // Shadow-scored totals are OUTLINED here for the same reason the score
-      // bar outlines them: a guess must never leave the desk looking
-      // official, least of all on a card someone is about to post.
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = p.white;
-      ctx.strokeText(String(data?.score ?? 0), x + blockW / 2, blockY + 218);
-    } else {
-      ctx.fillText(String(data?.score ?? 0), x + blockW / 2, blockY + 218);
-    }
+    // Solid even when shadow-scored, as on the score bar: a hollow number
+    // read as a rendering fault. The verdict below never says WINNER on a
+    // guess, and an estimated card cannot be published.
+    ctx.fillText(String(data?.score ?? 0), x + blockW / 2, blockY + 218);
 
     if (isWinner) {
-      // Unofficial says so, in the quieter colour, and never as "WINNER".
+      // A guess says LEADING, in the quieter colour, and never WINNER.
       ctx.fillStyle = card.estimated ? p.dim : p.gold;
       ctx.font = cond(700)(card.estimated ? 24 : 28);
-      trackedCenter(ctx, card.estimated ? 'LEADING, UNOFFICIAL' : 'WINNER',
+      trackedCenter(ctx, card.estimated ? 'LEADING' : 'WINNER',
         x + blockW / 2, blockY + 264, 4);
     } else if (won === 'tie') {
       ctx.fillStyle = p.dim;
       ctx.font = cond(600)(26);
-      ctx.fillText(card.estimated ? 'LEVEL, UNOFFICIAL' : 'TIE',
+      ctx.fillText(card.estimated ? 'LEVEL' : 'TIE',
         x + blockW / 2, blockY + 264);
     }
   };

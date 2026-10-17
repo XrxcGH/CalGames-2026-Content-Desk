@@ -245,7 +245,10 @@ test('a section written twice is a warning on the Start here box; a good file sa
         /class="warn"><b>config\.json gives &quot;obs&quot; something other than a group of settings/);
       const ok = startBox(await page(fine.port, `localhost:${fine.port}`));
       assert.match(ok, /Start here/);
-      assert.doesNotMatch(ok, /config\.json/);
+      // No line about the file. The default-code note still says WHERE the
+      // codes are changed, which names config.json, so the check is for the
+      // file's own warning line rather than for the word.
+      assert.doesNotMatch(ok, /<b>config\.json/);
       assert.doesNotMatch(ok, /PRACTICE|REPLAY/);
     } finally {
       await dup.done();
@@ -278,7 +281,10 @@ test('the Start here box says why other screens may not reach the address', asyn
     try {
       const here = await page(d.port, `localhost:${d.port}`);
       assert.match(here, /If other screens cannot open this address, it is the Windows\s+Firewall on this laptop or a Wi-Fi that keeps devices apart/);
-      assert.match(here, /chapter 11/);
+      // Pointed at the steps on this same page, not at a chapter of a PDF.
+      assert.match(startBox(here), /<a href="#help-reach">what to do<\/a>/);
+      assert.match(here, /id="help-reach"><dt>[^<]*cannot open the address/);
+      assert.doesNotMatch(here, /chapter \d/, 'no handbook chapter numbers on the front page');
       assert.ok(here.indexOf('Firewall') > here.indexOf('class="addr"'), 'under the address');
     } finally {
       await d.done();
@@ -296,7 +302,8 @@ test('/api/info tells the launcher, with no PIN, whether the desk is in practice
       try {
         const res = await fetch(`${d.base}/api/info`);
         assert.equal(res.status, 200, 'open: the launcher holds no PIN');
-        assert.deepEqual(await res.json(), { mode: want });
+        // And where the field is (C6), null with no field: nothing else.
+        assert.deepEqual(await res.json(), { mode: want, field: { host: null } });
       } finally {
         await d.done();
       }
@@ -517,11 +524,20 @@ test('the real desk, started in rehearsal on a broken config.json, says both whe
     }
     assert.ok(up, `the desk never answered:\n${out}`);
 
-    assert.deepEqual(await (await fetch(`${base}/api/info`)).json(), { mode: 'rehearsal' });
+    assert.deepEqual(await (await fetch(`${base}/api/info`)).json(), { mode: 'rehearsal', field: { host: null } });
 
     const front = await (await fetch(`${base}/`)).text();
     assert.match(front, /PRACTICE: started with \/rehearsal/);
     assert.match(front, /config\.json has a typo near line 3, so none of it is in use/);
+    // A broken file still gets the whole front page, choices and help and all,
+    // and the status strip tells the truth about a desk started with no field
+    // and (the file being unusable) no OBS.
+    assert.match(front, /<a class="choice" href="\/s\/watch"><b>Put the show on a projector or TV<\/b>/);
+    assert.match(front, /<a class="choice" href="\/s\/program"><b>Put the graphics into the video switcher<\/b>/);
+    assert.match(front, /<h2 id="help-title">Something not working\?<\/h2>/);
+    assert.match(front, /<b>Field:<\/b> not connected, and this desk is not looking for it, so matches are run by hand/);
+    assert.match(front, /<b>Switcher:<\/b> No video switcher found on the network\. Fine if this setup has none\./);
+    assert.match(front, /<b>OBS:<\/b> not used on this setup\./);
 
     const vitals = await (await fetch(`${base}/api/vitals`)).json() as
       { checks: { id: string; level: string }[]; blockers: { id: string }[] };

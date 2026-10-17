@@ -111,11 +111,32 @@ const upcoming = emit => emit({
   },
 });
 
+/*
+ * Every shot is a page opened on its own in a browser, which is how the venue
+ * runs the screens now. The overlays ask for fill (?key=fill), the CalGames
+ * backdrop behind them, which is how the audience sees them on a projector,
+ * and how the front page's projector choice and /s/watch open them. With no
+ * ?key at all a browser on its own gets luma, graphics on black for a video
+ * switcher's luma key (one shot, program-keyer, shows that look). Before
+ * either, they were transparent, and headless Chrome photographed them on
+ * white, which is the page the volunteers saw too. None of these composites
+ * over a camera plate; a shot that ever does should ask for ?key=alpha. See
+ * applyDisplayMode.
+ */
 const SHOTS = [
   // ---- program overlay, one per screen ----
   {
+    // First, before any match loads: the preview desk starts from nothing,
+    // with no field, which is exactly a fresh install on a venue laptop.
+    name: 'program-standby',
+    url: '/s/program?key=fill',
+    note: 'A projector before any match has loaded. It says why it is empty: here, no ' +
+      'field connection, so matches run from the desk console. Connected to a field ' +
+      'it says it is waiting for a match; with the desk gone it says where it is looking.',
+  },
+  {
     name: 'program-alliance-overview',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'Pre-match: the RSN-style alliance overview with robot cutouts.',
     setup: emit => {
       loadMatch(emit);
@@ -124,7 +145,7 @@ const SHOTS = [
   },
   {
     name: 'program-match-scorebug',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'Live match: score bar, clock, hub indicator, RP thresholds.',
     setup: emit => {
       emit({ type: 'match.start', source: 'cheesy' });
@@ -133,8 +154,16 @@ const SHOTS = [
     },
   },
   {
-    name: 'program-match-cards',
+    // The same moment at the plain address, as a switcher input gets it.
+    name: 'program-keyer',
     url: '/s/program',
+    note: 'The plain address on a video switcher input: the same score bar on black, which '
+      + 'the switcher\'s luma key cuts out. Whenever the desk cannot give a score, this same '
+      + 'input shows the field\'s own score display instead, so that display needs no keyer.',
+  },
+  {
+    name: 'program-match-cards',
+    url: '/s/program?key=fill',
     note: 'The same bar with a red card, a carried yellow and a surrogate marked.',
     setup: emit => {
       emit({ type: 'card.issued', source: 'cheesy', payload: { team: 846, card: 'red', alliance: 'red' } });
@@ -144,7 +173,7 @@ const SHOTS = [
   },
   {
     name: 'program-card-call',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'The card call: what the announcer talks over before the score.',
     setup: emit => emit({
       type: 'card.call', source: 'manual',
@@ -156,7 +185,7 @@ const SHOTS = [
   },
   {
     name: 'program-final-score',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'Final score, with the breakdown, RP badges and any cards issued.',
     setup: emit => {
       emit({ type: 'card.call_clear', source: 'manual', payload: {} });
@@ -167,7 +196,7 @@ const SHOTS = [
   },
   {
     name: 'program-analysis-panel',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'Analysis segment: one card per person, in screen order. The two ' +
       'students are marked as such at the desk, so their cards carry a given ' +
       'name and a family initial.',
@@ -190,7 +219,7 @@ const SHOTS = [
   },
   {
     name: 'program-award-reveal',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'The awards ceremony at the reveal: title, definition, winner. ' +
       'Until the reveal button, the winner exists nowhere the audience can read.',
     setup: async () => {
@@ -206,7 +235,7 @@ const SHOTS = [
   },
   {
     name: 'program-recognition-slide',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'A recognition slide on the program. The side screens rotate the ' +
       'same deck ambiently; this is the desk deliberately taking one to air.',
     setup: async () => {
@@ -259,7 +288,7 @@ const SHOTS = [
   },
   {
     name: 'program-alliance-selection',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'Alliance selection, mirrored from the field, with the pick clock.',
     setup: emit => {
       emit({
@@ -287,19 +316,19 @@ const SHOTS = [
   },
   {
     name: 'program-explainer',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'The explainer loop, for the parent who arrived twenty minutes ago.',
     setup: emit => emit({ type: 'screen.change', source: 'manual', payload: { screen: 'explain' } }),
   },
   {
     name: 'program-arcade-bumper',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'The bumper while the switcher moves to the console capture.',
     setup: emit => emit({ type: 'screen.change', source: 'manual', payload: { screen: 'arcade' } }),
   },
   {
     name: 'program-safety-message',
-    url: '/s/program',
+    url: '/s/program?key=fill',
     note: 'A safety message: covers the frame, latches until cleared.',
     setup: emit => emit({
       type: 'emergency.raise', source: 'manual',
@@ -324,7 +353,7 @@ const SHOTS = [
   },
   {
     name: 'arcade-overlay',
-    url: '/s/arcade',
+    url: '/s/arcade?key=fill',
     note: 'The side tournament: a versus set and the grand prix standings.',
     api: [
       ['/api/arcade/set', { game: 'smash', round: 'Winners Final', bestOf: 5,
@@ -348,13 +377,16 @@ const SHOTS = [
   },
   {
     name: 'telestrator-render',
-    url: '/s/tele',
-    note: 'The analyst\'s ink, transparent, layered over the replay in OBS. '
-      + 'Mostly empty by design: it is a layer, and the ink is drawn live.',
+    url: '/s/tele?key=fill',
+    note: 'The telestrator layer asked for the backdrop, with nothing drawn: it says what it '
+      + 'is for. At its plain address on a switcher input it is ink on black for the luma key, '
+      + 'and in OBS a see-through layer over the replay; either way it carries only the '
+      + 'analyst\'s ink, drawn live.',
     setup: emit => emit({
-      // Without an analyst there is genuinely nothing on this layer, and a
-      // blank tile in a gallery reads as a broken render rather than as a
-      // transparent overlay doing its job.
+      // An analyst on the layer, as during a segment. Ink is relayed live
+      // and never lands in state, so a page loaded for a still has none to
+      // show: what this shot shows is the layer's own words, which is what
+      // a volunteer sees opening it on a screen by itself.
       type: 'telestrator.frame', source: 'manual',
       payload: { analyst: 'Priya Raman', frame: null },
     }),
@@ -392,6 +424,9 @@ const SHOTS = [
   { name: 'phone-remote', url: '/s/remote', auth: true, width: 430, height: 1400,
     note: 'Run the show from a phone: screens, cameras, music, cues.' },
   { name: 'index', url: '/', note: 'The page every screen is picked from.' },
+  { name: 'watch-chooser', url: '/s/watch', height: 1200,
+    note: 'Pick a screen: which screen goes on which display (the projector, the TVs by ' +
+      'the field, the pits), for whoever is plugging one in.' },
 ];
 
 // ---------------------------------------------------------------------------

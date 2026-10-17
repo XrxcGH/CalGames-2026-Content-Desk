@@ -10,11 +10,13 @@
 <style>
 /* Crowd trivia, a full-frame gap-filler. Same head/tick lockup as the other
    full-frame screens; question plates borrow the alliance-plate vocabulary.
-   Defaults to luma (it also runs on venue TVs); ?key=alpha for OBS. */
+   Defaults to luma (it also runs on venue TVs). A full picture in every
+   mode: #stage paints its own purple even with ?key=alpha, which only clears
+   the margins outside the 16:9 stage, so cut to it rather than key it. */
 #stage {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-size: var(--tex-perf-size), cover, cover, cover;
 }
 :root[data-key="luma"] #stage { background-color: var(--cg-purple); background-image: var(--tex-perf); }
 

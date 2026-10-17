@@ -1,10 +1,20 @@
 /**
- * Turn RUN-THE-DESK.md into RUN-THE-DESK.pdf.
+ * Turn RUN-THE-DESK.md into RUN-THE-DESK.pdf, and QUICK-START.md into
+ * QUICK-START.pdf.
  *
  *   npm run handbook
  *
  * The Markdown is the source; the PDF is what gets printed and handed to
  * volunteers, because a gym has worse Wi-Fi than it has photocopiers.
+ *
+ * The quick start exists because the handbook alone failed the people it was
+ * for: on a test night a screen stuck on white, and the volunteers gave up
+ * rather than troubleshoot through 43 pages. So the quick start is held to
+ * ONE printed page, checked below on every build, and a build that lets it
+ * grow past that says so and exits non-zero. One page because it now holds
+ * only what software cannot do for itself: the desk finds the field and the
+ * switcher, and its front page says what it found, so the sheet is the few
+ * steps a person's hands have to take and where the desk explains the rest.
  *
  * No dependencies, for the same reason nothing else here has any: this repo
  * has one runtime dependency and no build step, and adding a Markdown library
@@ -25,9 +35,32 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
-const SRC = join(ROOT, 'RUN-THE-DESK.md');
-const OUT = join(ROOT, 'RUN-THE-DESK.pdf');
 const TMP = join(ROOT, '.handbook.tmp.html');
+
+/**
+ * What gets built. `maxPages` is the promise the document makes on its own
+ * first line ("One page"), so the build checks it rather than trusting it.
+ * `css` is added after the shared print styles: the quick start is set a
+ * little tighter so one sheet holds the five steps AND the fix table, which
+ * are the two things somebody holding it actually needs, at a size still
+ * readable at arm's length on a cart.
+ */
+const DOCS = [
+  { name: 'RUN-THE-DESK', title: 'Running the CalGames Content Desk', maxPages: null, css: '' },
+  { name: 'QUICK-START', title: 'CalGames Content Desk: quick start', maxPages: 1, css: `
+  @page { margin: 11mm 12mm 11mm; }
+  body { font-size: 9.6pt; line-height: 1.4; }
+  h1 { font-size: 18pt; }
+  h2 { font-size: 12pt; margin: 9pt 0 4pt; padding-bottom: 2pt; }
+  p { margin: 0 0 5pt; }
+  ol { margin-bottom: 5pt; }
+  li { margin-bottom: 3pt; }
+  table { font-size: 8.6pt; margin-bottom: 0; }
+  th { padding: 3pt 6pt; font-size: 8pt; }
+  td { padding: 3pt 6pt; }
+  th:first-child, td:first-child { width: 29%; }
+` },
+];
 
 const CHROMES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -153,9 +186,13 @@ function render(md) {
     }
 
     // A continuation line inside a list item: indented, and the list is open.
+    // A setup step ends with its **You should see** check, and that line is
+    // what a volunteer's eye goes back to with the laptop in front of them,
+    // so it starts a line of its own instead of trailing the instructions.
     if (list && /^\s{2,}\S/.test(line)) {
       const last = html.length - 1;
-      html[last] = (html[last] ?? '').replace(/<\/li>$/, ` ${inline(line.trim())}</li>`);
+      const join = /^\s*\*\*You should see\*\*/.test(line) ? '<br>' : ' ';
+      html[last] = (html[last] ?? '').replace(/<\/li>$/, `${join}${inline(line.trim())}</li>`);
       i++;
       continue;
     }
@@ -194,8 +231,8 @@ function render(md) {
  * splits across a page break is nearly useless when somebody is following it
  * step by step, so tables and headings are kept whole.
  */
-const PAGE = body => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Running the CalGames Content Desk</title>
+const PAGE = (body, title = 'Running the CalGames Content Desk', extraCss = '') => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>${esc(title)}</title>
 <style>
   @page { size: letter; margin: 18mm 16mm 20mm; }
   html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -244,48 +281,75 @@ const PAGE = body => `<!doctype html>
   /* A rule in this document always sits between chapters. */
   hr { border: 0; break-after: page; height: 0; margin: 0; }
   hr + h2 { margin-top: 0; }
+${extraCss}
 </style></head><body>
 ${body}
 </body></html>`;
 
 const chrome = () => CHROMES.find(existsSync);
 
+/**
+ * Pages in a PDF Chrome wrote: one `/Type /Page` object per printed page.
+ * `/Type /Pages` is the tree that holds them, hence the look past the word.
+ */
+const pageCount = bytes => (bytes.toString('latin1').match(/\/Type\s*\/Page(?!s)/g) ?? []).length;
+
 async function main() {
-  const md = await readFile(SRC, 'utf8');
-  const html = PAGE(render(md));
+  const built = [];
+  for (const doc of DOCS) {
+    const md = await readFile(join(ROOT, `${doc.name}.md`), 'utf8');
+    built.push({ ...doc, md, html: PAGE(render(md), doc.title, doc.css) });
+  }
 
   // `--html [path]` stops at the HTML. Useful for checking the layout, and it
   // is also the fallback below: a machine with no Chrome can still open that
-  // file in any browser and use its own Print to PDF.
+  // file in any browser and use its own Print to PDF. A path given names the
+  // handbook's file, as it always did; the quick start lands beside it.
   const flag = process.argv.indexOf('--html');
   if (flag !== -1) {
-    const dest = process.argv[flag + 1] ?? join(ROOT, 'RUN-THE-DESK.html');
-    await writeFile(dest, html, 'utf8');
-    console.log(`[handbook] ${dest}`);
+    const asked = process.argv[flag + 1];
+    for (const doc of built) {
+      const dest = asked
+        ? (doc.name === 'RUN-THE-DESK' ? asked : join(dirname(resolve(asked)), `${doc.name}.html`))
+        : join(ROOT, `${doc.name}.html`);
+      await writeFile(dest, doc.html, 'utf8');
+      console.log(`[handbook] ${dest}`);
+    }
     return;
   }
 
   const bin = chrome();
   if (!bin) {
-    const fallback = join(ROOT, 'RUN-THE-DESK.html');
-    await writeFile(fallback, html, 'utf8');
-    console.error('No Chrome or Edge found, so no PDF. Wrote RUN-THE-DESK.html instead: '
-      + 'open it in any browser and use Print to PDF.');
+    for (const doc of built) await writeFile(join(ROOT, `${doc.name}.html`), doc.html, 'utf8');
+    console.error('No Chrome or Edge found, so no PDF. Wrote '
+      + built.map(d => `${d.name}.html`).join(' and ')
+      + ' instead: open each in any browser and use Print to PDF.');
     return;
   }
 
-  await writeFile(TMP, html, 'utf8');
+  // One after the other through the one temp name, which .gitignore already
+  // covers, so a build that dies half way leaves nothing to commit by mistake.
+  for (const doc of built) {
+    const out = join(ROOT, `${doc.name}.pdf`);
+    await writeFile(TMP, doc.html, 'utf8');
+    await new Promise((res, rej) => {
+      const p = spawn(bin, [
+        '--headless', '--disable-gpu', '--no-pdf-header-footer',
+        `--print-to-pdf=${out}`, TMP,
+      ], { stdio: 'ignore' });
+      p.on('exit', code => (code === 0 ? res() : rej(new Error(`chrome exited ${code}`))));
+      p.on('error', rej);
+    }).finally(() => rm(TMP, { force: true }));
 
-  await new Promise((res, rej) => {
-    const p = spawn(bin, [
-      '--headless', '--disable-gpu', '--no-pdf-header-footer',
-      `--print-to-pdf=${OUT}`, TMP,
-    ], { stdio: 'ignore' });
-    p.on('exit', code => (code === 0 ? res() : rej(new Error(`chrome exited ${code}`))));
-    p.on('error', rej);
-  }).finally(() => rm(TMP, { force: true }));
-
-  console.log(`[handbook] RUN-THE-DESK.pdf written from ${md.split('\n').length} lines of Markdown`);
+    const pages = pageCount(await readFile(out));
+    console.log(`[handbook] ${doc.name}.pdf written from ${doc.md.split('\n').length} lines `
+      + `of Markdown: ${pages} page${pages === 1 ? '' : 's'}`);
+    if (doc.maxPages && pages > doc.maxPages) {
+      console.error(`[handbook] ${doc.name}.pdf is ${pages} pages; it promises ${doc.maxPages}. `
+        + 'Cut it back: a sheet nobody can hold in one hand is the 43-page problem again.');
+      process.exitCode = 1;
+    }
+  }
 }
 
 await main();

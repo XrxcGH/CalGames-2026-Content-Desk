@@ -248,3 +248,21 @@ test('an open static tree cannot be used to climb into a closed one', () => {
   assert.equal(get('/theme/fonts/inter.woff2'), false);
   assert.equal(get('/shared/%64esk-client.js'), false);
 });
+
+test('the settings page\'s routes and the screens list are closed by default, and /api/info stays open', () => {
+  // The routes that change codes and connections, and the list of the AV
+  // table's computers, are opened only by a session the server checks (the
+  // settings or awards session, or the desk's): never by this allowlist.
+  for (const p of ['/api/settings', '/api/screens']) assert.equal(get(p), true, `GET ${p}`);
+  for (const p of ['/api/settings/connections', '/api/settings/code', '/api/settings/restart',
+    '/api/awards/code']) {
+    assert.equal(post(p), true, `POST ${p}`);
+    assert.equal(get(p), true, `GET ${p}`);
+  }
+  // Where the field is goes to the program page with no PIN (C6), as the
+  // practice mode always did for the launcher.
+  assert.equal(get('/api/info'), false);
+  assert.equal(post('/api/info'), true, 'open to read, never to write');
+  // The setup page's own door is unchanged by any of this.
+  assert.equal(post('/api/setup/auth'), false);
+});

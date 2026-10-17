@@ -3,35 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Watch · CalGames 2026</title>
+<title>Pick a screen · CalGames 2026</title>
 <link rel="icon" href="/favicon.svg?l=W">
 <link rel="stylesheet" href="/theme/tokens.css">
 <link rel="stylesheet" href="/shared/fonts.css">
 <style>
-/* Kiosk wrapper for the pit monitors.
+/* Kiosk wrapper for every display in the venue: the projector, the TVs
+ * beside the field, the pit TVs.
  *
- * The overlays are built for OBS, which means they are transparent and expect
- * something behind them. A monitor in the pits has no OBS: somebody plugs in a
- * spare screen, opens a browser, and needs the finished picture. So this page
- * composites what the switcher would: the field feed underneath, the program
- * overlay on top, nothing else on screen.
+ * The overlays are layers, transparent when something is behind them. A
+ * display has no OBS: somebody plugs in a screen, opens a browser, and needs
+ * the finished picture. So this page composites what a switcher would: the
+ * field feed underneath and the overlay on top when there is a feed, and the
+ * overlay drawing its own backdrop when there is not.
  *
  * Everything here is a plain iframe or a plain video element. A pit TV might be
  * a smart TV browser or an ancient laptop, and anything clever is a thing that
  * can fail in a room nobody is watching.
  */
+/* The same backdrop the overlays paint in fill (broadcast.css), so a screen
+   looks the same framed here or opened on its own. Three "cover"s because
+   --atmo is three layers; see the fill rule there for the bands one made. */
 html {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
   background-attachment: fixed;
   min-height: 100%;
 }
 /* No background on this shared rule: the shorthand would wipe the brand
    layers painted on html above (a shorthand resets background-image), which
    is how the feed-less kiosk showed the overlay on plain black while its own
-   menu promised the CalGames backdrop. The stage keeps its own black for
-   letterboxing real video. */
+   menu promised the CalGames backdrop. The stage is black only under a feed
+   (see #stage). */
 html, body {
   margin: 0; height: 100%; overflow: hidden;
   color: var(--cg-white);
@@ -39,13 +43,29 @@ html, body {
 body { background: transparent; }
 
 /* A fixed 16:9 stage centered in whatever the screen is, so the overlay lands
-   pixel-for-pixel on the video behind it. Letterboxing is black, which is what
-   a broadcast monitor does. */
+   pixel-for-pixel on the video behind it. Black under a feed, which is what a
+   broadcast monitor does while video letterboxes.
+
+   Black ONLY under a feed that is showing a picture. It used to be black
+   always, and the stage fills a 16:9 TV edge to edge, so a kiosk with no feed
+   showed the overlay on solid black over the backdrop it promised, and before
+   the first match loaded a pit TV was a black screen nobody could tell from a
+   dead one. A feed that is configured but not answering is the same screen,
+   so data-feed waits for the first picture too (see watchFeed). */
 #stage {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 100vw; height: 56.25vw;          /* 16:9 by width */
   max-height: 100vh; max-width: 177.78vh; /* 16:9 by height */
-  background: #000;
+  background: transparent;
+}
+#stage[data-feed] { background: #000; }
+/* No feed to line up with, so nothing to keep 16:9 for: the framed screen
+   takes the whole display and draws its own backdrop (it is opened with
+   key=fill, see showKiosk), reaching every edge with no seam where the
+   stage would have ended. */
+#stage[data-alone] {
+  top: 0; left: 0; transform: none;
+  width: 100vw; height: 100vh; max-width: none; max-height: none;
 }
 
 /* Every feed element by its real id. An earlier #bg selector matched
@@ -58,17 +78,13 @@ body { background: transparent; }
 /* object-fit only applies to replaced media. The YouTube iframe ignores it
    and just fills the stage; the player letterboxes inside itself. */
 #bgImg, #bgVideo { object-fit: cover; background: #000; }
+/* Laid out and loading, but never seen until it has shown a picture (see
+   watchFeed): before that, a camera that is off or typed wrong was a black
+   box with Chrome's broken-image glyph in its corner. */
+#bgImg:not([data-picture]), #bgVideo:not([data-picture]) { visibility: hidden; }
 /* The overlay sits above the feed and must never eat clicks: a pit TV with a
    touch screen should not be able to drive anything. */
 #fg { pointer-events: none; background: transparent; }
-
-/* Shown when no field feed is configured. The overlay still works: an
-   alliance overview or a score bar over the brand backdrop is a perfectly
-   good pit screen, and better than a black rectangle. */
-#backdrop {
-  position: absolute; inset: 0;
-  background: transparent;
-}
 
 /* Nothing is clickable, so the cursor is noise on a permanent display. */
 #stage { cursor: none; }
@@ -78,7 +94,7 @@ body { background: transparent; }
 .menu { position: fixed; inset: 0; overflow: auto; cursor: auto;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-size: var(--tex-perf-size), cover, cover, cover;
   padding: 40px 32px 60px; box-sizing: border-box; }
 .menu-in { max-width: 900px; margin: 0 auto; }
 h1 { margin: 0 0 6px; font-family: var(--font-cond); font-weight: 700; font-size: 34px;
@@ -92,6 +108,11 @@ a.card { display: block; text-decoration: none; color: inherit;
   clip-path: var(--chamfer); --ch: 14px; padding: 16px 18px; }
 a.card:hover { background-color: var(--cg-purple-hi); }
 a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; }
+/* Which display this card is for, first: a volunteer arrives knowing the
+   display ("the TVs by the field"), not the name of the screen. */
+.card .for { display: block; margin-bottom: 6px; font-family: var(--font-cond);
+  font-weight: 700; font-size: 14px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--cg-gold); }
 .card b { display: block; font-size: 19px; margin-bottom: 4px; }
 .card span { color: var(--cg-white-dim); font-size: 14px; line-height: 1.5; }
 .card code { display: block; margin-top: 9px; font-family: var(--font-mono); font-size: 13px;
@@ -105,7 +126,6 @@ a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; 
 
 <!-- Kiosk: feed underneath, overlay on top -->
 <div id="stage" hidden>
-  <div id="backdrop"></div>
   <img id="bgImg" hidden alt="">
   <iframe id="bgFrame" hidden allow="autoplay; encrypted-media" title="Field feed"></iframe>
   <video id="bgVideo" hidden muted autoplay playsinline></video>
@@ -115,10 +135,10 @@ a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; 
 <!-- Chooser -->
 <div class="menu" id="menu" hidden>
   <div class="menu-in">
-    <h1>Watch</h1>
-    <p class="lead">Screens anyone can put on a monitor. Open one of these on a pit TV and
-      leave it: no OBS, no sign-in, no keyboard. Each one fills the screen and looks after
-      itself.</p>
+    <h1>Pick a screen</h1>
+    <p class="lead">Find the display you are setting up, open its screen in a browser on the
+      computer plugged into that display, and make the browser full screen (F11 on Windows).
+      Then leave it: no sign-in, no keyboard, and each screen looks after itself.</p>
     <!-- Only filled when the address asked for a screen that does not exist.
          A kiosk nobody is standing next to has to be right or visibly wrong. -->
     <p class="lead" id="menuNote" role="status" hidden
@@ -130,11 +150,12 @@ a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; 
 
 <script type="module">
 /**
- * Screens a pit monitor can show. Only surfaces that need no PIN appear here,
- * which is the same list `access.ts` keeps open, for the same reason.
+ * Screens any venue display can show. Only surfaces that need no PIN appear
+ * here, which is the same list `access.ts` keeps open, for the same reason.
  *
  * `feed` marks the ones that are transparent overlays and therefore want the
- * field picture behind them. The rest already draw their own background.
+ * field picture behind them; with no feed they draw the backdrop themselves
+ * (see showKiosk). The rest already draw their own background.
  *
  * THE SAME FIVE ROWS EXIST IN apps/core/src/server.ts, in the SURFACES table
  * under group 'On a pit monitor', because the desk's home page lists them and
@@ -153,23 +174,37 @@ a.card:focus-visible { outline: 3px solid var(--cg-gold); outline-offset: -6px; 
  * PIT_SCREENS, not SCREENS: the shared client exports a SCREENS that means
  * PROGRAM screens, and one name for two different lists is how the wrong one
  * gets imported.
+ *
+ * `for` leads each card and says which DISPLAY it is for, in the order a
+ * venue sets them up. Whoever is standing at a projector with a laptop knows
+ * which display they are at; they do not know what the desk calls the
+ * screen, and the old list made them read five blurbs to find out.
  */
 const PIT_SCREENS = [
-  { id: 'program', name: 'Program, with the field feed', feed: true,
-    blurb: 'The broadcast picture: field feed with the live overlay on top. What the stream shows, without OBS.' },
-  { id: 'side', name: 'Side screen', feed: false,
-    blurb: 'On deck and rankings, rotating. Built to be read from across the room.' },
-  { id: 'arcade', name: 'Arcade', feed: true,
-    blurb: 'The side tournament, over the game capture.' },
-  { id: 'trivia', name: 'Trivia', feed: false,
+  { id: 'program', name: 'Program', for: 'the projector, or the stream', feed: true,
+    blurb: 'The main show picture: who is playing, the live score, the final score. '
+      + 'It changes on its own as the field runs.' },
+  { id: 'side', name: 'Side screen', for: 'the TVs beside the field', feed: false,
+    blurb: 'Who is on deck and the current rankings, rotating. Built to be read from across the room.' },
+  { id: 'next', name: 'When do we play?', for: 'pit TVs', feed: false,
+    blurb: 'When each team plays next, with start times that follow the field running early or late. '
+      + 'Also fine on a phone.' },
+  { id: 'trivia', name: 'Trivia', for: 'the trivia monitor', feed: false,
     blurb: 'The crowd game. Shows the join code between questions.' },
-  { id: 'next', name: 'When do we play?', feed: false,
-    blurb: 'Per-team schedule with drift-adjusted start times. Also fine on a phone.' },
+  { id: 'arcade', name: 'Arcade', for: 'the arcade TV', feed: true,
+    blurb: 'Scores from the side tournament, for a TV beside the game consoles.' },
 ];
 
 const params = new URLSearchParams(location.search);
 const want = params.get('screen');
 const $ = id => document.getElementById(id);
+
+// Up here, with the other module state, because showKiosk can reach the
+// functions that read them before the module has finished running.
+let framed = '';                   // the overlay address now in #fg (frame)
+const FEED_CHECK_MS = 1000;        // how often a feed is looked at (watchFeed)
+const FIRST_PICTURE_CHECKS = 4;    // looks a feed gets to show a first picture
+const RETRY_CHECKS = 3;            // looks between asks at a feed that gave up
 
 /*
  * "Nothing asked for" and "asked for something that does not exist" are not
@@ -198,9 +233,10 @@ if (!want) {
 function showMenu() {
   $('menu').hidden = false;
   $('menuNote').hidden = true;
-  document.title = 'Watch · CalGames 2026';
+  document.title = 'Pick a screen · CalGames 2026';
   $('grid').innerHTML = PIT_SCREENS.map(s => `
     <a class="card" href="?screen=${s.id}">
+      <span class="for">For ${s.for}</span>
       <b>${s.name}</b>
       <span>${s.blurb}</span>
       <code>/s/watch?screen=${s.id}</code>
@@ -209,16 +245,38 @@ function showMenu() {
   fetch('/api/urls').then(r => r.json()).then(u => {
     const base = u.base ?? location.origin;
     $('note').innerHTML =
-      `On this network the desk is <b>${base}</b>. A pit monitor only needs that address `
+      `On this network the desk is <b>${base}</b>. Any display only needs that address `
       + `followed by <b>/s/watch</b>. Nothing here asks for a PIN, and nothing here can `
       + `change the show.`
       + (u.fieldStream
-        ? ` The field feed is configured, so the program screen composites it automatically.`
-        : ` No field feed is set, so the program screen draws on the CalGames backdrop `
-          + 'instead. Add one on the <b>Event settings</b> page at <b>/s/setup</b>, under '
-          + 'Screens and stream, or for this monitor only append <b>?feed=</b> to this '
-          + 'address.');
+        ? ' The field feed is set, so Program plays it behind the score.'
+        : ' No field feed is set, so Program draws on the CalGames backdrop. To add one, '
+          + 'open <b>Event settings</b> at <b>/s/setup</b>, under Screens and stream, or '
+          + 'for one display only add <b>?feed=</b> and the feed address to this address.')
+      // The one setup the cards above do not cover: a hardware switcher that
+      // KEYS the graphics over its own camera, rather than cutting to them.
+      // Every card here is a whole picture; a keyer needs the black one,
+      // which is what the program's plain address is on its own in a
+      // browser. It also stands in for the field's own score overlay (see
+      // program.js), so that overlay no longer needs a keyer of its own.
+      // Only from a computer that can reach the field, though: the moment
+      // it is needed is the moment the desk cannot relay it, so it says so.
+      + `<br><br>Keying the graphics over a camera on a video switcher? Open `
+      + `<b>${base}/s/program</b> full screen on the computer feeding that input and `
+      + 'turn on the switcher\'s luma key: the black drops out and the graphics stay. '
+      + 'Use it in place of the field\'s own score display: whenever the desk cannot '
+      + 'give a score, that same input shows the field\'s by itself, as long as that '
+      + 'computer is on the field network.';
   }).catch(() => { $('note').textContent = ''; });
+}
+
+/** Where the field picture comes from, most specific first: the URL the
+ *  display was opened with, then the configured default. '' for none. */
+async function feedFor() {
+  const asked = params.get('feed');
+  if (asked) return asked;
+  return fetch('/api/urls')
+    .then(r => r.json()).then(u => u.fieldStream ?? '').catch(() => '');
 }
 
 async function showKiosk(screen) {
@@ -226,32 +284,74 @@ async function showKiosk(screen) {
   $('stage').hidden = false;
 
   /*
-   * The overlay itself. `key=alpha` keeps it transparent so the feed shows
-   * through; the side screen and trivia draw their own background and are
-   * unaffected by it.
+   * The overlay itself, with `key` saying what is behind it:
+   *
+   *   key=alpha  a feed is playing underneath, so the overlay stays
+   *              transparent and the feed shows through. Also the side
+   *              screen, trivia and "When do we play?", which draw their own
+   *              background and are unaffected by it.
+   *   key=fill   a program or arcade screen with no feed, or with a feed that
+   *              has shown no picture. Nothing would show through, so the
+   *              framed page draws the backdrop itself, and the program can
+   *              then say why it is empty (its standby card) instead of
+   *              leaving a pit TV blank until the first real match.
+   *
+   * Decided before the frame loads, so the overlay never flashes one look
+   * and then the other. With a feed, that means waiting for its first
+   * picture (see watchFeed).
    *
    * `kiosk=1` is for the pages that are ALSO phone pages. "When do we play?"
    * is built for a hand at arm's length: 560px wide with 13 to 24px type. On
    * a pit monitor that is a narrow column of small text in the middle of a
    * 1920x1080 screen, read from across a room, next to a chooser that
-   * promised every screen "fills the screen and looks after itself". The flag
-   * lets the page answer with room-scale type; a page that ignores it renders
-   * exactly as before.
+   * promised every screen looks after itself. The flag lets the page answer
+   * with room-scale type; a page that ignores it renders exactly as before.
    */
-  $('fg').src = `/s/${screen.id}?key=alpha&kiosk=1`;
-
-  if (!screen.feed) return;                    // draws its own background
-
-  // Where the field picture comes from, most specific first: the URL the
-  // monitor was opened with, then the configured default.
-  let feed = params.get('feed');
-  if (!feed) {
-    feed = await fetch('/api/urls')
-      .then(r => r.json()).then(u => u.fieldStream ?? '').catch(() => '');
+  if (!screen.feed) {                          // draws its own background
+    $('fg').src = `/s/${screen.id}?key=alpha&kiosk=1`;
+    return;
   }
-  if (!feed) return;                           // backdrop stays, overlay still works
 
-  mountFeed(feed);
+  const feed = await feedFor();
+  if (!feed) {
+    frame(screen, 'alone');
+    return;
+  }
+  mountFeed(feed, screen);
+}
+
+/**
+ * Put the overlay over the feed (key=alpha, on the black stage) or on its
+ * own (key=fill, the whole display, drawing its own backdrop). `feedDown` is
+ * the host of a configured feed that has shown no picture, for the program's
+ * standby card to name (feedNote in program/decide.js; the arcade has no
+ * card and ignores it).
+ *
+ * The frame is only reloaded when the answer changes, because a reload is a
+ * visible blink, and over a live match a confusing one.
+ */
+function frame(screen, over, feedDown = '') {
+  const stage = $('stage');
+  let src;
+  if (over === 'feed') {
+    delete stage.dataset.alone;
+    stage.dataset.feed = '';
+    src = `/s/${screen.id}?key=alpha&kiosk=1`;
+  } else {
+    delete stage.dataset.feed;
+    stage.dataset.alone = '';
+    src = `/s/${screen.id}?key=fill&kiosk=1`
+      + (feedDown ? `&feeddown=${encodeURIComponent(feedDown)}` : '');
+  }
+  if (src === framed) return;
+  framed = src;
+  $('fg').src = src;
+}
+
+/** A feed's host and port, the only part of its address a screen may print:
+ *  the rest can carry a camera's user name and password. '' if unreadable. */
+function hostOf(url) {
+  try { return new URL(url, location.href).host; } catch { return ''; }
 }
 
 /**
@@ -264,7 +364,7 @@ async function showKiosk(screen) {
  * Twitch: player.twitch.tv refuses plain-HTTP embeds, and a pit monitor
  * reaches the desk over plain HTTP on the venue LAN.
  */
-function mountFeed(url) {
+function mountFeed(url, screen) {
   const yt = url.match(/(?:youtube\.com\/.*[?&]v=|youtu\.be\/|youtube\.com\/live\/)([\w-]{6,})/);
   if (yt) {
     const el = $('bgFrame');
@@ -273,6 +373,10 @@ function mountFeed(url) {
     el.src = `https://www.youtube.com/embed/${yt[1]}`
       + '?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0';
     el.hidden = false;
+    // A page from another site cannot be asked whether it is playing, so
+    // this one is trusted at once, as it always was. When the video is
+    // missing, YouTube's own player says so, in words, on the stage.
+    frame(screen, 'feed');
     return;
   }
 
@@ -280,9 +384,15 @@ function mountFeed(url) {
     const el = $('bgImg');
     el.src = url;
     el.hidden = false;
-    // An MJPEG stream that drops leaves a frozen frame, which looks live and
-    // is not. Reconnect rather than sit on a stale picture.
-    el.onerror = () => setTimeout(() => { el.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`; }, 3000);
+    el.onload = el.onerror = watchFeed(screen, el, url, {
+      picture: () => el.naturalWidth > 0,
+      // `complete` with no picture: an error, or a stream cut mid-way, which
+      // Chrome reports with no event at all, only an image with no size.
+      // The old onerror retry therefore never ran for the commonest drop.
+      gaveUp: () => el.complete,
+      // A new address each time, or the browser hands back the dead answer.
+      retry: () => { el.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`; },
+    });
     return;
   }
 
@@ -290,8 +400,79 @@ function mountFeed(url) {
   el.src = url;
   el.hidden = false;
   el.play().catch(() => { /* autoplay refused; the poster frame still shows */ });
-  // Same reasoning as above: a dead feed should keep trying, quietly.
-  el.onerror = el.onended = () => setTimeout(() => { el.load(); el.play().catch(() => {}); }, 3000);
+  el.onloadeddata = el.onerror = watchFeed(screen, el, url, {
+    picture: () => el.readyState >= 2 && !el.error,   // HAVE_CURRENT_DATA
+    gaveUp: () => !!el.error,
+    retry: () => { el.load(); el.play().catch(() => {}); },
+    // Muted autoplay can be held back while the element is invisible.
+    live: () => el.play().catch(() => {}),
+  });
+  // A file that ends, or a stream the far end closes, plays again.
+  el.onended = () => setTimeout(() => { el.load(); el.play().catch(() => {}); }, 3000);
+}
+
+/*
+ * A configured feed is an address, not a picture.
+ *
+ * The kiosk used to trust it: the stage went black and the overlay went
+ * transparent the moment a feed was set. A camera that was off, on another
+ * network, or typed wrong in Event settings then left the display solid
+ * black with nothing to read, which nobody can tell from a dead screen, on
+ * a day the venue is wiring its own cameras instead of OBS.
+ *
+ * So the feed has to show a picture first. Checked once a second, and at
+ * once on the element's own load and error events:
+ *
+ *   waiting  no picture yet. The backdrop, and no overlay chosen.
+ *   live     a picture: the feed on the black stage, the overlay over it.
+ *   down     no picture within FIRST_PICTURE_CHECKS, or an error first. The
+ *            overlay on its own (key=fill), naming the feed's host so the
+ *            program's standby card can say which box to go and look at.
+ *   lost     live once, then the picture went. The dead element and the
+ *            black go, so the backdrop shows behind the graphics, but the
+ *            overlay is NOT reloaded: mid-show that is a blink over a live
+ *            score, and the stream comes back by itself more often than not.
+ *
+ * Down to live reloads the overlay once, as a layer over the feed. Whatever
+ * the phase, a feed the browser has given up on is asked again every
+ * RETRY_CHECKS, quietly.
+ *
+ * Returns the check, for the element's own events to call.
+ */
+function watchFeed(screen, el, url, { picture, gaveUp, retry, live = () => {} }) {
+  const stage = $('stage');
+  const host = hostOf(url);
+  let phase = 'waiting';
+  let waited = 0;
+  let idle = 0;
+  const check = tick => {
+    if (picture()) {
+      idle = 0;
+      if (phase === 'live') return;
+      el.dataset.picture = '';
+      if (phase === 'lost') stage.dataset.feed = '';
+      else frame(screen, 'feed');
+      phase = 'live';
+      live();
+      return;
+    }
+    if (phase === 'live') {
+      phase = 'lost';
+      delete el.dataset.picture;
+      delete stage.dataset.feed;
+    }
+    const failed = gaveUp();
+    if (phase === 'waiting' && (failed || (tick && ++waited >= FIRST_PICTURE_CHECKS))) {
+      phase = 'down';
+      frame(screen, 'alone', host);
+    }
+    if (tick && failed && ++idle >= RETRY_CHECKS) {
+      idle = 0;
+      retry();
+    }
+  };
+  setInterval(() => check(true), FEED_CHECK_MS);
+  return () => check(false);
 }
 
 // A permanent display should heal itself. If the desk restarts, the overlay

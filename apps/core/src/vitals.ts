@@ -28,6 +28,10 @@ import type { ObsClient } from './cue/obs.ts';
 import type { PublishQueue } from './publish/queue.ts';
 import type { Recorder } from './recorder.ts';
 import type { CheesyAdapter } from './ingest/cheesy/adapter.ts';
+import type { FieldLink } from './ingest/cheesy/field-link.ts';
+import type { AtemStatus } from './atem/watcher.ts';
+import { isProgramPage, type ScreenInfo } from './screens.ts';
+import { DEFAULT_CODES, type Settings } from './settings.ts';
 import {
   configFileReport, launchMode, publishReadiness,
   type Config, type ConfigFileReport, type LaunchMode,
@@ -66,7 +70,22 @@ export interface VitalsDeps {
   recorder?: Recorder | null;
   publish?: PublishQueue | null;
   obs?: ObsClient | null;
+  /**
+   * Whether the desk has a field bridge, read at the moment of each report
+   * (C3): the finder can attach one long after the desk started.
+   */
+  field?: FieldView | null;
+  /**
+   * A bridge fixed at start, for a desk or test with no FieldLink. Read only
+   * when `field` is absent.
+   */
   cheesy?: CheesyAdapter | null;
+  /** The read-only switcher watcher, for the Switcher row and the screens' format check. */
+  atem?: AtemView | null;
+  /** Every open page's own report of where it is showing, for the Screens row. */
+  screens?: ScreensView | null;
+  /** The codes and connections from the settings page. */
+  settings?: Pick<Settings, 'resolved'> | null;
   audio?: HouseAudio | null;
   coverage?: CoverageLedger | null;
   /** Bytes per second the recorder is expected to write, for hours-remaining. */
@@ -114,9 +133,11 @@ export function configFileVital(r: ConfigFileReport): Vital | null {
   const base = { id: 'config-file', label: 'Settings file' };
   if (r.state === 'unread') return null;
   if (r.state === 'missing') {
+    // Fine, and said as fine: the codes and connections are set on the
+    // settings page now, and nobody needs to make this file to run a show.
     return { ...base, level: 'off',
-      detail: 'no config.json in the desk folder, so every setting is the shipped default '
-        + '(handbook chapter 2, step 3)' };
+      detail: 'no config.json in the desk folder, which is fine: the codes and connections are set on '
+        + 'the Event settings page, and everything else uses the shipped defaults' };
   }
   const lost = 'so none of it is in use: the awards and settings codes are back to the shipped '
     + 'defaults, OBS is off, and every other setting in it is ignored';
@@ -207,6 +228,218 @@ export function loopbackOnly(host: string | undefined): boolean {
   return h === 'localhost' || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h);
 }
 
+/** The field as the doors check reads it (C3): a FieldLink, or anything shaped like one. */
+export type FieldView = Pick<FieldLink, 'adapter' | 'host' | 'searching'>;
+
+/** The switcher watcher, as far as a report needs it. */
+export interface AtemView { readonly status: AtemStatus }
+
+/** The registry of open pages, as far as a report needs it. */
+export interface ScreensView { list(): ScreenInfo[] }
+
+/** The words for no switcher, the same on every screen that says it. */
+export const NO_SWITCHER = 'No video switcher found on the network. Fine if this setup has none.';
+
+/** The name the AV crew gave an input on the switcher, or its number. */
+export function atemInputName(status: AtemStatus, id: number | null): string {
+  if (id === null) return 'nothing';
+  const input = status.inputs.find(i => i.id === id);
+  return input?.longName || input?.shortName || `input ${id}`;
+}
+
+/** "DSK1", "M/E 1 key 2": what the switcher's own panel calls a keyer. */
+const keyerName = (k: AtemStatus['keyers'][number]): string =>
+  k.kind === 'downstream' ? `DSK${k.index}` : `M/E ${k.me ?? 1} key ${k.index}`;
+
+/**
+ * The Switcher row: what the vision switcher has on air, read without
+ * touching it (the watcher is read-only by construction).
+ *
+ * Absent hardware is gray, never red: most desks in the world have no
+ * switcher, and the AV crew's own panel is the authority on what is on air.
+ * The warnings are the two mistakes that ruin a stream quietly: two overlays
+ * keyed at once (Cheesy's and the desk's, one over the other), and a match
+ * running with the graphics input keyed off, so the stream has no score.
+ * Pure, so the front page and the doors check say the same words.
+ */
+export function switcherVital(status: AtemStatus | null,
+  o: { graphicsInput?: number | null; matchRunning?: boolean } = {}): Vital {
+  const base = { id: 'switcher', label: 'Switcher' };
+  if (!status || status.state === 'off' || status.state === 'searching') {
+    // Two errors mean a switcher is plainly meant to be there: one that
+    // turned the desk down (no free connection slot), and an address on the
+    // settings page the watcher cannot use. Neither is "no switcher", so each
+    // is amber in the watcher's own words, which say what to do. Matched on
+    // those words, so anything else stays the gray "none found".
+    const err = status?.error ?? '';
+    if (/turned the desk down/i.test(err)) {
+      return { ...base, level: 'warn', detail: 'there is a switcher, but it would not let the desk connect.',
+        fix: err };
+    }
+    if (/not a switcher address|names port/i.test(err)) {
+      return { ...base, level: 'warn', detail: 'the switcher address on the Event settings page cannot be used.',
+        fix: `${err} Change it on the Event settings page (/s/setup), under Connections.` };
+    }
+    return { ...base, level: 'off', detail: NO_SWITCHER };
+  }
+  const at = status.host ? ` at ${status.host}` : '';
+  if (status.state === 'connecting') {
+    // A typed address that does not answer is somebody's mistake to fix; one
+    // the desk found a moment ago is only a handshake under way.
+    return status.error
+      ? { ...base, level: 'warn', detail: `not answering${at}.`,
+        fix: `${status.error} The desk keeps trying by itself.` }
+      : { ...base, level: 'unknown', detail: `connecting to the switcher${at}.` };
+  }
+  if (status.state === 'lost') {
+    return { ...base, level: 'warn',
+      detail: `lost the switcher${at}, so what is on air is unknown.`,
+      fix: 'Check the switcher is on and its network cable is in. The desk reconnects by itself, '
+        + 'and the switcher keeps running the show either way.' };
+  }
+  const name = (id: number | null): string => atemInputName(status, id);
+  const onAir = status.keyers.filter(k => k.onAir);
+  const keys = onAir.map(k => `${keyerName(k)} (${name(k.fillSource)})`);
+  const what = [
+    status.model ?? 'switcher',
+    status.host ? `at ${status.host}` : '',
+    status.videoMode ? `running ${status.videoMode.label}` : '',
+  ].filter(Boolean).join(' ');
+  const detail = `${what}. Program: ${name(status.program)}. `
+    + (keys.length ? `Keyed on air: ${keys.join(', ')}.` : 'No keys on air.');
+  // A picture-in-picture box is an upstream DVE key, not an overlay, so two
+  // of those, or one with the score, is a normal show.
+  const overlays = onAir.filter(k => k.type !== 'dve');
+  if (overlays.length >= 2) {
+    return { ...base, level: 'warn',
+      detail: `${detail} That is ${overlays.length} overlays on air at once, one over the other.`,
+      fix: 'On the switcher, take all but one of those keys off air (press its ON AIR button). The '
+        + "desk's graphics and Cheesy Arena's overlay come through the same input, so one key is enough." };
+  }
+  const gfx = o.graphicsInput ?? null;
+  if (gfx !== null && o.matchRunning && !onAir.some(k => k.fillSource === gfx)) {
+    return { ...base, level: 'warn',
+      detail: `${detail} A match is running and the graphics input (${name(gfx)}) is not keyed on air, `
+        + 'so the stream shows no score.',
+      fix: `On the switcher, put the key that carries ${name(gfx)} on air (on this kit, DSK 1: press its `
+        + 'ON AIR button). If the graphics reach the stream another way, clear the graphics input on '
+        + 'the Event settings page.' };
+  }
+  return { ...base, level: 'ok', detail };
+}
+
+/** The address of a page's computer as a person reads it. */
+export const whereIs = (addr: string): string =>
+  addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1' ? 'this laptop' : addr;
+
+/** Within two frames a second, the way a switcher's frame sync forgives it. */
+const HZ_SLACK = 2;
+
+/**
+ * The Screens row: where the program graphics are showing, as the pages
+ * themselves report it (hello frames, see screens.ts).
+ *
+ * The checks are the ones that put a broken picture on the stream with
+ * nothing complaining: no program page open anywhere; the switcher's feed in
+ * a window instead of full screen (the taskbar is keyed onto the stream);
+ * that computer's output at another resolution or frame rate than the
+ * switcher runs (scaled, juddering, or dropped by the converter); and the
+ * handoff to Cheesy Arena's own overlay, which is right when the desk cannot
+ * be trusted but means the desk's graphics are not on air. Each says which
+ * computer and what to do there.
+ *
+ * The size and rate checks apply only to a top-level page on black (the
+ * switcher feed): a projector page and an OBS source run at their own sizes.
+ */
+export function screensVital(list: readonly ScreenInfo[], o: {
+  atem?: AtemStatus | null;
+  /** The field bridge exists and is connected now. */
+  fieldConnected?: boolean;
+  /**
+   * Whether this desk has OBS set up. False means no OBS anywhere, so a
+   * see-through page in a plain browser is the white page; unset says nothing.
+   */
+  obs?: boolean;
+} = {}): Vital {
+  const base = { id: 'screens', label: 'Screens' };
+  const program = list.filter(isProgramPage);
+  if (!program.length) {
+    return { ...base, level: 'warn',
+      detail: 'no program page is open anywhere, so no switcher, projector or TV shows the desk\'s graphics.',
+      fix: "On the computer that feeds the switcher's overlay input, open this desk's address with "
+        + '/s/program on the end, and press F11. For a projector or TV, open /s/watch on that computer instead.' };
+  }
+  const places = [...new Set(program.map(s => whereIs(s.addr)))];
+  const detail = `the program graphics are open on ${program.length} `
+    + `${program.length === 1 ? 'page' : 'pages'}: ${places.join(', ')}.`;
+  const said: string[] = [];
+  const todo: string[] = [];
+  const mode = o.atem?.state === 'connected' ? o.atem.videoMode : null;
+  for (const s of program) {
+    const where = whereIs(s.addr);
+    const on = where === 'this laptop' ? 'on this laptop' : `on ${where}`;
+    if (s.showing === 'cheesy') {
+      said.push(`The program page ${on} is showing Cheesy Arena's own score overlay instead of the desk's, `
+        + (o.fieldConnected
+          ? 'because the desk or its field connection was down a moment ago. It switches back by itself in a few seconds.'
+          : 'because the desk\'s field connection is down, and Cheesy\'s overlay has the real score meanwhile.'));
+      todo.push(`nothing to do ${on}: it switches back to the desk's graphics by itself once the desk and `
+        + 'the field are both answering (see the Field bridge row)');
+    }
+    if (s.embedded !== false) continue;
+    // The failure the AV crew met on a test night: ?key=alpha in a plain
+    // browser, on a desk with no OBS. A browser paints a see-through page
+    // white, and a switcher keying that input puts white over the stream.
+    if (o.obs === false && s.key === 'alpha') {
+      said.push(`The program page ${on} is the see-through version made for OBS, so a plain browser shows `
+        + 'it on white, and on a switcher that white covers the whole stream.');
+      todo.push(`${on}, open this desk's address with /s/program on the end and nothing after it, `
+        + 'then press F11');
+      continue;
+    }
+    // The handoff (C7) is armed only when that computer can reach Cheesy
+    // Arena's own display. While the desk is working nothing on the input
+    // shows it, so it is said here, before the first desk hiccup freezes the
+    // score on the stream. Only while the field is connected: when it is not,
+    // the Field bridge row already says so, and this would repeat it.
+    if (s.key === 'luma' && s.backup === 'bad' && o.fieldConnected) {
+      said.push(`The program page ${on} cannot reach Cheesy Arena's own score display, so if the desk `
+        + "stops, that input keeps its last picture instead of showing the field's score.");
+      todo.push(`put ${where} on the field network (the same switch as Cheesy Arena)`);
+    }
+    if (s.full === false) {
+      said.push(`The program page ${on} is in a window, not full screen.`);
+      todo.push(`${on}, click the page and press F11`);
+    }
+    if (!mode || s.key !== 'luma' || mode.width <= 0) continue;
+    if (s.sw !== null && s.sh !== null && s.dpr !== null) {
+      const pw = Math.round(s.sw * s.dpr);
+      const ph = Math.round(s.sh * s.dpr);
+      if (pw !== mode.width || ph !== mode.height) {
+        said.push(`The program page ${on} is on a ${pw}x${ph} screen, but the switcher runs `
+          + `${mode.label} (${mode.width}x${mode.height}).`);
+        todo.push(`${on}, open Settings, System, Display, pick the screen that goes to the switcher, and set `
+          + `Display resolution to ${mode.width} x ${mode.height}`);
+      }
+    }
+    if (s.hz !== null && mode.fps > 0) {
+      // An interlaced format's label is the field rate (1080i59.94 is 29.97
+      // frames), and the computer feeding it runs at the field rate.
+      const interlaced = /\d+i/.test(mode.label);
+      const target = interlaced ? mode.fps * 2 : mode.fps;
+      if (Math.abs(s.hz - target) > HZ_SLACK) {
+        said.push(`The program page ${on} is refreshing at ${s.hz} Hz, but the switcher runs ${mode.label}.`);
+        todo.push(`${on}, open Settings, System, Display, Advanced display, and set the refresh rate to `
+          + `${Math.round(target)} Hz`);
+      }
+    }
+  }
+  if (!said.length) return { ...base, level: 'ok', detail };
+  const fix = todo.join('; ');
+  return { ...base, level: 'warn', detail: `${detail} ${said.join(' ')}`,
+    fix: `${fix.charAt(0).toUpperCase()}${fix.slice(1)}.` };
+}
+
 /** What the operating system says is free for an ordinary process on `root`'s drive. */
 const driveFreeBytes = async (root: string): Promise<number> => {
   const fs = await statfs(root);
@@ -231,6 +464,27 @@ const worstOf = (levels: VitalLevel[]): VitalLevel => {
   return 'ok';
 };
 
+/**
+ * The report as any computer but the desk laptop may see it.
+ *
+ * "Still on the shipped default: awards code" is a default-code warning, and
+ * those go only to the desk laptop (the server's isDeskMachine), as the Start
+ * here box and GET /api/settings keep them: a shipped default is a public
+ * code, so that line on a console at the AV table tells whoever reads it the
+ * code that opens the staged winners. So the warning row is left out there,
+ * not grayed (the desk console shows any Access codes row it is given), and
+ * the worst level is worked out again without it. An empty desk PIN stays: it
+ * is a blocker, and it names no code anyone could not already use.
+ */
+export function forAnotherComputer(report: VitalsReport): VitalsReport {
+  const checks = report.checks.filter(c => !(c.id === 'codes' && c.level === 'warn'));
+  return {
+    ...report,
+    checks,
+    worst: worstOf(checks.filter(c => c.level !== 'off').map(c => c.level)),
+  };
+}
+
 export class Vitals {
   #d: VitalsDeps;
 
@@ -242,7 +496,7 @@ export class Vitals {
     // disk check wait, and the whole report is polled from a browser.
     const results = await Promise.allSettled([
       this.#settings(), this.#disk(), this.#eventLog(), this.#recorder(), this.#obs(), this.#audioInputs(),
-      this.#field(), this.#publish(), this.#house(), this.#coverage(),
+      this.#field(), this.#switcher(), this.#screens(), this.#publish(), this.#house(), this.#coverage(),
       this.#codes(),
     ]);
     for (const r of results) {
@@ -383,17 +637,21 @@ export class Vitals {
       const listed = Array.isArray(sources) && sources.some(s => s && s.enabled !== false);
       let ffmpeg = false;
       try { ffmpeg = await (this.#d.ffmpegFound ?? hasFfmpeg)(); } catch { /* unknown: say missing */ }
-      const step = '(handbook chapter 4, step 9)';
+      // Neither half is the normal state of a kit that records on its own
+      // hardware (a Web Presenter, the switcher's own recorder): gray, in
+      // plain words, with no chapter of a manual to go and read. A setup
+      // half done says which half, because somebody started on it.
       return [{
         id: 'recorder', label: 'Recording', level: 'off',
         detail: !ffmpeg && !listed
-          ? 'not running: ffmpeg is not installed on this laptop, and no cameras are listed '
-            + `under "recording" in config.json, so there are no replays or match videos ${step}`
+          ? 'not used on this setup: this desk records no cameras, so its replay and match video '
+            + 'tools have nothing to cut (ffmpeg is not installed, and no cameras are listed under '
+            + '"recording" in config.json)'
           : !ffmpeg
-            ? `not running: ffmpeg is not installed on this laptop, so there are no replays or match videos ${step}`
+            ? 'not running: ffmpeg is not installed on this laptop, so there are no replays or match videos'
             : !listed
               ? 'not running: no cameras are listed under "recording" in config.json, so there are '
-                + `no replays or match videos ${step}`
+                + 'no replays or match videos'
               : 'not running, though ffmpeg is installed and config.json lists cameras: desk-log.txt '
                 + 'says why (a camera entry it could not use, a recorder that failed to start, or '
                 + 'ffmpeg installed after the desk started). Fix that, then restart the desk.',
@@ -454,13 +712,17 @@ export class Vitals {
    */
   #codes(): Vital[] {
     const cfg = this.#d.config;
-    const desk = process.env['REMOTE_PIN'] ?? '0864';
+    // The settings page's codes when there is a Settings, which is what the
+    // server runs on (they change live, so this row must read them live).
+    const live = this.#d.settings?.resolved.codes;
+    const desk = live ? live.desk : process.env['REMOTE_PIN'] ?? DEFAULT_CODES.desk;
     // String() for the same reason the server does it: "pin": 2468 unquoted in
     // config.json is a number, and a thrown .trim() here is raised while the
     // list of checks is still being built, so it would take the whole health
     // report down rather than just this row.
-    const ja = String(process.env['JA_PIN'] ?? cfg.awards?.pin ?? '1357').trim();
-    const setup = String(process.env['SETUP_PIN'] ?? cfg.setup?.pin ?? '4567').trim();
+    const ja = live ? live.awards : String(process.env['JA_PIN'] ?? cfg.awards?.pin ?? DEFAULT_CODES.awards).trim();
+    const setup = live ? live.settings
+      : String(process.env['SETUP_PIN'] ?? cfg.setup?.pin ?? DEFAULT_CODES.settings).trim();
     // An explicitly EMPTY desk PIN is not a "changed" code: it is the gate
     // switched off (the server lets every request through), the kitchen-table
     // escape hatch. It used to read as changed, so with the other two codes
@@ -483,14 +745,14 @@ export class Vitals {
         id: 'codes', label: 'Access codes', level: 'fail', blocking: true,
         detail: 'The desk PIN is empty, so every control surface is open to anyone '
           + 'on the venue Wi-Fi.',
-        fix: 'Set REMOTE_PIN to a code chosen for this event (or drop the empty '
-          + 'override) and restart the desk.',
+        fix: 'Set a desk PIN on the Event settings page (/s/setup, on the desk laptop), or drop the '
+          + 'empty REMOTE_PIN override and restart the desk.',
       }];
     }
     const onDefault: string[] = [];
-    if (desk === '0864') onDefault.push('desk PIN');
-    if (ja === '1357') onDefault.push('awards code');
-    if (setup === '4567') onDefault.push('settings code');
+    if (desk === DEFAULT_CODES.desk) onDefault.push('desk PIN');
+    if (ja === DEFAULT_CODES.awards) onDefault.push('awards code');
+    if (setup === DEFAULT_CODES.settings) onDefault.push('settings code');
     if (!onDefault.length) {
       return [{ id: 'codes', label: 'Access codes', level: 'ok',
         detail: 'all three changed from the shipped defaults' }];
@@ -507,8 +769,9 @@ export class Vitals {
           ? 'Anyone with a copy of this software knows the awards code, so it '
             + 'leaks winners before the ceremony. Change it for a real event.'
           : 'Anyone with a copy of this software knows these. Change them for a real event.'),
-      fix: 'Set REMOTE_PIN, and awards.pin / setup.pin in config.json, to '
-        + 'codes chosen for this event.',
+      // Where each one is changed, on a page, at once: no file and no flag.
+      fix: 'On the desk laptop, change the desk PIN and the settings code on the Event settings page '
+        + '(/s/setup). The Judge Advisor changes the awards code on their own page (/s/awards).',
     }];
   }
 
@@ -518,18 +781,24 @@ export class Vitals {
       // Named by the switch the exe actually has: the launcher passes no
       // --obs, so pointing at the flag sent a first-time crew to a command
       // line they never see.
+      // Gray and short. Most venues no longer run OBS (NorCal's kit is a
+      // hardware switcher), and a row telling a first-timer to edit a file to
+      // turn on something they do not have read as a fault to fix. The front
+      // page's "If you use OBS" note says how, for whoever does.
       return [{
         id: 'obs', label: 'OBS', level: 'off',
-        detail: 'not connected. To let the desk drive OBS, set "obs": { "enabled": true } '
-          + 'in config.json and restart the desk.',
+        detail: 'not used on this setup',
       }];
     }
     if (!obs.connected) {
       return [{
         id: 'obs', label: 'OBS', level: 'fail', blocking: true,
         detail: 'not answering',
+        // The password by what it is, not by where it is stored: whoever
+        // switched OBS on put it there, and the volunteer reading this never
+        // has a file to open.
         fix: 'Open OBS, then Tools > WebSocket Server Settings: check the server is '
-          + 'enabled, and that its password matches obs.password in config.json.',
+          + 'enabled, and that it uses the password this desk was set up with.',
       }];
     }
     try {
@@ -644,25 +913,42 @@ export class Vitals {
     }
   }
 
+  /**
+   * The bridge as it stands at this moment (C3): the FieldLink's, which the
+   * finder can attach long after the start, or the fixed one a desk without
+   * a FieldLink was given. A getter that throws reads as no bridge.
+   */
+  #adapter(): CheesyAdapter | null {
+    try { return this.#d.field ? this.#d.field.adapter : this.#d.cheesy ?? null; } catch { return null; }
+  }
+
   async #field(): Promise<Vital[]> {
-    if (!this.#d.cheesy) {
-      // In the words of the exe, which scans for the field once at start and
-      // has no --cheesy to pass. The old "started without --cheesy" sent a
-      // first-time crew looking for a command line they never see.
+    const adapter = this.#adapter();
+    if (!adapter) {
+      // In plain words, with nothing to type. The desk looks for the field by
+      // itself now (the finder), so the old advice, restart with
+      // /cheesy-host:ADDRESS from a command prompt, is gone from the row.
+      const mode = this.#mode();
+      const searching = (() => { try { return !!this.#d.field?.searching; } catch { return false; } })();
       return [{
         id: 'field', label: 'Field bridge', level: 'off',
-        detail: this.#mode() === 'demo'
+        detail: mode === 'demo'
           ? 'not connected: practice mode runs without the field'
-          : 'not connected: the desk did not find the field when it started. Once the field '
-            + 'is up, restart the desk (Task Manager, End task, double-click the exe), or start '
-            + 'it with START-DESK.cmd /cheesy-host:ADDRESS:8080 using the address the FTA '
-            + 'gives you (handbook chapter 9).',
+          : mode === 'replay'
+            ? 'not connected: this desk is playing back a saved event log'
+            : searching
+              ? 'searching for the field by itself. It connects as soon as the field is up; until then, '
+                + 'matches are run by hand (Field down? Run matches by hand, in the desk console).'
+              : 'not connected, and this desk is not looking for the field, so matches are run by hand. '
+                + 'Once the field is up, restart the desk (Task Manager, End task, double-click the exe) '
+                + 'and it finds the field by itself.',
       }];
     }
     const up = this.#d.bus.state.connected.cheesy;
+    const host = (() => { try { return this.#d.field?.host ?? null; } catch { return null; } })();
     const out: Vital[] = [{
       id: 'field', label: 'Field bridge', level: up ? 'ok' : 'warn',
-      detail: up ? 'connected to Cheesy Arena' : 'not answering',
+      detail: up ? `connected to Cheesy Arena${host ? ` at ${host}` : ''}` : 'not answering',
       ...(up ? {} : {
         fix: 'The desk still runs on operator input. Check the cable and the ' +
           'field host, and remember scores go on air estimated until it returns.',
@@ -680,7 +966,7 @@ export class Vitals {
      * the day. Nothing anywhere would have said so; the arena has been
      * sending its own numbers on every connect the whole time.
      */
-    const off = this.#d.cheesy.timingMismatch;
+    const off = adapter.timingMismatch;
     if (off?.length) {
       out.push({
         id: 'field-timing', label: 'Match timing', level: 'warn',
@@ -691,6 +977,33 @@ export class Vitals {
       });
     }
     return out;
+  }
+
+  /** The Switcher row; see switcherVital. Gray when there is no watcher at all. */
+  async #switcher(): Promise<Vital[]> {
+    // A watcher that cannot be read is no switcher to report, never a broken
+    // report: the switcher keeps running the show whatever the desk knows.
+    let status: AtemStatus | null = null;
+    try { status = this.#d.atem ? this.#d.atem.status : null; } catch { status = null; }
+    let graphicsInput: number | null = null;
+    try { graphicsInput = this.#d.settings?.resolved.graphicsInput ?? null; } catch { graphicsInput = null; }
+    return [switcherVital(status, { graphicsInput, matchRunning: matchUnderway(this.#d.bus.state) })];
+  }
+
+  /**
+   * The Screens row; see screensVital. No row at all for a desk with no
+   * registry (a test, a tool), because "no program page open" would then be
+   * a guess rather than a report.
+   */
+  async #screens(): Promise<Vital[]> {
+    const screens = this.#d.screens;
+    if (!screens) return [];
+    let atem: AtemStatus | null = null;
+    try { atem = this.#d.atem ? this.#d.atem.status : null; } catch { atem = null; }
+    return [screensVital(screens.list(), {
+      atem, fieldConnected: !!this.#adapter() && this.#d.bus.state.connected.cheesy,
+      obs: !!this.#d.obs,
+    })];
   }
 
   async #publish(): Promise<Vital[]> {
@@ -730,7 +1043,7 @@ export class Vitals {
 
   async #house(): Promise<Vital[]> {
     const audio = this.#d.audio;
-    if (!audio) return [{ id: 'house', label: 'House audio', level: 'off', detail: 'disabled' }];
+    if (!audio) return [{ id: 'house', label: 'House audio', level: 'off', detail: 'not used on this setup' }];
     const { armed } = audio.snapshot.players;
     return [{
       id: 'house', label: 'House audio', level: armed === 1 ? 'ok' : armed === 0 ? 'warn' : 'fail',

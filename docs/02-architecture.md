@@ -260,7 +260,7 @@ with a Stream Deck binding.
 | `bridge` | sits on the field-adjacent NIC, reads Cheesy/FMS, republishes to production LAN | only component allowed to touch the field side; read-only |
 | `core` | normalizer, event log, snapshot store, WS fan-out, REST | single process; NDJSON log to disk, replayable |
 | `replay` | rolling record, clip extraction, clip library | separate process/box, a crash here must not take program down |
-| `cue` | show automation: `on(state) -> actions` | drives OBS-WS scene changes today, honoring a wide-shot lock that keeps autopilot from cutting away from the field mid-match; ATEM and Companion integrations are not built |
+| `cue` | show automation: `on(state) -> actions` | drives OBS-WS scene changes today, honoring a wide-shot lock that keeps autopilot from cutting away from the field mid-match; the desk only *reads* an ATEM (`apps/core/src/atem/`, read-only by construction, for the doors check), and nothing drives one or Companion |
 | `surfaces` | static web bundles, one per surface | served by `core`; every one is just a WS subscriber. Every operator console shares a navigation strip (writes `screen.change` directly) so an operator can jump between consoles and take a program screen without going back to `/` |
 
 Deliberately small. Five processes, one of which is optional, all on a LAN, no cloud dependency

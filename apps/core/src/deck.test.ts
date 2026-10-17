@@ -489,7 +489,12 @@ test('overnight: a desk left running from Friday practice waits for Saturday\'s 
   assert.deepEqual(etas, [sat9, sat9 + 7 * MIN]);
 });
 
-test('after a restart the pace comes back from the day\'s log, not two matches later', async () => {
+test('after a restart the pace comes back from the day\'s log, not two matches later', async ctx => {
+  // The clock is pinned to midday. The fixture's starts run from 30 minutes
+  // ago, and in the half hour after midnight that is yesterday, which the
+  // rebuild rightly leaves out: the test failed every night from 00:00 to
+  // 00:30 while the desk was doing exactly what it should.
+  ctx.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 17, 12, 0, 0).getTime() });
   const dir = await mkdtemp(join(tmpdir(), 'cg-pace-'));
   try {
     const t = Date.now() - 30 * MIN;

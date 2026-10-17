@@ -13,6 +13,9 @@
    Modes, set on <html>:
      data-key="alpha"      transparent background   (OBS Browser Source)
      data-key="luma"       black background         (Blackmagic downstream luma key)
+     data-key="fill"       CalGames backdrop        (a page alone on a projector or TV;
+                                                    painted in broadcast.css, chosen by
+                                                    applyDisplayMode)
      data-surface="light"  light operator UI
      data-lockdown         endgame: suppress decorative motion only
 
@@ -461,7 +464,7 @@ html, body {
 /* Atmosphere layer: full-bleed backdrops are never a flat fill. */
 .atmosphere {
   background-image: var(--tex-perf), var(--atmo);
-  background-size: var(--tex-perf-size), cover;
+  background-size: var(--tex-perf-size), cover, cover, cover;
 }
 
 /* --------------------------------------------------------------------------

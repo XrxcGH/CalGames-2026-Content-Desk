@@ -58,6 +58,190 @@ addEventListener('resize', setJumpHeight);
 // with no resize event to go with it.
 if (typeof ResizeObserver === 'function') new ResizeObserver(setJumpHeight).observe(jumpStrip);
 
+// ---- Simple and Everything -------------------------------------------------
+// A first-time AV coordinator met twenty-five panels, could not find the few
+// that put something on the projector, and gave up. Simple shows what a match
+// day needs and Everything is the whole console, one click apart. The view
+// lives on <html data-view>, set by the head script before the first paint,
+// and the stylesheet does the hiding, so no panel flashes up and away on a
+// reload. This block switches it, remembers the choice for this browser, and
+// keeps the jump strip and the folds honest about what is on the page (those
+// two catch up as this module loads). Nothing here stops a panel working: a
+// hidden panel's key still fires and its polls keep running.
+const page = document.documentElement;
+const VIEW_KEY = 'desk.view';
+const OBS_SHOWN_KEY = 'desk.obsShown';
+/** Folds that Simple opened, so going back to Everything shuts them again. */
+const simpleOpened = new Set();
+
+/**
+ * Open a fold for a reason of its own (the field dropped, a check failed, a
+ * jump). It is then the operator's open fold, which leaving Simple must not
+ * shut on them.
+ */
+function openFold(fold) {
+  simpleOpened.delete(fold);
+  fold.open = true;
+}
+
+/**
+ * Left off the page by the view or the OBS fold, as opposed to tucked inside
+ * a closed fold, which a jump opens on the way. Read back from the stylesheet
+ * rather than worked out again here, so the jump strip cannot disagree with
+ * what the page actually shows.
+ */
+function offPage(el) {
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    if (getComputedStyle(n).display === 'none') return true;
+  }
+  return false;
+}
+
+function paintView() {
+  const simple = page.dataset.view !== 'everything';
+  for (const b of document.querySelectorAll('[data-view-pick]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.viewPick === (simple ? 'simple' : 'everything')));
+  }
+  // Simple reads as plain cards: a fold holding one of its panels opens and
+  // its summary steps aside or stays as a plain heading (the stylesheet
+  // decides which), so the doors check, Load a match and the sample data are
+  // on the page rather than one more click away.
+  for (const fold of document.querySelectorAll('details.group')) {
+    if (simple && fold.hasAttribute('data-simple')) {
+      if (!fold.open) { fold.open = true; simpleOpened.add(fold); }
+    } else if (simpleOpened.has(fold)) {
+      fold.open = false;
+      simpleOpened.delete(fold);
+    }
+  }
+  // A jump to a panel that is not on the page scrolls to nothing, which reads
+  // as a broken strip. Only the panels this view shows keep their link.
+  for (const a of jumpStrip.querySelectorAll('a[href^="#"]')) {
+    const target = document.getElementById(a.getAttribute('href').slice(1));
+    a.hidden = !target || offPage(target);
+  }
+  const shown = page.hasAttribute('data-obs-shown');
+  setText($('obsToggle'), shown ? 'Put the camera controls away' : 'Using OBS? Show the camera controls');
+  $('obsToggle').setAttribute('aria-expanded', String(shown));
+  setJumpHeight();
+}
+
+/**
+ * Switch the view. `remember` is false for a switch the operator did not ask
+ * for by name (a link to a panel Simple leaves out), so an old bookmark does
+ * not quietly change what this browser opens to tomorrow.
+ */
+function pickView(view, remember = true) {
+  page.dataset.view = view;
+  if (remember) {
+    try { localStorage.setItem(VIEW_KEY, view); } catch { /* storage blocked: this page only */ }
+    // A ?view= in the address would win over the choice just made on the next
+    // reload, so it goes once somebody has chosen.
+    try {
+      const url = new URL(location.href);
+      if (url.searchParams.has('view')) {
+        url.searchParams.delete('view');
+        history.replaceState(history.state, '', url);
+      }
+    } catch { /* no history to tidy */ }
+  }
+  paintView();
+}
+
+for (const b of document.querySelectorAll('[data-view-pick]')) {
+  b.onclick = () => pickView(b.dataset.viewPick);
+}
+
+// Simple holds its folds open, and the one heading it leaves showing, "Field
+// down? Run matches by hand", is the words the front page's help tells a
+// first-timer to look for. A click on it shut the fold like any other, and
+// one press into that help took Load a match by hand and the sample data off
+// the page, with nothing left to say how to get them back. In Everything the
+// fold works as it always has.
+for (const fold of document.querySelectorAll('details.group[data-simple]')) {
+  const heading = [...fold.children].find(c => c.localName === 'summary');
+  heading?.addEventListener('click', e => {
+    if (page.dataset.view !== 'everything') e.preventDefault();
+  });
+}
+
+/**
+ * Whether this desk drives OBS at all, from the stream poll's `available`
+ * (false only when OBS is not set up in config.json). Most venues no longer
+ * run OBS: the picture is a browser full screen on a projector or a hardware
+ * switcher, and a camera row that cuts nothing beside a stream panel that
+ * cannot start only looks broken. With OBS set up, connected or not, nothing
+ * changes: the panels stay where they were and say why they are dead.
+ */
+function paintObs(available) {
+  const now = available ? 'on' : 'off';
+  if (page.dataset.obs === now) return;
+  page.dataset.obs = now;
+  paintView();
+  // The setup strip reads it too: a see-through page is OBS's only on a
+  // desk with OBS. Later in the file, and only ever called from a poll.
+  paintKit();
+}
+
+// "Using OBS?": for a desk whose OBS is about to be set up, or somebody who
+// wants to see what the controls look like. Remembered like the view.
+$('obsToggle').onclick = () => {
+  const show = !page.hasAttribute('data-obs-shown');
+  page.toggleAttribute('data-obs-shown', show);
+  try {
+    if (show) localStorage.setItem(OBS_SHOWN_KEY, '1');
+    else localStorage.removeItem(OBS_SHOWN_KEY);
+  } catch { /* storage blocked: this page only */ }
+  paintView();
+};
+
+/*
+ * The field-down kit follows the field, in Simple. data-field on <html> is
+ * "down" while the field is not connected and "up" while it is, and the
+ * stylesheet shows the kit's band in Simple only while it is down (Everything
+ * always has it). Down is said at once: that is the moment somebody needs
+ * Load a match by hand. Up waits until the field has stayed connected for
+ * FIELD_SETTLE_MS and nobody is typing in the kit, because a field that
+ * flaps would otherwise pull the band out from under a half-typed match, and
+ * the operator may still be loading one in the seconds after it reconnects.
+ * The first word after a reload needs no wait: nobody is typing yet.
+ */
+const FIELD_SETTLE_MS = 20_000;
+let fieldUpSince = 0;
+/** A link into the kit that arrived before the desk said where the field is. */
+let arriveLater = null;
+
+function setField(now) {
+  if (page.dataset.field === now) return;
+  page.dataset.field = now;
+  paintView();
+  const go = arriveLater;
+  arriveLater = null;
+  go?.();
+}
+
+function paintField(s) {
+  if (!s) return;
+  if (s.connected?.cheesy !== true) {
+    fieldUpSince = 0;
+    setField('down');
+    return;
+  }
+  if (page.dataset.field !== 'down') {
+    setField('up');
+    return;
+  }
+  const t = Date.now();
+  if (!fieldUpSince) fieldUpSince = t;
+  if (t - fieldUpSince < FIELD_SETTLE_MS) return;
+  if ($('fieldBand').contains(document.activeElement)) return;
+  setField('up');
+}
+
+desk.on('state', paintField);
+
+paintView();
+
 // ---- live readout ----------------------------------------------------------
 // Writes are guarded: setting textContent mutates the node even when the
 // string is identical, and the Now readout's fields are aria-live, so
@@ -114,7 +298,7 @@ function paintLiveState(s) {
   const statusUp = !!s.status;
   $('statusClear').classList.toggle('btn--go', statusUp);
   setText($('statusHint'), statusUp
-    ? `ON SCREEN over program and the side screens: "${s.status.message}"`
+    ? `ON SCREEN over the main screen and the side screens: "${s.status.message}"`
       + (s.status.backAt
         ? `, back at about ${new Date(s.status.backAt).toLocaleTimeString()}` : '')
       + '. Press Hide card when the show starts again.'
@@ -133,8 +317,8 @@ function paintLiveState(s) {
       ? 'A frozen frame is loaded on the analyst\'s pad.'
       : 'No frozen frame yet: the pad stays blank until one is sent.')
       + (tele?.hidden
-        ? ' The render surface is HIDDEN, so nothing the analyst draws is on air. Show again brings it back.'
-        : ' The render surface is up.'));
+        ? ' The drawing is HIDDEN, so nothing the analyst draws is on air. Show again brings it back.'
+        : ' The drawing is up on the broadcast.'));
   }
 
   /*
@@ -170,8 +354,12 @@ function paintLiveState(s) {
   // the seconds after a flapping bridge reconnects.
   if (s.connected && s.connected.cheesy === false && !fieldKitOpened) {
     fieldKitOpened = true;
-    $('fieldDownKit').open = true;
+    openFold($('fieldDownKit'));
   }
+  // Simple follows the field in its own band above the cards (setField and
+  // paintField, near the top), never inside the card flow: a card that came
+  // and went with the field rebalanced every column under the operator the
+  // moment it dropped.
 
   // The match beats: light the one the show is at, so the row teaches its own
   // order. Every button stays pressable: out-of-order is the recovery path.
@@ -462,10 +650,10 @@ $('loadMatch').onclick = () => {
    * talking over an overview nobody can see. Press Pre-match.
    */
   setText($('loadHint'), held
-    ? `${displayName} is loaded, ${teams}. It is NOT on the program screen: you are `
+    ? `${displayName} is loaded, ${teams}. It is NOT on the main screen: you are `
       + `holding ${SCREEN_LABEL[desk.state.screen] ?? desk.state.screen}. `
       + 'Press Pre-match to put the overview up.'
-    : `${displayName} is loaded and on the program screen: ${teams}.`);
+    : `${displayName} is loaded and on the main screen: ${teams}.`);
   noteLoadHint();
 };
 
@@ -755,6 +943,10 @@ const streamSay = (msg, isErr = false) => {
 };
 
 function paintStream(s) {
+  // The one poll that says whether OBS is set up at all, which is what folds
+  // the camera and stream panels away. A poll that did not answer says
+  // nothing about OBS, so the page stays as it was.
+  if (s) paintObs(!!s.available);
   // Dead integrations disable the buttons with the reason on the status
   // line, never silently: the operator must know WHY Start is grayed out.
   const usable = !!s?.connected;
@@ -766,7 +958,10 @@ function paintStream(s) {
   // thing failing (a desk restart mid-poll, a blocked fetch). Pointing at a
   // healthy indicator sent operators hunting in the wrong place.
   if (!s) line = 'Stream status did not answer. If the desk just restarted, the next poll picks it up on its own.';
-  else if (!s.available) line = 'No OBS control: turn it on in config.json (handbook chapter 4, step 7) to run the stream from here.';
+  else if (!s.available) {
+    line = 'OBS is not set up on this desk. To run the stream from here, set "obs": '
+      + '{ "enabled": true } in config.json and restart the desk (handbook chapter 4, step 7).';
+  }
   else if (!s.connected) line = 'OBS is not connected. Start OBS on this machine; the desk retries on its own.';
   else if (s.streaming === null) line = 'OBS is connected but did not answer the status probe.';
   else if (s.streaming) {
@@ -1489,6 +1684,459 @@ setInterval(() => {
   void loadPublish();
 }, 60_000);
 
+// ---- the setup strip: what this desk found ----------------------------------
+/*
+ * The kits change. NorCal stopped using OBS and rebuilt its AV rack around an
+ * ATEM switcher, and the first anyone heard of it was a coordinator testing
+ * the exe on the field, stuck, with a 43-page handbook as the only way to
+ * find out why. So the console says, at the top of both views, what it found
+ * and what is on air: the field, the switcher, the graphics screens, and the
+ * access codes while they still need changing. Every problem is one line
+ * that names the computer and says what to do on it.
+ *
+ * It only reads. Every request here is a plain GET of something the desk
+ * already knows (the switcher watcher is read-only by construction), so the
+ * strip cannot change the show, and an answer it does not get leaves its row
+ * off the page: an older desk has no /api/atem or /api/screens at all, and a
+ * row that guessed would be the one people trust.
+ */
+const kit = {
+  /** The switcher watcher's status, or null when this desk answers none. */
+  atem: null,
+  /** The switcher input the desk's graphics come in on, when the answer says. */
+  graphicsInput: null,
+  /** The graphics screens that have said hello, or null when the desk cannot say. */
+  screens: null,
+  /** Since when the screens have listed no main screen (this page's clock). */
+  noScreensSince: Date.now(),
+  /** The doors check's rows, from loadVitals. */
+  vitals: null,
+  /** Where the field is expected, from /api/info, so a warning can name it. */
+  fieldHost: null,
+  /** This desk's address on the network, for the "open this address" fix. */
+  base: null,
+};
+let kitBusy = false;
+
+/** A GET's JSON. Null when the desk does not answer it; undefined when the request itself failed. */
+async function kitGet(path) {
+  try {
+    const res = await fetch(path);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The switcher status out of an answer, whether it comes bare or as { atem }. */
+function atemFrom(body) {
+  const a = body && typeof body === 'object' && body.atem && typeof body.atem === 'object' ? body.atem : body;
+  return a && typeof a === 'object' && typeof a.state === 'string' ? a : null;
+}
+
+const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const isNum = v => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * The computer a screen runs on, in words. The browser cannot learn a
+ * computer's name, so it is the address the desk saw it at, or the desk
+ * laptop itself when it is this machine.
+ */
+function computerAt(addr) {
+  const a = String(addr ?? '').replace(/^::ffff:/i, '').trim();
+  if (!a) return 'a computer the desk cannot name';
+  if (a === '::1' || a === 'localhost' || /^127\./.test(a)) return 'the desk laptop';
+  return `the computer at ${a}`;
+}
+
+/** A switcher input by the name the crew gave it. */
+function inputName(a, id) {
+  if (!isNum(id)) return 'an input the switcher did not name';
+  const i = (Array.isArray(a.inputs) ? a.inputs : []).find(x => x && x.id === id);
+  return i?.longName || i?.shortName || `input ${id}`;
+}
+
+const KEY_WORD = { luma: 'luma key', chroma: 'chroma key', pattern: 'pattern key', dve: 'DVE key' };
+
+/** "DSK1" or "key 1 on M/E 1", as the panel says it. */
+function keyerName(k) {
+  return k.kind === 'downstream' ? `DSK${k.index}` : `key ${k.index} on M/E ${k.me ?? 1}`;
+}
+
+/**
+ * The field row. Connected comes from the desk state, live. What "not
+ * connected" means comes from the doors check's Field row: lost (the desk
+ * has the field and it stopped answering), still looking (the desk searches
+ * for it by itself), or not part of this setup. "Not looking" is read first:
+ * it has the word "looking" in it too.
+ */
+function fieldRow() {
+  const s = desk.state;
+  const v = (kit.vitals ?? []).find(c => c?.id === 'field') ?? null;
+  if (!s && !v) return null;
+  const at = kit.fieldHost ? ` at ${kit.fieldHost}` : '';
+  if (s?.connected?.cheesy === true) {
+    return { l: 'ok', say: `connected to Cheesy Arena${at}. Matches load by themselves.` };
+  }
+  const byHand = 'Until then, run matches by hand below.';
+  const said = String(v?.detail ?? '');
+  if (v && v.level !== 'off' && v.level !== 'unknown') {
+    return { l: 'warn', byHand: true,
+      say: `not answering. The desk reconnects by itself. ${byHand}`,
+      warn: `The desk laptop cannot reach the field${at}. Check the desk laptop's network cable `
+        + 'to the field network, and ask the scorekeeper whether Cheesy Arena is running.' };
+  }
+  if (/not looking/i.test(said)) {
+    return { l: 'off', byHand: true, say: 'not used on this setup: the desk was started without '
+      + 'looking for it. Run matches by hand below.' };
+  }
+  if (/searching/i.test(said)) {
+    return { l: 'wait', byHand: true,
+      say: `not found yet. The desk keeps looking for it by itself. ${byHand}` };
+  }
+  if (/practice/i.test(said)) {
+    return { l: 'off', byHand: true, say: 'not used in practice mode. Run matches by hand below.' };
+  }
+  if (/playing back/i.test(said)) {
+    return { l: 'off', say: 'not used: this desk is playing back a saved day.' };
+  }
+  return { l: 'off', byHand: true, say: 'not connected. Run matches by hand below.' };
+}
+
+/**
+ * The doors check's Switcher row, for a desk that answers no /api/atem: the
+ * same facts in the doors check's words, every thirty seconds rather than
+ * every five.
+ */
+function switcherFromCheck() {
+  const v = (kit.vitals ?? []).find(c => c?.id === 'switcher');
+  if (!v) return null;
+  const l = ['ok', 'warn', 'fail', 'off'].includes(v.level) ? v.level : 'wait';
+  return { l, say: String(v.detail ?? ''),
+    warn: v.fix && (l === 'warn' || l === 'fail') ? `On the switcher: ${String(v.fix)}` : null };
+}
+
+/**
+ * The switcher row, live. Its problems are the ones that spoil a stream
+ * quietly, the same two the doors check names: two overlays keyed at once
+ * (the desk's graphics and Cheesy Arena's come through the same input, so one
+ * key is enough), and a match running with the graphics input keyed off. And
+ * losing the switcher, which changes nothing on air: the desk only watches.
+ */
+function switcherRow() {
+  const a = kit.atem;
+  if (!a) return switcherFromCheck();
+  const at = a.host ? ` at ${a.host}` : '';
+  // The watcher's own words, when it has some, are the fix: it knows
+  // whether nothing answered, the switcher turned the desk down (a copy of
+  // ATEM Software Control holding the last slot), or it answered and is
+  // slow, and each one sends somebody to a different place.
+  const said = typeof a.error === 'string' && a.error.trim() ? a.error.trim() : null;
+  // Its words name the switcher already, except an address typed wrong,
+  // which needs saying where it was typed.
+  const fix = said && /not a switcher address|names port/i.test(said)
+    ? `The switcher address on the Event settings page: ${said}` : said;
+  if (a.state === 'off' || a.state === 'searching') {
+    // Searching with no answer is a kit with no switcher: gray. But a
+    // switcher that turned the desk down, or an address typed wrong, is
+    // somebody's to fix even while the desk searches. Named by what the
+    // watcher says, so words it might say one day fall back to gray.
+    if (said && /turned the desk down|not a switcher address|names port/i.test(said)) {
+      // A typo leaves nothing to retry until somebody fixes it.
+      return { l: 'warn', warn: fix, say: fix !== said
+        ? 'not connected: the address typed for it is not a switcher address.'
+        : 'not connected. The desk keeps trying by itself.' };
+    }
+    return a.state === 'off' ? { l: 'off', say: 'not used on this setup.' }
+      : { l: 'off', say: 'none found: not used on this setup, or not on the network yet. '
+        + 'The desk keeps looking by itself.' };
+  }
+  if (a.state === 'connecting') {
+    // A typed address that does not answer is somebody's to fix; one the
+    // desk found a moment ago is only a handshake under way.
+    if (!said) return { l: 'wait', say: `found one${at}, connecting.` };
+    return { l: 'warn',
+      say: /^no answer/i.test(said) ? `not answering${at}. The desk keeps trying by itself.`
+        : `not connected yet${at}. The desk keeps trying by itself.`,
+      warn: fix };
+  }
+  if (a.state === 'lost') {
+    return { l: 'warn',
+      say: `lost${at}. The desk reconnects by itself, and the switcher keeps running without it.`,
+      warn: `The desk laptop lost the switcher${at}. Check the switcher is on and the network cable `
+        + 'between it and the desk laptop. Nothing on air changes: the desk only watches the switcher.' };
+  }
+  if (a.state !== 'connected') return null;
+  const parts = [`${a.model || 'ATEM switcher'}${at}${a.videoMode?.label ? `, ${a.videoMode.label}` : ''}.`];
+  if (isNum(a.program)) parts.push(`On air: ${inputName(a, a.program)}.`);
+  const keyed = (Array.isArray(a.keyers) ? a.keyers : []).filter(k => k && k.onAir);
+  parts.push(keyed.length
+    ? `Overlay on air: ${keyed.map(k => `${keyerName(k)}, ${KEY_WORD[k.type] ?? 'key'} of `
+      + `${inputName(a, k.fillSource)}`).join('; ')}.`
+    : 'No overlay keyer is on air.');
+  // A picture-in-picture box is an upstream DVE key, not an overlay.
+  const overlays = keyed.filter(k => k.type !== 'dve');
+  const gfx = isNum(kit.graphicsInput) ? kit.graphicsInput : null;
+  let warn = null;
+  if (overlays.length >= 2) {
+    warn = `The switcher has ${overlays.length} overlays keyed on air at once, one over the other `
+      + `(${overlays.map(keyerName).join(', ')}). On the switcher's panel, take all but one off air with `
+      + "its ON AIR button: the desk's graphics and Cheesy Arena's overlay come through the same input, "
+      + 'so one key is enough.';
+  } else if (gfx !== null && desk.state?.matchStartedAt && !keyed.some(k => k.fillSource === gfx)) {
+    warn = `A match is running and the graphics input (${inputName(a, gfx)}) is not keyed on air, so `
+      + "the stream shows no score. On the switcher's panel, put the key that carries it on air (on "
+      + 'this kit, DSK 1: press its ON AIR button).';
+  }
+  return { l: warn ? 'warn' : 'ok', say: parts.join(' '), warn };
+}
+
+/** How long a list with no main screen in it waits before it is a problem. */
+const SCREENS_SETTLE_MS = 15_000;
+
+/**
+ * The graphics row: the main-screen pages that have said hello, how many are
+ * full screen, and whose overlay they show (the desk's own, or Cheesy
+ * Arena's when the desk has no field data). The checks are the doors check's
+ * Screens row, said from the screens' own reports every few seconds: a page
+ * in a window rather than full screen (the taskbar is keyed onto the
+ * stream), the switcher's feed at another size or rate than the switcher
+ * runs (the converter between them does not scale, so the input goes
+ * blank), and the handoff to Cheesy Arena's overlay. A page framed by
+ * /s/watch is a projector's and an OBS browser source lives in OBS: neither
+ * is held to full screen or to the switcher's format.
+ */
+/**
+ * A main-screen page, its variants included: the clean second-stream feed
+ * connects as "program-clean" (?mode=clean), and a crew that keys that one
+ * has the graphics on air. The server's isProgramPage (screens.ts) is the
+ * same rule, so the strip and the doors check count the same pages.
+ */
+const isProgramPage = sc => !!sc && typeof sc.surface === 'string'
+  && (sc.surface === 'program' || sc.surface.startsWith('program-'));
+
+function graphicsRow() {
+  if (!kit.screens) return null;
+  const shows = kit.screens.filter(isProgramPage);
+  if (!shows.length) {
+    // Every page reconnects by itself after the desk restarts, a few
+    // seconds apart, and "none open" in that window sends somebody to fix
+    // nothing.
+    if (Date.now() - kit.noScreensSince < SCREENS_SETTLE_MS) {
+      return { l: 'wait', say: 'waiting for the screens to say where they are.' };
+    }
+    const where = kit.base ? `${kit.base}/s/program` : "this desk's address followed by /s/program";
+    return { l: 'warn', say: 'not open on any screen yet.',
+      warns: [`No computer has the graphics open. On the computer whose HDMI goes to the switcher, `
+        + `open ${where} in Chrome or Edge, then press F11. For a projector or TV, open /s/watch on `
+        + 'that computer instead.'] };
+  }
+  // A top-level page drawn see-through is an OBS browser source only on a
+  // desk that has OBS. On a desk with none it is the page the AV table got
+  // stuck on: a plain browser showing ?key=alpha, which it draws on white,
+  // and the switcher keys that white over the whole stream. The page cannot
+  // tell OBS from a plain browser by its hello alone, so the desk's own
+  // word on OBS decides, and until the stream poll answers it stays "in OBS".
+  const obsOff = page.dataset.obs === 'off';
+  const seeThrough = sc => sc.key === 'alpha' && sc.embedded === false;
+  const inObs = sc => seeThrough(sc) && !obsOff;
+  const onWhite = sc => seeThrough(sc) && obsOff;
+  const own = sc => sc.embedded === false && !inObs(sc);
+  const shown = shows.filter(own);
+  const full = shown.filter(sc => sc.full === true).length;
+  const cheesy = shows.filter(sc => sc.showing === 'cheesy').length;
+  const framed = shows.filter(sc => sc.embedded === true).length;
+  const parts = [`on ${plural(shows.length, 'screen', 'screens')}`];
+  if (shown.length) {
+    parts.push(full === shown.length
+      ? (shown.length === 1 && shows.length === 1 ? 'full screen' : `${full === 1 ? '1' : 'all'} full screen`)
+      : `${full} of ${shown.length} full screen`);
+  }
+  if (framed) parts.push(`${framed} on a projector or TV`);
+  if (shows.some(inObs)) parts.push(`${shows.filter(inObs).length} in OBS`);
+  if (shows.some(onWhite)) parts.push(`${shows.filter(onWhite).length} on white`);
+  parts.push(!cheesy ? "showing the desk's graphics"
+    : cheesy === shows.length ? "showing Cheesy Arena's own overlay"
+      : `${cheesy} showing Cheesy Arena's own overlay`);
+
+  const warns = [];
+  const mode = kit.atem?.state === 'connected' ? kit.atem.videoMode : null;
+  const fmt = mode?.label || 'its own format';
+  for (const sc of shows) {
+    const who = computerAt(sc.addr);
+    if (sc.showing === 'cheesy') {
+      warns.push(`${capFirst(who)} is showing Cheesy Arena's own score overlay, because the desk has `
+        + 'no field data right now. It switches back to the desk\'s graphics by itself a few seconds '
+        + 'after the desk and the field are both answering.');
+    }
+    if (!own(sc)) continue;
+    if (onWhite(sc)) {
+      // One line, not this and "not full screen" too: its fix ends in F11.
+      // "If it is not OBS": a desk can still have an OBS it does not drive.
+      const there = kit.base ? `${kit.base}/s/program` : "this desk's address followed by /s/program";
+      warns.push(`The graphics on ${who} are the see-through version made for OBS, so a plain browser `
+        + 'shows them on white, and on the switcher that white covers the whole stream. If that '
+        + `computer is not running OBS, open ${there} there instead, with nothing after it, then press F11.`);
+      continue;
+    }
+    // The handoff to Cheesy Arena's own display is armed only when that
+    // computer can reach it (program.js says 'bad' after 15 s of failing).
+    // Nothing on the input shows it while the desk works, so it is said now,
+    // not at the first desk hiccup. Only while the field is up: when it is
+    // down, the Field row already says so.
+    if (sc.key === 'luma' && sc.backup === 'bad' && desk.state?.connected?.cheesy === true) {
+      warns.push(`${capFirst(who)} cannot reach Cheesy Arena's own score display, so if the desk stops, `
+        + "that input keeps its last picture instead of showing the field's score. Plug that computer "
+        + 'into the field network (the same switch as Cheesy Arena).');
+    }
+    if (sc.full === false) {
+      warns.push(`The graphics on ${who} are not full screen. On that computer, click them and press F11.`);
+    }
+    if (!mode || sc.key !== 'luma') continue;
+    const w = isNum(sc.sw) && isNum(sc.dpr) ? Math.round(sc.sw * sc.dpr) : null;
+    const h = isNum(sc.sh) && isNum(sc.dpr) ? Math.round(sc.sh * sc.dpr) : null;
+    if (w && h && isNum(mode.width) && isNum(mode.height) && mode.width > 0
+      && (w !== mode.width || h !== mode.height)) {
+      warns.push(`${capFirst(who)} sends ${w}x${h}, and the switcher runs ${fmt} `
+        + `(${mode.width}x${mode.height}). If it feeds the switcher, set that display to `
+        + `${mode.width}x${mode.height} in Windows: Settings, System, Display.`);
+    }
+    // An interlaced format's label is the field rate (1080i59.94 is 29.97
+    // frames), and the computer feeding it runs at the field rate.
+    const target = isNum(mode.fps) && mode.fps > 0
+      ? (/\d+i/.test(String(mode.label ?? '')) ? mode.fps * 2 : mode.fps) : null;
+    if (isNum(sc.hz) && target !== null && Math.abs(sc.hz - target) > 2) {
+      warns.push(`${capFirst(who)} refreshes ${sc.hz} times a second, and the switcher runs `
+        + `${fmt}. If it feeds the switcher, set that display to ${Math.round(target)} Hz `
+        + 'in Windows: Settings, System, Display, Advanced display.');
+    }
+  }
+  return { l: warns.length ? 'warn' : 'ok', say: `${parts.join(', ')}.`, warns };
+}
+
+/**
+ * The access codes, only while the doors check's row is not green, with the
+ * way to change them. Its words, not its fix: the fix is written for
+ * somebody editing config.json, and Event settings now changes the codes.
+ * No code is ever in the doors check's words, so none can reach this line.
+ */
+function codesRow() {
+  // Only on the desk laptop, opened by a local name: which codes are still
+  // the shipped ones is a hint to anybody reading over a shoulder at another
+  // AV table computer (the shipped awards code opens the winners). The same
+  // rule as the front page's Start here box, from this page's side: a page
+  // at localhost is on the desk laptop. Keeping the row out of other
+  // machines' doors check answers is the server's part; this keeps the strip
+  // from headlining it there.
+  const name = String(location.hostname ?? '').toLowerCase();
+  if (name !== 'localhost' && name !== '127.0.0.1' && name !== '[::1]') return null;
+  const v = (kit.vitals ?? []).find(c => c?.id === 'codes');
+  if (!v || v.level === 'ok') return null;
+  const detail = String(v.detail ?? '');
+  const which = /default:\s*([^.]+)\./.exec(detail)?.[1];
+  // Gray is the one empty PIN that is no open door (a desk answering only
+  // on its own machine), and the row's own words say why.
+  const say = v.level === 'off' ? detail
+    : /PIN is empty/i.test(detail)
+      ? 'the desk PIN is empty, so anyone who can reach this desk can run the show.'
+      : which
+        ? `still the shipped ${which}, which anyone with a copy of this software knows.`
+        : detail;
+  return { l: v.level === 'fail' ? 'fail' : v.level === 'off' ? 'off' : 'warn', say };
+}
+
+function paintKitRow(id, row) {
+  const el = $(id);
+  el.hidden = !row;
+  if (!row) return;
+  if (el.dataset.l !== row.l) el.dataset.l = row.l;
+  setText($(`${id}Say`), row.say);
+}
+
+let kitWarnShown = '';
+/**
+ * Never throws: it runs on every desk event, beside the handlers that keep
+ * the rest of the console true, and an answer shaped in a way nobody planned
+ * for takes the strip off the page rather than anything else with it.
+ */
+function paintKit() {
+  try {
+    paintKitNow();
+  } catch {
+    $('kit').hidden = true;
+  }
+}
+
+function paintKitNow() {
+  const field = fieldRow();
+  const switcher = switcherRow();
+  const graphics = graphicsRow();
+  const codes = codesRow();
+  paintKitRow('kitField', field);
+  $('kitFieldGo').hidden = !field?.byHand;
+  paintKitRow('kitSwitcher', switcher);
+  paintKitRow('kitGraphics', graphics);
+  paintKitRow('kitCodes', codes);
+  const warns = [
+    ...(field?.warn ? [field.warn] : []),
+    ...(switcher?.warn ? [switcher.warn] : []),
+    ...(graphics?.warns ?? []),
+  ];
+  // Rebuilt only when the words change: the list is announced, and the strip
+  // repaints every few seconds and on every desk event.
+  const key = warns.join('\n');
+  if (key !== kitWarnShown) {
+    kitWarnShown = key;
+    $('kitWarn').replaceChildren(...warns.map(w => {
+      const li = document.createElement('li');
+      li.textContent = w;
+      return li;
+    }));
+  }
+  $('kit').hidden = !field && !switcher && !graphics && !codes && !warns.length;
+}
+
+async function refreshKit() {
+  if (kitBusy) return;
+  kitBusy = true;
+  try {
+    const [atem, screens, info] = await Promise.all(
+      [kitGet('/api/atem'), kitGet('/api/screens'), kitGet('/api/info')]);
+    // A request that failed outright (the desk restarting) keeps the last
+    // answer: the link indicator in the header already says the desk is
+    // away, and a strip that blanked every row would read as a desk that
+    // found nothing.
+    if (atem !== undefined) {
+      kit.atem = atemFrom(atem);
+      const gfx = atem?.graphicsInput ?? kit.atem?.graphicsInput;
+      kit.graphicsInput = isNum(gfx) ? gfx : null;
+    }
+    if (screens !== undefined) {
+      kit.screens = Array.isArray(screens?.screens) ? screens.screens : null;
+      const any = (kit.screens ?? []).some(isProgramPage);
+      if (any) kit.noScreensSince = Infinity;
+      else if (kit.noScreensSince === Infinity) kit.noScreensSince = Date.now();
+    }
+    if (info !== undefined) kit.fieldHost = typeof info?.field?.host === 'string' ? info.field.host : null;
+  } finally {
+    kitBusy = false;
+  }
+  paintKit();
+  // The field-down kit's wait after a reconnect ends on this tick too, on a
+  // desk whose state has gone quiet.
+  paintField(desk.state);
+}
+
+desk.on('state', () => paintKit());
+fetch('/api/urls').then(r => (r.ok ? r.json() : null)).then(u => {
+  if (typeof u?.base === 'string') { kit.base = u.base; paintKit(); }
+}).catch(() => { /* the fix then says it in words */ });
+void refreshKit();
+setInterval(() => { if (!document.hidden) void refreshKit(); }, 5000);
+addEventListener('visibilitychange', () => { if (!document.hidden) void refreshKit(); });
+
 // ---- vitals -----------------------------------------------------------------
 // One health report across every subsystem. Polled slowly on purpose: several
 // checks talk to OBS, and a panel that hammers the switcher every second is
@@ -1576,7 +2224,7 @@ async function loadVitals(manual = false) {
     setText($('vitalsMirrorText'), `doors check: ${verdict}`);
     if (r.worst === 'fail' && !vitalsOpened) {
       vitalsOpened = true;
-      $('setupGroup').open = true;
+      openFold($('setupGroup'));
     }
 
     $('vitals').replaceChildren(...r.checks.map(c => {
@@ -1600,10 +2248,31 @@ async function loadVitals(manual = false) {
       }
       return row;
     }));
+    paintRecording(r.checks.find(c => c.id === 'recorder'));
+    kit.vitals = r.checks;
+    paintKit();
   } catch {
     vitalsMisses++;
     if (manual || vitalsMisses >= 2) vitalsNotAnswering();
   }
+}
+
+/**
+ * Whether this desk records at all, from the doors check's Recording row:
+ * "off" only when neither half is set up (no ffmpeg AND no cameras listed),
+ * the one gray row whose words start "not used on this setup". That folds
+ * away the controls that only work on a recording. Any other gray row is a
+ * setup half done or a recorder that failed to start, and a failing one is
+ * red: their controls stay, because clips cut before a restart still wait
+ * in the upload queue, and the row says what broke.
+ */
+function paintRecording(row) {
+  const now = !row ? null
+    : row.level === 'off' && /^not used on this setup/i.test(String(row.detail ?? '')) ? 'off' : 'on';
+  if ((page.dataset.recording ?? null) === now) return;
+  if (now) page.dataset.recording = now;
+  else delete page.dataset.recording;
+  paintView();
 }
 
 $('vitalsCheck').onclick = () => void loadVitals(true);
@@ -1613,7 +2282,11 @@ $('vitalsCheck').onclick = () => void loadVitals(true);
 // the doors check's: Sample data sits inside the field-down kit.
 function openFoldsAround(id) {
   const el = id ? document.getElementById(id) : null;
-  for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+  // A link to a panel Simple leaves out (an old bookmark, a page elsewhere
+  // that points at one) shows Everything for this visit rather than landing
+  // on nothing. The jump strip never offers one, so this is only arrivals.
+  if (el && page.dataset.view !== 'everything' && offPage(el)) pickView('everything', false);
+  for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details')) openFold(d);
   return el;
 }
 for (const a of document.querySelectorAll('a[href^="#"]')) {
@@ -1626,13 +2299,22 @@ for (const a of document.querySelectorAll('a[href^="#"]')) {
 {
   let id = '';
   try { id = decodeURIComponent(location.hash.slice(1)); } catch { /* a malformed fragment */ }
-  const target = openFoldsAround(id);
-  if (target) requestAnimationFrame(() => target.scrollIntoView());
+  const arrive = () => {
+    const target = openFoldsAround(id);
+    if (target) requestAnimationFrame(() => target.scrollIntoView());
+  };
+  // A link into the field-down kit (the Start here box's sample data) waits
+  // for the desk to say where the field is. Simple shows the kit only while
+  // the field is down, so deciding before the first state would read the
+  // kit as left out and switch a first-timer to Everything for nothing.
+  const into = id ? document.getElementById(id) : null;
+  if (into && $('fieldBand').contains(into) && page.dataset.field === undefined) arriveLater = arrive;
+  else arrive();
 }
 $('vitalsPrint').onclick = () => {
   // A closed <details> is display:none inside, and display:none beats the
   // print stylesheet's visibility trick; open it or the sheet comes out blank.
-  $('setupGroup').open = true;
+  openFold($('setupGroup'));
   window.print();
 };
 void loadVitals();
@@ -1860,7 +2542,7 @@ async function sponsorAction(action) {
     if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
     setText($('spHint'), action === 'hide'
       ? 'Hidden.'
-      : `On program: ${out.live?.name ?? out.card?.name ?? 'next sponsor'}.`);
+      : `On the main screen: ${out.live?.name ?? out.card?.name ?? 'next sponsor'}.`);
   } catch (err) {
     setText($('spHint'), err.message);
   }
@@ -2130,7 +2812,7 @@ $('awShow').onclick = async () => {
       $('awCustomDesc').value = '';
     }
     $('awHint').textContent = $('awWinnerIn').value.trim()
-      ? 'On screen. The winner is loaded and hidden: press Reveal on the GA\'s cue.'
+      ? 'On screen. The winner is loaded and hidden: press Reveal on the announcer\'s cue.'
       : 'On screen. Type the winner, then press Reveal.';
     await loadAwards();
   } catch (err) {
@@ -2228,7 +2910,7 @@ function paintSlideDeck({ deck = [], live = null }) {
     show.textContent = 'Show';
     show.onclick = e => {
       e.preventDefault();
-      void slideAction({ action: 'show', id: sl.id }, 'On program.');
+      void slideAction({ action: 'show', id: sl.id }, 'On the main screen.');
     };
     const kill = document.createElement('button');
     kill.className = 'btn kill';
@@ -2296,7 +2978,7 @@ $('slAdd').onclick = async () => {
   if (out) { $('slTitleIn').value = ''; $('slLinesIn').value = ''; }
 };
 
-$('slNext').onclick = () => void slideAction({ action: 'next' }, 'Next slide on program.');
+$('slNext').onclick = () => void slideAction({ action: 'next' }, 'Next slide on the main screen.');
 $('slHide').onclick = () => void slideAction({ action: 'hide' }, 'Taken down.');
 
 void loadSlideDeck();
@@ -2559,7 +3241,9 @@ async function cueAction(id, action) {
 }
 
 $('cueArmAll').onclick = async () => {
-  if (!confirm('Arm every cue? The desk starts cutting cameras and driving audio '
+  // No cameras to cut on a desk without OBS, so the question does not offer any.
+  const doing = page.dataset.obs === 'off' ? 'switching the screens' : 'cutting cameras';
+  if (!confirm(`Arm every cue? The desk starts ${doing} and driving audio `
     + 'by itself from now on. You can still take anything by hand.')) return;
   await cueAction('all', 'arm');
 };

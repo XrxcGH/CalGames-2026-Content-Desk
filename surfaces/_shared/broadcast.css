@@ -23,6 +23,90 @@
 .screen { position: absolute; inset: 0; display: none; }
 .screen[data-active] { display: block; }
 
+/* ---- Fill: the screen is the whole picture. ------------------------------
+   A browser full screen on a projector, a TV or an HDMI input has nothing
+   underneath it, and a transparent page there is a WHITE page: the browser
+   paints its own default behind it. So fill paints the CalGames backdrop,
+   the same layers /s/watch draws, so the program looks the same whichever
+   way a volunteer opened it. On the root rather than the stage, so it
+   reaches every edge of a screen that is not 16:9 instead of leaving bars.
+   Set by applyDisplayMode in desk-client.js; alpha and luma are untouched.
+
+   Three "cover"s, here and on every plate below that paints --atmo, because
+   --atmo is THREE layers (two glows and a gradient), not one. With a single
+   "cover" the size list wrapped around, the gradient took --geo-size, and
+   it tiled every 320px: hard horizontal bands across every full-frame plate,
+   and across this backdrop on a projector. */
+:root[data-key="fill"] {
+  background-color: var(--cg-purple-void);
+  background-image: var(--tex-perf), var(--geo), var(--atmo);
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
+  background-attachment: fixed;
+  min-height: 100%;
+}
+
+/* ---- Standby: what a screen standing on its own says when it has nothing
+   to show yet. The program's card says why it is empty (no match loaded,
+   no field, no desk); the telestrator and the arcade layers say what they
+   are for. Centred, at room scale, because whoever reads it is standing
+   across a gym from the projector wondering whether the thing is broken.
+
+   Never drawn outside fill, by the stylesheet as well as the script: over a
+   camera, in OBS or under a hardware keyer, any words here would go out on
+   the stream. Under the lower third, the status card, the sweep and the
+   safety plate, which all outrank it. ----------------------------------- */
+.standby {
+  position: absolute; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 26px; padding: 0 var(--safe-x); text-align: center;
+  pointer-events: none;
+}
+.standby[hidden], :root:not([data-key="fill"]) .standby { display: none; }
+.sb-title {
+  font-family: var(--font-display); font-weight: 800; font-size: var(--t-hero);
+  font-variation-settings: "wdth" var(--wdth-wide); line-height: 1;
+  color: var(--cg-white); text-transform: uppercase; letter-spacing: .01em;
+}
+.sb-tick { width: 420px; height: 4px; background: var(--tick); }
+/* Sentence case, not the caps the labels use: this is a whole sentence, and
+   a sentence in tracked capitals is slow to read from the back of a room. */
+.sb-line {
+  max-width: 1400px;
+  font-family: var(--font-cond); font-weight: 600; font-size: 44px; line-height: 1.2;
+  letter-spacing: .02em; color: var(--cg-white-dim);
+}
+/* The desk cannot be reached: the one standby line that means "act". */
+.sb-line[data-tone="warn"] { color: var(--st-warn); }
+/* A kiosk's field feed shows no picture (feedNote in program/decide.js).
+   Under the status line and smaller, because the status outranks it, but in
+   the same "act" colour: somebody has to go and look at a camera. */
+.sb-note {
+  max-width: 1400px; margin-top: -6px;
+  font-family: var(--font-cond); font-weight: 600; font-size: 32px; line-height: 1.3;
+  letter-spacing: .02em; color: var(--st-warn);
+}
+.sb-note[hidden] { display: none; }
+
+/* ---- The field's own score, standing in for the desk (program.js, "the
+   field's own score"). Over everything and the full window, on black, so
+   the luma key cuts out exactly what it cut out of the field's own keyed
+   display. Unseen but live while the desk is working: opacity, not
+   display:none or visibility, because a browser throttles a frame it
+   thinks nobody can see, and this one has to be current the moment it is
+   cut to. Never anything but luma, by the stylesheet as well as the
+   script, which never makes the frame in any other mode. ------------------ */
+#fieldBackup {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  border: 0; margin: 0; padding: 0;
+  z-index: 2147483000;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+:root[data-key="luma"][data-showing="cheesy"] #fieldBackup { opacity: 1; }
+:root[data-key="luma"][data-showing="cheesy"] #stageWrap { visibility: hidden; }
+:root:not([data-key="luma"]) #fieldBackup { display: none; }
+
 /* The Gold Sweep as a full-stage wipe. Leading edge skewed -12deg with a
    brighter band, tying the signature transition to the chamfer geometry. */
 #sweep {
@@ -50,7 +134,7 @@
 .ov {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 :root[data-key="luma"] .ov {
   background-color: var(--cg-purple);
@@ -249,7 +333,7 @@
    that selector weighs exactly what `.bar-side` and `.bar-center` weigh, so
    it was settled by source order, and .bar-center's shorthand further down
    the file quietly took the lift back off the clock. */
-.bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px 38px; }
+.bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px; }
 .bar-side--red  { padding-left: var(--safe-x);  background: var(--alliance-red);  border-right: var(--rule); }
 .bar-side--blue { padding-right: var(--safe-x); background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; }
 
@@ -279,22 +363,13 @@
   font-weight: 900; font-size: var(--t-score); line-height: 1;
   color: var(--cg-white); letter-spacing: -.03em;
 }
-/* Estimated data renders outlined, never solid. We never present a guess as
-   official: see the `confidence` field in docs/02-architecture.md.
-   The BREAKDOWN gets the same treatment as the total and for the same reason:
-   the rule is about a value, not about a sum. An outlined 80 sitting beside a
-   solid "61 FUEL - 16 TOWER" is the overlay asserting two of the numbers it
-   just admitted it was guessing. */
-.bar-total[data-est="true"] {
-  color: transparent;
-  -webkit-text-stroke: 3px var(--cg-white);
-}
-.bar-sub .num[data-est="true"] {
-  color: transparent;
-  /* Thinner than the total's 3px: this type is smaller, and a stroke that
-     does not scale down closes the counters up into a smudge at 28px. */
-  -webkit-text-stroke: 1.5px var(--cg-white);
-}
+/* Estimated numbers (see the `confidence` field in docs/02-architecture.md)
+   are drawn exactly like the field's: solid white, no outline and no tag.
+   An outline-only number read as a rendering fault on the stream and the LED
+   wall, and the event asked for no UNOFFICIAL tag either. What still keeps a
+   guess from being announced as a result: the final screen and the
+   post-match card never say "Winner" on a guess ("Leading" instead), nothing
+   estimated can be published, and the announcer's tablet still says so. */
 .bar-sub {
   font-family: var(--font-cond); font-weight: 600; font-size: var(--t-label);
   color: var(--cg-white); opacity: .94; line-height: 1;
@@ -325,20 +400,21 @@
   color: var(--cg-green-hi);
 }
 
-/* 38px, not 18, and the gap and the chip's leading come down with it.
-   Everything in this bar has to finish above the 3.5% action-safe line at
-   y=1042.2, and as shipped nothing did: the phase chip ended at 1058 in
-   EVERY match, and a four-team playoff alliance put its fourth team number
-   at 1050.1. The bar's own fill may bleed to the frame edge; its text may
-   not, because that margin is the part an overscanning TV in a gym is
-   entitled to eat.
+/* Centered in the bar by default. The program now goes from the switcher
+   straight to the stream and an LED wall, and neither crops the edge of the
+   picture, so the old 38px bottom margin only made every number sit 19px
+   high in its box.
 
-   The height came out of the chip's leading rather than the bar. A 28px
-   label was sitting in a 56px box, nearly all of it line-height, so the one
-   change that bought the whole budget also changed nothing anybody can see:
-   the chip's text is still 28px, the broadcast floor. Measured after: worst
-   case 1040.1, 2.1px clear, with the clock still starting at y=928. */
-.bar-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 0 12px 38px; }
+   ?safe=1 (data-safe on <html>) puts the margin back for a TV that DOES
+   overscan: the bar's fill may bleed to the frame edge but its text must
+   then finish above the 3.5% action-safe line at y=1042.2. With it, the
+   worst case (a four-team playoff alliance) ends at 1040.1, 2.1px clear.
+
+   The chip's leading stays trimmed either way: a 28px label was sitting in a
+   56px box, nearly all of it line-height, and 28px is the broadcast floor. */
+.bar-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; }
+:root[data-safe] .bar-center,
+:root[data-safe] .bar-side { padding-bottom: 38px; }
 /* See above: the chip's box was line-height, not type. */
 .bar-center .phase { line-height: 1; }
 .clock {
@@ -546,7 +622,7 @@
   position: absolute; inset: 0;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 /* Same luma rule as .ov and .gap-card: near-black fills key out on the DSK. */
 :root[data-key="luma"] .final {
@@ -604,20 +680,10 @@
   font-weight: 900; font-size: calc(var(--t-hero) * 1.5); line-height: 1;
   letter-spacing: -.04em; color: var(--cg-white);
 }
-/* Estimated (shadow-scored) totals render outlined here exactly as they do on
-   the score bar. The final screen is the one everyone screenshots; a guess
-   must never look official on it. Stroke scales with the hero size. */
-.final-score[data-est="true"] {
-  color: transparent;
-  -webkit-text-stroke: 5px var(--cg-white);
-}
-/* And the itemization under it. An official total does NOT make the period
-   splits beneath it official (with the bridge down they are what an operator
-   typed), so the two carry separate confidence and can differ on screen. */
-.final-break[data-est="true"] .fb-n {
-  color: transparent;
-  -webkit-text-stroke: 1.5px var(--cg-white);
-}
+/* Estimated (shadow-scored) totals stay solid white here, as on the score
+   bar. The final screen is the one everyone screenshots, so a guess never
+   claims the result: the verdict under the alliance reads "Leading" rather
+   than "Winner", without the gold cap (.final-verdict below). */
 /* Where the points came from: fuel/tower by period, plus opponent fouls.
    A recessed plate so the itemization reads as detail under the hero total. */
 .final-break {
@@ -818,7 +884,7 @@
   gap: 20px; text-align: center;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 /* Near-black fills key out under the luma DSK, same rule as .ov and .bar. */
 :root[data-key="luma"] .gap-card {
@@ -934,7 +1000,7 @@
 #scr-selection {
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 :root[data-key="luma"] #scr-selection {
   background-color: var(--cg-purple);
@@ -953,7 +1019,7 @@
   gap: 22px; text-align: center; padding: 0 var(--safe-x);
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 :root[data-key="luma"] .exp-card {
   background-color: var(--cg-purple);
@@ -1082,7 +1148,7 @@
   gap: 18px; padding: 0 140px; text-align: center;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 :root[data-key="luma"] .cc {
   background-color: var(--cg-purple);
@@ -1120,8 +1186,11 @@
    header rather than dropped into the grid: .final is a positioned box, not a
    grid, so a grid-column here did nothing and the chip landed on the match
    name. */
+/* Top at 176px so the chips (about 50px tall) end clear of the alliance
+   plates at 240px. At 186px they ran 6px into the plates and read as the
+   plates being clipped. */
 .final-cards {
-  position: absolute; top: 186px; left: 0; right: 0;
+  position: absolute; top: 176px; left: 0; right: 0;
   display: flex; justify-content: center; gap: 16px;
 }
 .final-cards[hidden] { display: none; }
@@ -1163,7 +1232,7 @@
   gap: 22px; padding: 0 140px; text-align: center;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 :root[data-key="luma"] .sp {
   background-color: var(--cg-purple);
@@ -1214,7 +1283,7 @@
   gap: 18px; padding: 0 140px; text-align: center;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 .screen.aw[data-active], .screen.sl[data-active] { display: flex; }
 :root[data-key="luma"] .aw {
@@ -1288,7 +1357,7 @@
   gap: 20px; padding: 0 160px; text-align: center;
   background-color: var(--cg-purple-void);
   background-image: var(--tex-perf), var(--geo), var(--atmo);
-  background-size: var(--tex-perf-size), var(--geo-size), cover;
+  background-size: var(--tex-perf-size), var(--geo-size), cover, cover, cover;
 }
 :root[data-key="luma"] .sl {
   background-color: var(--cg-purple);

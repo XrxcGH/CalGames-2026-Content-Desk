@@ -144,13 +144,13 @@ test('no selection means an empty pool', () => {
 
 // ---- final screen verdict --------------------------------------------------
 
-test('shadow-scored and ahead reads "Leading, unofficial" with NO gold cap', () => {
+test('shadow-scored and ahead reads "Leading" with NO gold cap', () => {
   // The branch was unreachable: winning was '!estimated && r > b', so while
   // shadow-scoring neither side was ever ahead and a decided match showed two
   // outlined totals and no words.
   const v = alliance.finalVerdict(scored(120, 95, { totalConfidence: 'estimated' }));
   assert.equal(v.leader, 'red');
-  assert.equal(v.verdict.red, 'Leading, unofficial');
+  assert.equal(v.verdict.red, 'Leading');
   assert.equal(v.verdict.blue, '');
   assert.deepEqual(v.won, { red: false, blue: false }, 'the cap is for results only');
   assert.equal(v.estimated, true);
@@ -158,14 +158,14 @@ test('shadow-scored and ahead reads "Leading, unofficial" with NO gold cap', () 
 
 test('shadow-scored blue lead is named too, not only red', () => {
   const v = alliance.finalVerdict(scored(80, 81, { totalConfidence: 'estimated' }));
-  assert.equal(v.verdict.blue, 'Leading, unofficial');
+  assert.equal(v.verdict.blue, 'Leading');
   assert.equal(v.verdict.red, '');
 });
 
-test('shadow-scored and level reads "Level, unofficial" on both', () => {
+test('shadow-scored and level reads "Level" on both', () => {
   const v = alliance.finalVerdict(scored(70, 70, { totalConfidence: 'estimated' }));
-  assert.equal(v.verdict.red, 'Level, unofficial');
-  assert.equal(v.verdict.blue, 'Level, unofficial');
+  assert.equal(v.verdict.red, 'Level');
+  assert.equal(v.verdict.blue, 'Level');
   assert.deepEqual(v.won, { red: false, blue: false });
 });
 
@@ -205,7 +205,7 @@ test('while estimated the field verdict is ignored, as the screen always did', (
   const v = alliance.finalVerdict(
     scored(90, 100, { totalConfidence: 'estimated', officialWinner: 'red' }));
   assert.equal(v.leader, 'blue');
-  assert.equal(v.verdict.blue, 'Leading, unofficial');
+  assert.equal(v.verdict.blue, 'Leading');
 });
 
 // ---- second robots on the social card --------------------------------------

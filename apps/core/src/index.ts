@@ -4,6 +4,12 @@
  *   npm run dev                       start, watch, demo driver off
  *   npm start -- --demo               simulated match, for building graphics
  *   npm run replay -- data/x.ndjson 4 replay a recorded event log at 4x
+ *
+ *   --discover        find the field and the ATEM switcher by itself, and keep
+ *                     looking until they answer (the launcher always passes
+ *                     it, except in practice mode)
+ *   --no-field-search with --discover, look for the switcher but never the
+ *                     field (the launcher's /no-cheesy)
  */
 
 import { fileURLToPath } from 'node:url';
@@ -17,6 +23,11 @@ import { rosterList, setRoster } from './teams.ts';
 import { attachMarkers } from './markers.ts';
 import { attachPace } from './pace.ts';
 import { CheesyAdapter } from './ingest/cheesy/adapter.ts';
+import { FieldLink } from './ingest/cheesy/field-link.ts';
+import { FieldFinder, fieldCandidates, looksLikeCheesy, withFieldPort } from './ingest/cheesy/finder.ts';
+import { AtemWatcher } from './atem/watcher.ts';
+import { ScreenRegistry } from './screens.ts';
+import { Settings } from './settings.ts';
 import { StartggAdapter } from './ingest/startgg/adapter.ts';
 import { NexusAdapter } from './ingest/nexus/adapter.ts';
 import { CueEngine } from './cue/engine.ts';
@@ -201,6 +212,24 @@ const content = new EventContent(ROOT);
 await content.load();
 content.apply(config);
 
+// The codes and connections set on the Event settings page (data/settings.json,
+// and the launcher's desk-pin.txt for the desk PIN). Never throws: a missing
+// or broken file is the shipped defaults and one line in the log. Read here,
+// before the field bridge, because the field address it holds is the first
+// place the desk looks. See settings.ts for which value wins.
+const settings = Settings.load(ROOT, config);
+
+/*
+ * What the desk may find out about this network by itself.
+ *
+ * Never in practice or replay (their pretend and recorded matches must not
+ * mix with a real field's, and a rehearsal at a kitchen table has no switcher
+ * to find), and never on the preview desk, which must not touch the show.
+ * --discover is passed by the launcher; a desk started by hand without it
+ * looks for nothing, as it always did.
+ */
+const discover = has('discover') && !has('demo') && !has('replay') && !previewDesk;
+
 // ---- recording ------------------------------------------------------------
 // Optional. Everything else runs without ffmpeg; only recording and replay
 // need it.
@@ -320,23 +349,74 @@ console.log(`[event] ${rosterList().length} teams, `
   + `${rosterList().filter(t => t.label).length} of them second robots`);
 
 // ---- Cheesy Arena field bridge ---------------------------------------------
-// Deliberately a launch flag rather than a config setting: the bridge needs FTA
-// sign-off, and turning it on should be an explicit act at the point of use,
-// not something inherited from a file that got copied between machines.
+// Never inherited from a file copied between machines: the bridge needs FTA
+// sign-off, so it comes on only at the point of use. Either the launcher found
+// the field when it started (--cheesy), or the desk finds it on this network
+// by itself (--discover), with the same read-only check the launcher makes.
 //
 //   --cheesy [--cheesy-host 10.0.100.5:8080] [--display-id contentdesk1]
+//   --discover [--no-field-search]
 //
 // See docs/10-field-bridge.md. Only HandleNotifiers-only sockets are reachable.
-let cheesy: CheesyAdapter | null = null;
+//
+// Everything that asks "is there a bridge" reads field.adapter when it asks,
+// because with --discover the answer changes from no to yes mid-run. See
+// field-link.ts.
+const field = new FieldLink();
+const displayId = arg('display-id') || 'contentdesk1';
+let finder: FieldFinder | null = null;
+
+/** Build the bridge exactly as the desk always has, and attach it. Once. */
+function bridgeField(hostPort: string): void {
+  if (field.adapter) return;
+  const adapter = new CheesyAdapter({ bus, host: hostPort, displayId });
+  adapter.start();
+  field.attach(adapter, hostPort);
+  console.log(`[cheesy] bridging ${hostPort} as display "${displayId}"`);
+}
+
 if (has('cheesy')) {
-  cheesy = new CheesyAdapter({
-    bus,
-    host: arg('cheesy-host') || '10.0.100.5:8080',
-    displayId: arg('display-id') || 'contentdesk1',
+  const given = arg('cheesy-host') || null;
+  const saved = withFieldPort(settings.resolved.connections.fieldHost);
+  // Not in practice or replay: there the bridge must be up before the demo
+  // check below runs, which an answer that arrives later would not be.
+  if (given && saved && withFieldPort(given) !== saved && !has('demo') && !has('replay')) {
+    /*
+     * The launcher's scan found one field and the Event settings page names
+     * another. A restart asked for from the settings page (exit code 75) runs
+     * the desk with the launcher's original arguments, so without this a new
+     * field address typed there could never take effect. The address the
+     * operator typed wins if it answers as Cheesy Arena (one GET, at most a
+     * couple of seconds); a stale one from an earlier event does not, and the
+     * field the launcher found is attached instead.
+     */
+    void looksLikeCheesy(saved)
+      .then(yes => {
+        if (!yes) {
+          console.log(`[cheesy] the field address in Event settings (${saved}) did not answer; `
+            + `using the one found at start (${given})`);
+        }
+        bridgeField(yes ? saved : given);
+      })
+      .catch(() => bridgeField(given));
+  } else {
+    bridgeField(given || saved || '10.0.100.5:8080');
+  }
+} else if (has('demo') || has('replay')) {
+  console.log('[cheesy] bridge off: practice and replay never connect to a field');
+} else if (has('no-field-search')) {
+  console.log('[cheesy] bridge off, and not looking for the field (started with /no-cheesy)');
+} else if (discover) {
+  // Started once the server is listening (below), so the search never
+  // delays the screens coming up. It stops for good once the field answers.
+  finder = new FieldFinder({
+    // Read at every sweep: a field address typed on the settings page is the
+    // first place the next sweep looks.
+    candidates: () => fieldCandidates(settings.resolved.connections.fieldHost),
+    onFound: hostPort => bridgeField(hostPort),
+    log: line => console.log(`[cheesy] ${line}`),
   });
-  cheesy.start();
-  console.log(`[cheesy] bridging ${arg('cheesy-host') || '10.0.100.5:8080'} ` +
-    `as display "${arg('display-id') || 'contentdesk1'}"`);
+  field.setSearching(true);
 } else {
   console.log('[cheesy] bridge off, pass --cheesy to connect to the field');
 }
@@ -619,18 +699,45 @@ if (config.accessibility.services.length) {
 
 // ---- FRC Nexus: the queue ---------------------------------------------------
 // What the queuers are doing, which the field does not know yet. Read-only and
-// over the internet, so there is no field-safety concern and config alone
+// over the internet, so there is no field-safety concern and having a key
 // switches it on.
+//
+// The key comes from the Event settings page (or config.json, which the
+// settings fall back to), and the event key from config.json. Live: a key
+// pasted on the settings page starts the poller at once, a new one restarts
+// it, a cleared one stops it. The key is never logged.
 let nexus: NexusAdapter | null = null;
-if (config.nexus.apiKey && config.nexus.eventKey) {
-  nexus = new NexusAdapter({
-    bus, apiKey: config.nexus.apiKey, eventKey: config.nexus.eventKey,
-  });
-  nexus.start();
-  console.log(`[nexus] polling queue status for ${config.nexus.eventKey}`);
-} else {
-  console.log('[nexus] off, set nexus.apiKey and nexus.eventKey in config.json');
+/**
+ * What the poller was last set up for: running with this key, or off for one
+ * of two reasons. Null before the first call, so the boot always says which.
+ * In memory only, like the key itself.
+ */
+let nexusPlan: string | null = null;
+function applyNexus(): void {
+  try {
+    const key = settings.resolved.connections.nexusKey || '';
+    const eventKey = config.nexus.eventKey || '';
+    const want = key && eventKey ? key : '';
+    const plan = want ? `run:${want}` : key ? 'off:no-event' : 'off:no-key';
+    if (plan === nexusPlan) return;
+    nexusPlan = plan;
+    nexus?.stop();
+    nexus = null;
+    if (!want) {
+      console.log(key
+        ? '[nexus] off: there is a Nexus key but config.json has no nexus.eventKey to ask about'
+        : '[nexus] off: no Nexus key yet (paste one on the Event settings page)');
+      return;
+    }
+    nexus = new NexusAdapter({ bus, apiKey: want, eventKey });
+    nexus.start();
+    console.log(`[nexus] polling queue status for ${eventKey}`);
+  } catch (err) {
+    // The queue is a nicety on the side screens; the show runs without it.
+    console.warn('[nexus] could not start the queue poller:', (err as Error)?.name ?? 'error');
+  }
 }
+applyNexus();
 
 // ---- start.gg side-tournament bracket --------------------------------------
 // Metadata only: round labels and entrants for the arcade console's pre-fill.
@@ -781,8 +888,27 @@ if (previewDesk) {
 // One place to ask "is this thing ready", and one place to find out which
 // single subsystem broke. See vitals.ts: the failures worth catching are the
 // ones nothing else complains about.
+// Every browser showing a desk page, and what it says about itself (keyed for
+// a switcher, full screen, how big): so the desk can tell the AV table what it
+// sees instead of asking them. Filled by the server's socket handler.
+const screens = new ScreenRegistry();
+
+/*
+ * The ATEM switcher, watched and never driven: read-only by construction (see
+ * atem/watcher.ts). Its address comes from the settings page; with --discover
+ * the desk also looks for it on this machine's networks. Neither: the
+ * watcher sits at "off" and the settings page says the switcher is not used
+ * on this setup. Started once the server is listening, below, and nothing
+ * else waits on it.
+ */
+const atem = new AtemWatcher({
+  host: previewDesk ? null : settings.resolved.connections.atemHost,
+  discover,
+  log: line => console.log(`[atem] ${line}`),
+});
+
 const vitals = new Vitals({
-  bus, config, root: ROOT, recorder, publish, obs, cheesy, audio, coverage,
+  bus, config, root: ROOT, recorder, publish, obs, field, screens, settings, atem, audio, coverage,
   recordBytesPerSec: undefined,
   // Whether an empty desk PIN leaves the controls open to the venue Wi-Fi
   // depends on what the server is listening on.
@@ -899,7 +1025,8 @@ bus.subscribe(ev => {
 });
 
 const server = startServer({
-  bus, media, root: ROOT, port, host, recorder, clips, publish, config, cheesy, cues, obs,
+  bus, media, root: ROOT, port, host, recorder, clips, publish, config, field, cues, obs,
+  screens, settings, atem,
   arcade, trivia, audio, audioClips, profiles, coverage, vitals, cardLedger,
   rundown, sponsors, awards, slides, lanBase, content,
   // For the Sample data button on the desk. The server refuses to call it
@@ -911,6 +1038,57 @@ const server = startServer({
 // From here on, an uncaught throw logs and continues instead of killing every
 // overlay at once (see the handler at the top of this file).
 bootComplete = true;
+
+/*
+ * The searches start once the screens can load, never before: a switcher or
+ * a field that is slow to answer must not hold up the desk coming up. Each is
+ * guarded on its own, because neither is the show and both run inside it.
+ */
+void server.listening.then(() => {
+  if (shuttingDown) return;
+  if (finder) {
+    try { finder.start(); } catch (err) {
+      console.warn('[cheesy] could not start looking for the field:', (err as Error).message);
+    }
+  }
+  if (!previewDesk) {
+    try { atem.start(); } catch (err) {
+      console.warn('[atem] could not start watching the switcher:', (err as Error).message);
+    }
+  }
+}).catch(() => { /* the port error has its own handler and words at the top */ });
+
+/*
+ * A change on the Event settings page, applied while the show runs.
+ *
+ * The switcher address goes live at once (the watcher drops its session and
+ * dials the new one), a Nexus key starts, restarts or stops the poller, and a
+ * field address re-aims the search while the desk has no field yet. Once a
+ * field is attached a different address takes effect at the next start; the
+ * settings page says so (setConnections returns it as restart-needed). The
+ * codes are the server's business, live there, and need nothing from here.
+ */
+settings.on('change', keys => {
+  try {
+    const conn = settings.resolved.connections;
+    if (keys.includes('atemHost') && !previewDesk) atem.setHost(conn.atemHost);
+    if (keys.includes('nexusKey')) applyNexus();
+    if (keys.includes('fieldHost')) {
+      const next = withFieldPort(conn.fieldHost);
+      if (field.adapter) {
+        if (next && next !== field.host) {
+          console.log(`[cheesy] the field address in Event settings is now ${next}; the desk stays `
+            + `on ${field.host} until its next start`);
+        }
+      } else if (finder) {
+        if (next) console.log(`[cheesy] the field address in Event settings is now ${next}; looking there first`);
+        finder.retarget();
+      }
+    }
+  } catch (err) {
+    console.warn('[settings] a change could not be applied while running:', (err as Error)?.name ?? 'error');
+  }
+});
 
 // Phase boundaries are time-driven, not event-driven: endgame lockdown and
 // the auto-end marker have to land even if nothing else is happening.
@@ -924,7 +1102,7 @@ if (replayFile) {
   void bus.replay(resolve(ROOT, replayFile), Number.isFinite(speed) ? speed : 1)
     .catch(err => console.error(`[bus] replay of ${replayFile} failed: ${(err as Error).message}`));
 } else if (has('demo')) {
-  if (cheesy) {
+  if (field.adapter) {
     // Demo events are indistinguishable from field data downstream. Mixing
     // them would corrupt the event log and every surface at once.
     console.error('[demo] not started: --cheesy is active, and simulated matches ' +
@@ -943,7 +1121,10 @@ const shutdown = (): void => {
   shuttingDown = true;
   console.log('\n[core] shutting down');
   clearInterval(ticker);
-  cheesy?.stop();
+  finder?.stop();
+  field.adapter?.stop();
+  // Read-only and quick: it closes one UDP socket and clears its timers.
+  void atem.stop().catch(() => { /* shutting down regardless */ });
   startgg?.stop();
   nexus?.stop();
   audio?.stop();

@@ -233,6 +233,18 @@
 
   <section class="screen" id="scr-blank"></section>
 
+  <!-- Standby: what this screen says, alone on a projector or a TV, before
+       there is anything to show. Only ever in fill (see applyDisplayMode),
+       never over a camera or on a keyer; the line is decided in decide.js
+       standbyLine. The field's own display, which stands in for the desk
+       on a keyer, is made by program.js only when it is needed. -->
+  <div class="standby" id="standby" hidden>
+    <div class="sb-title">CalGames 2026</div>
+    <div class="sb-tick"></div>
+    <div class="sb-line" id="standbyLine" role="status"></div>
+    <div class="sb-note" id="standbyNote" hidden></div>
+  </div>
+
   <div class="lower-third" id="third">
     <div class="t1" id="thirdT1"></div>
     <div class="t2" id="thirdT2"></div>

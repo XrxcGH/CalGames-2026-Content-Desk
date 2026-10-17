@@ -13,10 +13,21 @@
    desk console and deliberately not gated by the desk PIN: sixty desk
    controls need many hands, and the sponsor list needs exactly one. The
    desk PIN cannot open this page, the settings code cannot open the desk,
-   and the Judge Advisor's code opens neither. Credentials (API tokens, the
-   codes themselves) stay in config.json on the desk machine and never
-   appear here. */
+   and the Judge Advisor's code opens neither.
+
+   The codes, the field and switcher addresses and the Nexus key are set here
+   too now, because "edit config.json on the desk machine" is a step a
+   first-time volunteer cannot be expected to find. They can be CHANGED here
+   and never READ: a code or a key travels in a POST body only, never in the
+   address or browser storage, nothing on the page ever shows one back, and
+   every box is emptied the moment it is sent. */
 body { font-size: var(--font-ui-body); }
+/* Hidden means hidden on this page, whatever display a class gives the
+   element. An author display rule beats the browser's own [hidden] rule, and
+   the awards page once showed a "Lock this page" bar WHILE locked for exactly
+   that reason; here the same slip would show the desk PIN form on a laptop
+   that is not the desk. */
+[hidden] { display: none !important; }
 .wrap { margin: 0 auto; max-width: 1500px; padding: 18px 22px 60px; }
 @media (min-width: 1150px) {
   .cols { columns: 460px; column-gap: 18px; }
@@ -42,6 +53,33 @@ input { width: 100%; box-sizing: border-box; }
   padding: 10px 12px; margin-bottom: 8px; }
 .setrow .row { margin-bottom: 0; }
 .err { color: var(--st-bad-text); }
+.ok { color: var(--st-ok-text); }
+.warn { color: var(--st-warn); }
+
+/* This desk: codes, connections, restart. One sunken card per code or
+   connection, like the list rows above, so each reads as its own thing. */
+.box { background: var(--surface-sunken); clip-path: var(--chamfer); --ch: 8px;
+  padding: 10px 12px 12px; margin-bottom: 10px; }
+.box h3 { margin: 0; font-size: 17px; }
+.box h3 .who { font-weight: 400; font-size: 14px; color: var(--text-dim); margin-left: 6px; }
+.box .warn, .box .hint { margin: 6px 0 0; }
+.trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 560px) { .trio { grid-template-columns: 1fr; } }
+.trio label { margin: 8px 0 4px; }
+.box .row { margin-top: 10px; }
+select { width: 100%; box-sizing: border-box; }
+/* What the desk sees right now, under each address. Gray is "not used on
+   this setup", which is never a fault: a kit without a switcher is a kit
+   without a switcher. */
+.live { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--text-dim); }
+.live[data-level="ok"] { color: var(--st-ok-text); }
+.live[data-level="warn"] { color: var(--st-warn); }
+.note { color: var(--accent); }
+/* The desk laptop's own address, in a line sent to whoever is not on it. The
+   browser's default link blue all but vanishes on this purple, and the one
+   thing that line is for is that address being read. It wraps anywhere, so a
+   phone never scrolls sideways for it. */
+.hint a { color: var(--accent); overflow-wrap: anywhere; }
 
 /* The gate: the page is a shell until the settings code opens it. */
 #gate { max-width: 560px; margin: 8vh auto 0; }
@@ -52,7 +90,7 @@ input { width: 100%; box-sizing: border-box; }
 <div class="wrap">
   <header>
     <h1>Event settings</h1>
-    <span class="hint">The content half of config.json, edited live. Credentials stay in the file.</span>
+    <span class="hint">Everything that used to mean editing config.json, changed live. Codes and keys are never shown back.</span>
     <span class="spacer"></span>
     <!-- This session lasts sixteen hours on a laptop that gets passed between
          volunteers, and the route to end it already existed and was reachable
@@ -63,9 +101,11 @@ input { width: 100%; box-sizing: border-box; }
 
   <section id="gate">
     <h2>Settings code</h2>
-    <p class="hint">This page is for the content lead: the event's name, sponsors, run of
-      show, scoring thresholds and accessibility services. It takes the settings code,
-      which is not the desk PIN and not the awards code.</p>
+    <p class="hint">This page is for the content lead: the desk's codes, its connections
+      to the field and the video switcher, the event's name, sponsors, run of show,
+      scoring thresholds and accessibility services. It takes the settings code, which
+      is not the desk PIN and not the awards code.</p>
+    <p class="hint note" id="gateNote" role="status"></p>
     <form id="unlockForm">
       <div class="row" style="margin-top:10px">
         <input id="code" type="password" autocomplete="off" style="flex:1 1 200px"
@@ -77,6 +117,118 @@ input { width: 100%; box-sizing: border-box; }
   </section>
 
   <div class="cols" id="editors" hidden>
+<section id="codesSec">
+    <h2>Access codes</h2>
+    <p class="hint">Three codes for three people. A change works at once and signs out
+      everyone else using the old code: they type the new one to get back in. Each code
+      is 4 to 8 digits, and no two can be the same. Nothing here ever shows a code back.</p>
+    <p class="hint warn" id="codesGone" hidden></p>
+    <div id="codesBody">
+      <form class="box" id="codeDesk" hidden>
+        <h3>Desk PIN <span class="who">the crew running the consoles</span></h3>
+        <p class="warn" id="codeDeskDefault" hidden>Still the PIN the desk shipped with.
+          Change it before doors.</p>
+        <div class="trio">
+          <div><label for="codeDeskCur">Current</label>
+            <input id="codeDeskCur" type="password" autocomplete="off" inputmode="numeric"></div>
+          <div><label for="codeDeskNew">New</label>
+            <input id="codeDeskNew" type="password" autocomplete="off" inputmode="numeric"></div>
+          <div><label for="codeDeskAgain">New, again</label>
+            <input id="codeDeskAgain" type="password" autocomplete="off" inputmode="numeric"></div>
+        </div>
+        <div class="row"><button class="btn btn--go" id="codeDeskGo" type="submit">Change the desk PIN</button></div>
+        <p class="hint">Write the new PIN on the whiteboard: every console asks for it.</p>
+        <p class="hint" id="codeDeskMsg" role="status"></p>
+      </form>
+      <!-- Filled in by the script with this desk's own localhost address. -->
+      <p class="hint box" id="codeDeskElsewhere" hidden>The desk PIN changes only on the desk
+        laptop itself.</p>
+
+      <form class="box" id="codeSettings">
+        <h3>Settings code <span class="who">this page</span></h3>
+        <p class="warn" id="codeSettingsDefault" hidden>Still the code the desk shipped with.
+          Change it before doors.</p>
+        <div class="trio">
+          <div><label for="codeSettingsCur">Current</label>
+            <input id="codeSettingsCur" type="password" autocomplete="off" inputmode="numeric"></div>
+          <div><label for="codeSettingsNew">New</label>
+            <input id="codeSettingsNew" type="password" autocomplete="off" inputmode="numeric"></div>
+          <div><label for="codeSettingsAgain">New, again</label>
+            <input id="codeSettingsAgain" type="password" autocomplete="off" inputmode="numeric"></div>
+        </div>
+        <div class="row"><button class="btn btn--go" id="codeSettingsGo" type="submit">Change the settings code</button></div>
+        <p class="hint">Every other page open with the old code locks and asks for the new one.</p>
+        <p class="hint" id="codeSettingsMsg" role="status"></p>
+      </form>
+
+      <form class="box" id="codeAwards">
+        <h3>Awards code <span class="who">the Judge Advisor's</span></h3>
+        <p class="warn" id="codeAwardsDefault" hidden>Still the code the desk shipped with.
+          Change it before doors.</p>
+        <div class="trio">
+          <div><label for="codeAwardsCur">Current</label>
+            <input id="codeAwardsCur" type="password" autocomplete="off" inputmode="numeric"></div>
+          <div><label for="codeAwardsNew">New</label>
+            <input id="codeAwardsNew" type="password" autocomplete="off" inputmode="numeric"></div>
+          <div><label for="codeAwardsAgain">New, again</label>
+            <input id="codeAwardsAgain" type="password" autocomplete="off" inputmode="numeric"></div>
+        </div>
+        <div class="row"><button class="btn btn--go" id="codeAwardsGo" type="submit">Change the awards code</button></div>
+        <p class="hint">This code belongs to the Judge Advisor. They can change it on their own
+          page (/s/awards), or it can be changed here with the current code. Their page locks
+          within half a minute and asks for the new one, so tell them what it is.</p>
+        <p class="hint" id="codeAwardsMsg" role="status"></p>
+      </form>
+    </div>
+  </section>
+
+<section id="connSec">
+    <h2>Connections</h2>
+    <p class="hint">The desk looks for the field and the video switcher by itself. Type an
+      address only when it cannot find one. Leave a box blank to let it look.</p>
+    <p class="hint warn" id="connGone" hidden></p>
+    <div id="connBody">
+      <div class="box">
+        <label for="connField" style="margin-top:0">Field address (Cheesy Arena)</label>
+        <input id="connField" autocomplete="off" spellcheck="false"
+          placeholder="Blank: the desk finds the field by itself">
+        <p class="live" id="connFieldNow" role="status"></p>
+      </div>
+      <div class="box">
+        <label for="connAtem" style="margin-top:0">Video switcher address (ATEM)</label>
+        <input id="connAtem" autocomplete="off" spellcheck="false"
+          placeholder="Blank: the desk looks for a switcher by itself">
+        <p class="live" id="connAtemNow" role="status"></p>
+        <p class="hint">The desk only reads the switcher, to know what is on air. It never
+          changes anything on it.</p>
+        <label for="connInput">Switcher input carrying the desk's graphics</label>
+        <select id="connInput"></select>
+        <p class="hint" id="connInputNow"></p>
+      </div>
+      <div class="box">
+        <label for="connNexus" style="margin-top:0">FRC Nexus API key (queueing)</label>
+        <input id="connNexus" type="password" autocomplete="off" spellcheck="false"
+          placeholder="Paste a new key here to set or replace it">
+        <p class="live" id="connNexusNow" role="status"></p>
+        <p class="hint">From frc.nexus/api. Lets the desk see a match being queued before the
+          field calls it. Leave it unset if the event does not queue on Nexus.</p>
+        <div class="row"><button class="btn" id="connNexusClear" type="button" hidden>Remove the Nexus key</button></div>
+      </div>
+      <div class="row"><button class="btn btn--go" id="connSave" type="button">Save connections</button></div>
+      <p class="hint" id="connMsg" role="status"></p>
+    </div>
+  </section>
+
+<section id="restartSec" hidden>
+    <h2>Restart the desk</h2>
+    <p class="hint">For a change that says it takes effect at the next start. Do it between
+      matches: every screen reconnects by itself, and every console, this page included,
+      asks for its code again.</p>
+    <div class="row" id="restartRow"><button class="btn" id="restartGo" type="button">Restart the desk</button></div>
+    <p class="hint" id="restartElsewhere" hidden>Restarting is done only on the desk laptop itself.</p>
+    <p class="hint" id="restartMsg" role="status"></p>
+  </section>
+
 <section>
     <h2>Event</h2>
     <p class="hint">Everything on this page saves on the desk itself and overrides
@@ -172,11 +324,31 @@ import { iconEl } from '/shared/icons.js';
 
 const $ = id => document.getElementById(id);
 let setupDraft = null;
+let isOpen = false;
+/** The last GET /api/settings: what this desk is and sees. Null until read. */
+let machine = null;
+/** When Restart the desk was pressed, while the page waits for it to come back. */
+let restarting = null;
+
+// Every box on this page that can hold a code or a key.
+const SECRET_BOXES = ['codeDeskCur', 'codeDeskNew', 'codeDeskAgain',
+  'codeSettingsCur', 'codeSettingsNew', 'codeSettingsAgain',
+  'codeAwardsCur', 'codeAwardsNew', 'codeAwardsAgain', 'connNexus'];
 
 function show(unlocked) {
+  isOpen = unlocked;
   $('gate').hidden = unlocked;
   $('editors').hidden = !unlocked;
   $('lock').hidden = !unlocked;
+  if (!unlocked) {
+    // A half-typed code must not wait in a hidden box on a laptop that gets
+    // passed between volunteers: the next person to unlock would find it.
+    for (const id of SECRET_BOXES) { const box = $(id); if (box) box.value = ''; }
+    machine = null;
+    restarting = null;
+  } else {
+    $('gateNote').textContent = '';
+  }
 }
 
 /*
@@ -202,7 +374,20 @@ async function loadSetup() {
     if (res.status === 401 || res.status === 403) { show(false); return; }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const s = await res.json();
+    const wasOpen = isOpen;
     show(true);
+    // Only on the way in: this load also repaints after every content save,
+    // and re-reading the machine settings then would wipe an address being
+    // typed into Connections.
+    if (!wasOpen) {
+      void loadMachine({ fresh: true });
+      // "Change the codes" on the front page and the desk lands here as
+      // /s/setup#codes. The section was hidden behind the code prompt when
+      // the browser looked for it, so go there now that it is showing.
+      const jump = new Map([['codes', 'codesSec'], ['connections', 'connSec'], ['restart', 'restartSec']])
+        .get(String(location.hash || '').slice(1));
+      if (jump) $(jump)?.scrollIntoView?.({ block: 'start' });
+    }
     setupDraft = {
       sponsors: (s.sponsors.list ?? []).map(x => ({ ...x })),
       rundown: (s.rundown.segments ?? []).map(x => ({ ...x })),
@@ -439,18 +624,593 @@ $('setAxSave').onclick = () => void saveSetup('accessibility', {
   services: setupDraft?.services ?? [], ask: $('setAxAsk').value,
 }, 'setAxMsg', 'Saved. The screens update on their next rotation.');
 
+/* ---- this desk: codes, connections, restart ----------------------------------
+ *
+ * Everything below is what a volunteer used to need config.json, a launcher
+ * flag or a manual for. It reads GET /api/settings and writes through the
+ * POSTs beside it.
+ *
+ * None of it may break the rest of the page. A desk started from an older
+ * copy has none of these routes and answers them with a plain-text 404 (or,
+ * behind the desk PIN's door, a 401 that names no reason), so each section
+ * then says the desk needs a restart and the event editors below carry on.
+ */
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+// How to restart a desk that cannot yet restart itself from here. In words a
+// volunteer can follow at the desk, because the button that would do it is
+// one of the things this desk does not have yet.
+const NEEDS_RESTART = 'This desk needs a restart before it can offer this here. On the '
+  + 'desk laptop, between matches, press Ctrl+Shift+Esc, find "CalGames 2026 Content '
+  + 'Desk", press End task, then start the desk again the way it was started.';
+const SIGNED_OUT = 'This page got signed out: the desk restarted or the settings code '
+  + 'changed. Type the settings code to come back in.';
+
+/** A body, if there is one. An older desk answers a route it lacks in plain text. */
+async function readJson(res) {
+  try { return await res.json(); } catch { return null; }
+}
+
+/**
+ * Did this answer come from a desk that does not have the route at all?
+ *
+ * Two shapes, both with no reason of their own: the plain-text 404 for a path
+ * nothing handles, and the desk PIN's generic door ("PIN required") for a
+ * path this session's door does not cover yet. A route that exists and
+ * refuses always says why.
+ */
+const routeMissing = (res, out) =>
+  (res.status === 404 && !(out && typeof out.error === 'string'))
+  || (res.status === 401 && out?.error === 'PIN required');
+
+/** The desk's own reason when it gave one, else a plain fallback. */
+function failText(res, out, fallback) {
+  if (out && typeof out.error === 'string' && out.error) return out.error;
+  if (res.status === 429) return 'Too many wrong codes. Wait a minute, then try again.';
+  return fallback;
+}
+
+/** Write a line, in the voice its level calls for. */
+function say(node, text, level) {
+  node.textContent = text;
+  node.className = 'hint' + (level === 'bad' ? ' err' : level === 'ok' ? ' ok' : '');
+}
+
+/**
+ * Is this page still signed in? Asked when a new route refuses it, because
+ * the refusal alone cannot tell "signed out" from "an older desk".
+ */
+async function stillSignedIn() {
+  try {
+    const res = await fetch('/api/setup');
+    return !(res.status === 401 || res.status === 403);
+  } catch { return true; }                // unreachable is not signed out
+}
+
+/** Back to the code prompt, saying why in place of the usual description. */
+function signedOut(text) {
+  show(false);
+  $('gateNote').textContent = text;
+  $('code')?.focus();
+}
+
+/** The new sections, when this desk cannot offer them. */
+function paintMachineMissing(text) {
+  machine = null;
+  for (const [gone, body] of [['codesGone', 'codesBody'], ['connGone', 'connBody']]) {
+    $(gone).textContent = text;
+    $(gone).hidden = false;
+    $(body).hidden = true;
+  }
+  $('restartSec').hidden = true;
+}
+
+async function loadMachine({ fresh }) {
+  let res;
+  let out;
+  try {
+    res = await fetch('/api/settings');
+    out = await readJson(res);
+  } catch {
+    paintMachineMissing('The desk did not answer. Reload this page in a moment.');
+    return;
+  }
+  if (res.status === 401 || res.status === 403) {
+    if (!(await stillSignedIn())) { signedOut(SIGNED_OUT); return; }
+    paintMachineMissing(NEEDS_RESTART);
+    return;
+  }
+  if (!res.ok || !out || typeof out !== 'object') { paintMachineMissing(NEEDS_RESTART); return; }
+  machine = out;
+  try { paintMachine(out, fresh); } catch (err) {
+    // A shape this page does not expect (a desk newer or older than it) must
+    // not take the event editors down with it.
+    paintMachineMissing(`These settings could not be shown: ${err.message}`);
+  }
+}
+
+const isText = v => typeof v === 'string' && v.length > 0;
+
+/** The field line: what the desk sees of Cheesy Arena right now. */
+function fieldLine(f, wanted) {
+  if (!f || typeof f !== 'object') return ['off', 'Not used on this setup.'];
+  const at = isText(f.host) ? ` at ${f.host}` : '';
+  if (f.connected) {
+    // Typed a different address while attached: it is saved, and waits.
+    const later = isText(wanted) && isText(f.host) && wanted.toLowerCase() !== f.host.toLowerCase()
+      ? ` The address above takes effect the next time the desk starts.` : '';
+    return ['ok', `Connected to the field${at}.${later}`];
+  }
+  if (f.searching) return ['off', 'Looking for the field on the network by itself.'];
+  if (at) {
+    return ['warn', `Not reaching the field${at}. The desk keeps trying by itself. `
+      + 'Check the desk laptop\'s cable to the field network.'];
+  }
+  return ['off', 'Not used on this setup.'];
+}
+
+/** The switcher line. A kit without one reads gray, never as a fault. */
+function atemLine(a) {
+  if (!a || typeof a !== 'object') return ['off', 'Not used on this setup.'];
+  const at = isText(a.host) ? ` at ${a.host}` : '';
+  switch (a.state) {
+    case 'connected': {
+      const what = isText(a.model) ? a.model : 'A switcher';
+      const fmt = isText(a.videoMode?.label) ? `, running ${a.videoMode.label}` : '';
+      return ['ok', `Connected: ${what}${at}${fmt}.`];
+    }
+    case 'connecting': return ['off', `Reaching the switcher${at}.`];
+    case 'searching': return ['off', 'Looking for a switcher on the network by itself.'];
+    case 'lost':
+      return ['warn', `Lost the switcher${at}. The desk reconnects by itself when it `
+        + 'answers again. If this stays, check the switcher\'s network cable.'];
+    default: return ['off', 'Not used on this setup.'];
+  }
+}
+
+/**
+ * This page's address on the desk laptop, by the one name the desk takes as
+ * the desk laptop.
+ *
+ * The desk counts a browser as the desk laptop only when it comes from the
+ * laptop itself AND names the desk as localhost: the front page and the QR
+ * posters hand out the network address, and a volunteer sitting AT the desk
+ * laptop with that address open is told "not the desk laptop" while there. So
+ * every line that sends them to the desk laptop names the exact address to
+ * open, rather than "there". The port is already in this page's own address,
+ * so saying it gives nothing away.
+ */
+function deskHere() {
+  return `http://localhost${location.port ? `:${location.port}` : ''}/s/setup`;
+}
+
+/** A line that names deskHere() as a link, rebuilt only when its words change. */
+function deskLaptopLine(node, before, after) {
+  const url = deskHere();
+  // Rebuilt every five seconds otherwise, which drops keyboard focus off the link.
+  if (node.textContent === before + url + after) return;
+  const link = document.createElement('a');
+  link.href = url;
+  link.textContent = url;
+  node.replaceChildren(before, link, after);
+}
+
+function paintLive(id, [level, text]) {
+  const node = $(id);
+  node.dataset.level = level;
+  node.textContent = text;
+}
+
+/** The options the graphics-input dropdown should hold, as [value, words]. */
+function inputOptions(s, want) {
+  const inputs = Array.isArray(s.atem?.inputs) ? s.atem.inputs : [];
+  const opts = [['', 'None, or not sure']];
+  for (const i of inputs) {
+    if (!Number.isInteger(i?.id)) continue;
+    opts.push([String(i.id), `${isText(i.longName) ? i.longName : `Input ${i.id}`} (input ${i.id})`]);
+  }
+  // A saved input the switcher is not listing (it is not connected right
+  // now) stays chosen, rather than quietly turning into "None" on the next save.
+  if (want !== '' && !opts.some(o => o[0] === want)) {
+    opts.push([want, `Input ${want}, as saved (its name shows once the switcher is connected)`]);
+  }
+  return { opts, listed: inputs.length > 0 };
+}
+
+let inputKey = '';
+function paintGraphicsInput(s, fresh) {
+  const sel = $('connInput');
+  const saved = Number.isInteger(s.graphicsInput) ? String(s.graphicsInput) : '';
+  // A fresh paint takes the saved choice; a refresh keeps an unsaved pick.
+  const want = fresh || !sel.options.length ? saved : sel.value;
+  const { opts, listed } = inputOptions(s, want);
+  // Rebuilt only when the list itself changed: rebuilding an open dropdown
+  // shuts it in the person's hand, every five seconds.
+  const key = JSON.stringify(opts);
+  if (key !== inputKey || fresh) {
+    inputKey = key;
+    sel.replaceChildren(...opts.map(([value, words]) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = words;
+      return o;
+    }));
+  }
+  sel.value = want;
+  $('connInputNow').textContent = listed
+    ? 'So the desk can tell when its graphics are on air.'
+    : 'The list fills in from the switcher once the desk is connected to it.';
+}
+
+/**
+ * Paint the codes and connections from what the desk said.
+ *
+ * `fresh` is the first paint and the one after a save: only then do the
+ * address boxes take the stored values. The five-second refresh repaints what
+ * the desk SEES and leaves what the person is typing alone.
+ */
+function paintMachine(s, fresh) {
+  const desk = s.deskMachine === true;
+  $('codesGone').hidden = true;
+  $('codesBody').hidden = false;
+  $('connGone').hidden = true;
+  $('connBody').hidden = false;
+
+  // The desk PIN changes only from the desk laptop, and only that laptop is
+  // told whether the desk PIN or the awards code is still the shipped one: a
+  // default code is a door anyone on the venue Wi-Fi can open, so naming one
+  // to another device would hand it over. The settings code is the exception,
+  // said anywhere: whoever reads this page already holds it.
+  $('codeDesk').hidden = !desk;
+  $('codeDeskElsewhere').hidden = desk;
+  for (const [which, id, anywhere] of [['desk', 'codeDeskDefault', false],
+    ['settings', 'codeSettingsDefault', true], ['awards', 'codeAwardsDefault', false]]) {
+    $(id).hidden = !((desk || anywhere) && s.codes?.[which]?.isDefault === true);
+  }
+  // The section stays, with the button only on the desk laptop: a lead at the
+  // desk laptop by its network address would otherwise find no restart at
+  // all, and no word on where it went.
+  $('restartSec').hidden = false;
+  $('restartRow').hidden = !desk;
+  $('restartElsewhere').hidden = desk;
+  if (!desk) {
+    deskLaptopLine($('codeDeskElsewhere'), 'The desk PIN changes only on the desk laptop '
+      + 'itself. If this is the desk laptop, open ', ' in its browser: the desk knows it '
+      + 'is the desk laptop only by that address. It asks for the settings code again.');
+    deskLaptopLine($('restartElsewhere'), 'Restarting is done only on the desk laptop '
+      + 'itself. If this is the desk laptop, open ', ' in its browser and the button is '
+      + 'there. It asks for the settings code again.');
+  }
+
+  const c = s.connections && typeof s.connections === 'object' ? s.connections : {};
+  if (fresh) {
+    $('connField').value = isText(c.fieldHost) ? c.fieldHost : '';
+    $('connAtem').value = isText(c.atemHost) ? c.atemHost : '';
+    $('connNexus').value = '';
+  }
+  paintLive('connFieldNow', fieldLine(s.field, c.fieldHost));
+  paintLive('connAtemNow', atemLine(s.atem));
+  paintGraphicsInput(s, fresh);
+
+  const key = c.nexusKey && typeof c.nexusKey === 'object' ? c.nexusKey : {};
+  paintLive('connNexusNow', key.set === true
+    ? ['ok', `A key is set${isText(key.hint) ? ` (it ends in ${key.hint})` : ''}. `
+      + 'Paste a new one above to replace it.']
+    : ['off', 'No key set. The desk runs without one.']);
+  $('connNexusClear').hidden = key.set !== true;
+}
+
+// ---- access codes ----
+
+const CODES = {
+  desk: { id: 'codeDesk', name: 'desk PIN' },
+  settings: { id: 'codeSettings', name: 'settings code' },
+  awards: { id: 'codeAwards', name: 'awards code' },
+};
+
+/** POST one JSON body; never throws, so every caller has one shape to read. */
+async function post(url, body) {
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: JSON_HEADERS,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return { res, out: await readJson(res) };
+  } catch {
+    return { res: null, out: null };
+  }
+}
+
+/**
+ * The awards code, changed from this page.
+ *
+ * The awards code opens /api/awards* and nothing else, and the settings
+ * session opens nothing under it, so this goes through the Judge Advisor's
+ * own door: sign in with the current code (a wrong one is counted by the same
+ * damper as at their page), change it, then close that session again, so
+ * this browser never keeps the Judge Advisor's access afterwards.
+ */
+async function changeAwardsCode(current, next) {
+  const auth = await post('/api/awards/auth', { pin: current });
+  if (!auth.res) return { ok: false, text: 'The desk did not answer. Nothing was changed.' };
+  if (!auth.res.ok) {
+    if (routeMissing(auth.res, auth.out)) return { ok: false, text: NEEDS_RESTART };
+    return {
+      ok: false,
+      text: auth.res.status === 401 ? 'That is not the current awards code. Nothing was changed.'
+        : failText(auth.res, auth.out, 'The awards code was not changed.'),
+    };
+  }
+  try {
+    const { res, out } = await post('/api/awards/code', { current, next });
+    if (!res) return { ok: false, text: 'The desk did not answer. Check the awards page to see whether it changed.' };
+    if (res.ok) return { ok: true };
+    if (routeMissing(res, out)) return { ok: false, text: NEEDS_RESTART };
+    return { ok: false, text: failText(res, out, 'The awards code was not changed.') };
+  } finally {
+    await post('/api/awards/signout');
+  }
+}
+
+async function changeCode(which) {
+  const { id, name } = CODES[which];
+  const cur = $(`${id}Cur`);
+  const nu = $(`${id}New`);
+  const again = $(`${id}Again`);
+  const msg = $(`${id}Msg`);
+  const current = cur.value.trim();
+  const next = nu.value.trim();
+  const repeat = again.value.trim();
+  const retype = text => { nu.value = ''; again.value = ''; say(msg, text, 'bad'); nu.focus(); };
+
+  if (!current) { say(msg, `Type the current ${name} first.`, 'bad'); cur.focus(); return; }
+  if (!/^\d{4,8}$/.test(next)) { retype(`The new ${name} has to be 4 to 8 digits, numbers only.`); return; }
+  if (next !== repeat) { retype('The two new boxes did not match. Type the new one in both again.'); return; }
+  if (next === current) { retype(`That is the ${name} already. Type a different new one.`); return; }
+
+  // Out of the boxes the moment it is sent, whatever the desk answers.
+  cur.value = ''; nu.value = ''; again.value = '';
+  const go = $(`${id}Go`);
+  go.disabled = true;
+  say(msg, `Changing the ${name}...`);
+  let result;
+  try {
+    if (which === 'awards') {
+      result = await changeAwardsCode(current, next);
+    } else {
+      const { res, out } = await post('/api/settings/code', { which, current, next });
+      result = !res ? { ok: false, text: 'The desk did not answer. Nothing was changed.' }
+        : res.ok ? { ok: true }
+          : routeMissing(res, out) ? { ok: false, text: NEEDS_RESTART }
+            : { ok: false, text: failText(res, out, `The ${name} was not changed.`) };
+    }
+  } finally {
+    go.disabled = false;
+  }
+
+  if (!result.ok) {
+    say(msg, result.text, 'bad');
+    // A refusal can also mean this page itself was signed out meanwhile.
+    if (!(await stillSignedIn())) signedOut(SIGNED_OUT);
+    return;
+  }
+  if (which === 'settings') {
+    // Every OTHER settings session ends with the old code. This one is kept
+    // open by the desk (the person here proved both codes), but a desk that
+    // signs everyone out, this page included, must not leave it looking open.
+    if (await stillSignedIn()) {
+      say(msg, 'Changed. Every other page using the old settings code was signed out. '
+        + 'This one stays open.', 'ok');
+    } else {
+      signedOut('Settings code changed. Everyone using the old one was signed out, this '
+        + 'page too: type the new code to come back in.');
+    }
+    return;
+  }
+  say(msg, which === 'desk'
+    ? 'Changed. Every console signed in with the old PIN asks for the new one now. '
+      + 'Write it on the whiteboard.'
+    : 'Changed. The Judge Advisor\'s page locks within half a minute and asks for the new '
+      + 'code: tell them what it is.',
+  'ok');
+  // The shipped-default line may have just gone; and if the settings page is
+  // riding on the desk PIN (no separate settings code), this page is
+  // signed out too, which loadMachine finds and says.
+  void loadMachine({ fresh: false });
+}
+
+for (const which of Object.keys(CODES)) {
+  $(CODES[which].id).addEventListener('submit', e => {
+    e.preventDefault();
+    void changeCode(which);
+  });
+}
+
+// ---- connections ----
+
+/**
+ * An address as the desk wants it: host, or host:port.
+ *
+ * A pasted link is taken as meant: "http://10.0.100.5:8080/displays" is the
+ * field at 10.0.100.5:8080, and making the person trim it by hand first is
+ * exactly the trial and error this page exists to remove.
+ */
+function cleanHost(raw) {
+  let v = String(raw ?? '').trim();
+  v = v.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  v = v.replace(/[/?#].*$/, '');
+  if (!v) return { ok: true, value: '' };
+  const name = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(\d{1,5}))?$/i;
+  const v6 = /^\[[0-9a-f:.]+\](?::(\d{1,5}))?$/i;
+  const m = name.exec(v) ?? v6.exec(v);
+  if (!m || (m[1] !== undefined && (Number(m[1]) < 1 || Number(m[1]) > 65535))) {
+    return { ok: false, value: v };
+  }
+  return { ok: true, value: v };
+}
+
+const RESTART_NAMES = {
+  fieldHost: 'the field address', atemHost: 'the switcher address',
+  nexusKey: 'the Nexus key', graphicsInput: 'the graphics input',
+};
+
+function restartWords(keys, desk) {
+  const names = keys.map(k => RESTART_NAMES[k] ?? k);
+  const list = names.length < 2 ? names.join('')
+    : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  const lead = list.charAt(0).toUpperCase() + list.slice(1);
+  return `${lead} ${names.length < 2 ? 'takes' : 'take'} effect the next time the desk starts. `
+    + (desk ? 'Use Restart the desk below, between matches.'
+      : `Restart the desk between matches, from ${deskHere()} on the desk laptop.`);
+}
+
+async function saveConnections(patch) {
+  const msg = $('connMsg');
+  const { res, out } = await post('/api/settings/connections', patch);
+  if (!res) { say(msg, 'The desk did not answer. Nothing was saved. Try again in a moment.', 'bad'); return; }
+  if (!res.ok) {
+    if (routeMissing(res, out)) { say(msg, NEEDS_RESTART, 'bad'); return; }
+    say(msg, failText(res, out, 'Nothing was saved.'), 'bad');
+    if (!(await stillSignedIn())) signedOut(SIGNED_OUT);
+    return;
+  }
+  const later = Array.isArray(out?.restartNeeded) ? out.restartNeeded.filter(isText) : [];
+  say(msg, later.length ? `Saved. ${restartWords(later, machine?.deskMachine === true)}`
+    : 'Saved. The desk uses it now.', 'ok');
+  await loadMachine({ fresh: true });
+}
+
+$('connSave').onclick = () => {
+  const msg = $('connMsg');
+  if (!machine) { say(msg, NEEDS_RESTART, 'bad'); return; }
+  const c = machine.connections && typeof machine.connections === 'object' ? machine.connections : {};
+  const patch = {};
+  for (const [box, key, words] of [['connField', 'fieldHost', 'field'], ['connAtem', 'atemHost', 'switcher']]) {
+    const h = cleanHost($(box).value);
+    if (!h.ok) {
+      say(msg, `"${h.value}" does not look like the ${words}'s address. Type it like `
+        + '10.0.100.5, or 10.0.100.5:8080 with a port, or leave it blank.', 'bad');
+      $(box).focus();
+      return;
+    }
+    $(box).value = h.value;
+    // Only what changed: re-sending an address the desk is already attached
+    // to would read as a change that needs a restart.
+    if (h.value !== (isText(c[key]) ? c[key] : '')) patch[key] = h.value;
+  }
+  const pick = $('connInput').value;
+  const input = pick === '' ? null : Number(pick);
+  if (input !== (Number.isInteger(machine.graphicsInput) ? machine.graphicsInput : null)) {
+    patch.graphicsInput = input;
+  }
+  // A blank key box means "leave the key alone", never "remove it": the box
+  // is always blank, because the desk never sends a key back to fill it.
+  const key = $('connNexus').value.trim();
+  $('connNexus').value = '';
+  if (key) patch.nexusKey = key;
+  if (!Object.keys(patch).length) { say(msg, 'Nothing to save: everything is as the desk has it.'); return; }
+  say(msg, 'Saving...');
+  void saveConnections(patch);
+};
+
+$('connNexusClear').onclick = () => {
+  if (!confirm('Remove the Nexus key? The desk stops reading the queue from Nexus until a new key is set.')) return;
+  $('connNexus').value = '';
+  say($('connMsg'), 'Removing the key...');
+  void saveConnections({ nexusKey: '' });
+};
+
+// ---- restart ----
+
+const RESTART_WAIT_MS = 90_000;
+
+$('restartGo').onclick = async () => {
+  const msg = $('restartMsg');
+  if (!confirm('Restart the desk now?\n\nDo it between matches. Every screen reconnects by '
+    + 'itself within about half a minute. Every console, this page included, asks for its '
+    + 'code again.')) return;
+  $('restartGo').disabled = true;
+  const { res, out } = await post('/api/settings/restart', {});
+  $('restartGo').disabled = false;
+  if (!res) { say(msg, 'The desk did not answer, so it may already be restarting. Wait a moment, then reload this page.'); return; }
+  if (!res.ok) {
+    say(msg, routeMissing(res, out) ? NEEDS_RESTART : failText(res, out, 'The desk did not restart.'), 'bad');
+    return;
+  }
+  restarting = Date.now();
+  say(msg, 'Restarting. This page asks for the settings code again when the desk is back, '
+    + 'usually within half a minute.');
+};
+
+/** While restarting: back to the code prompt once a NEW desk answers. */
+async function waitForRestart() {
+  let res = null;
+  try { res = await fetch('/api/setup'); } catch { res = null; }
+  if (restarting === null) return;
+  // A new desk process does not know this page's session; the old one,
+  // still on its way out, does.
+  if (res && (res.status === 401 || res.status === 403)) {
+    signedOut('The desk restarted. Type the settings code to open this page again.');
+    return;
+  }
+  if (Date.now() - restarting > RESTART_WAIT_MS) {
+    restarting = null;
+    say($('restartMsg'), 'The desk has not come back by itself. On the desk laptop, start it '
+      + 'again the way it was started: the CalGames 2026 Content Desk icon, or START-DESK.cmd '
+      + 'in its folder.', 'bad');
+  }
+}
+
+/**
+ * Every five seconds while the page is open and on screen: what the desk
+ * sees now, so "searching" turns into "connected" without a reload, and a
+ * page signed out by a code change elsewhere says so instead of failing its
+ * next save.
+ */
+async function refreshMachine() {
+  if (!isOpen || document.hidden) return;
+  if (restarting !== null) { await waitForRestart(); return; }
+  // Not offered (or not read yet): ask again. An older desk answers that the
+  // same way signed in or not, so ask about the session first: that is how a
+  // page left open across a restart by hand finds out it was signed out.
+  if (!machine) {
+    if (!(await stillSignedIn())) { signedOut(SIGNED_OUT); return; }
+    await loadMachine({ fresh: true });
+    return;
+  }
+  let res;
+  let out;
+  try {
+    res = await fetch('/api/settings');
+    out = await readJson(res);
+  } catch { return; }                     // a blip; the next tick tries again
+  if (!isOpen) return;
+  if (res.status === 401 || res.status === 403) {
+    if (!(await stillSignedIn())) signedOut(SIGNED_OUT);
+    return;
+  }
+  if (!res.ok || !out || typeof out !== 'object') return;
+  machine = out;
+  try { paintMachine(out, false); } catch { /* keep the last good paint */ }
+}
+
+setInterval(() => void refreshMachine(), 5_000);
+
 $('unlockForm').addEventListener('submit', async e => {
   e.preventDefault();
   const err = $('gateErr');
   err.textContent = '';
+  // Out of the box as it is sent, right or wrong.
+  const pin = $('code').value.trim();
+  $('code').value = '';
   try {
     const res = await fetch('/api/setup/auth', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: $('code').value.trim() }),
+      body: JSON.stringify({ pin }),
     });
     const out = await res.json();
     if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
-    $('code').value = '';
     await loadSetup();
   } catch (e2) {
     err.textContent = e2.message;

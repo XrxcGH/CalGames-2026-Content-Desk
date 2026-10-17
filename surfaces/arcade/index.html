@@ -118,8 +118,8 @@
   color: var(--cg-white); letter-spacing: -.04em; margin-left: auto;
 }
 .ar-side--p2 .ar-score { margin-left: 0; margin-right: auto; }
-/* Unconfirmed scores render outlined, exactly like an estimated match score. */
-.ar-score[data-est="true"] { color: transparent; -webkit-text-stroke: 3px var(--cg-white); }
+/* Unconfirmed scores stay solid white, like an estimated match score: a
+   hollow number read as a rendering fault on the stream and the LED wall. */
 
 .ar-mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px; min-width: 0; }
 .ar-round {
@@ -262,7 +262,6 @@
   font-weight: 900; font-size: 38px; line-height: 1;
   color: var(--cg-white); letter-spacing: -.03em;
 }
-.ffa-score[data-est="true"] { color: transparent; -webkit-text-stroke: 3px var(--cg-white); }
 .ffa-name {
   font-family: var(--font-cond); font-weight: 600; font-size: 28px;
   letter-spacing: .06em; text-indent: .06em; text-transform: uppercase; color: var(--cg-white);
@@ -344,6 +343,16 @@
     </div>
   </div>
 
+  <!-- Only in fill, a screen that is the whole picture (see applyDisplayMode), and only
+       while no box is up: over the game capture in OBS or a keyer, this
+       layer carries the boxes and nothing else. -->
+  <div class="standby" id="idle" hidden>
+    <div class="sb-title">Arcade</div>
+    <div class="sb-tick"></div>
+    <div class="sb-line">The side tournament&rsquo;s scores appear here when the arcade
+      console starts a set. Nothing is being played right now.</div>
+  </div>
+
   <div id="sweep"></div>
 
   <!-- Last in the stage and z-index 90, so it covers the strips, the panels
@@ -359,7 +368,13 @@
 <script type="module">
 import { connect, applyDisplayMode, fitStage, roll } from '/shared/desk-client.js';
 
-applyDisplayMode();
+// Alone in a browser it is boxes on black (luma), never a white page: a
+// switcher's luma key cuts the black out, as it does for the program. In
+// OBS or framed by /s/watch over a game capture it stays the transparent
+// layer it always was; ?key=fill (what /s/watch asks for with no capture)
+// gives it the backdrop and the words below. See applyDisplayMode.
+applyDisplayMode({ alone: 'luma' });
+const FILL = document.documentElement.dataset.key === 'fill';
 const $ = id => document.getElementById(id);
 const desk = connect('arcade');
 
@@ -526,7 +541,19 @@ function paint(s) {
   // Only rewrite the text while it is on screen: replacing it during the slide
   // out would show the next segment's name flashing past on the way off.
   if (s.upNext) $('upNext').textContent = `Up next · ${s.upNext}`;
+  paintIdle();
 }
+
+/**
+ * Alone on a screen with every box off, this says what the page is for
+ * rather than leaving an empty backdrop that looks like a fault. Fill only.
+ */
+const BOXES = ['card', 'ffa', 'gp', 'upNext'];
+function paintIdle() {
+  const quiet = !FILL || BOXES.some(id => !$(id).hasAttribute('data-off'));
+  if ($('idle').hidden !== quiet) $('idle').hidden = quiet;
+}
+paintIdle();
 
 for (const t of ['arcade.set_start', 'arcade.score', 'arcade.set_end', 'arcade.bracket_updated']) {
   desk.on(t, ev => paint(ev.payload));

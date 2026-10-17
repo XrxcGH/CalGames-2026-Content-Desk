@@ -1,19 +1,40 @@
 /**
- * Program overlay: the whole broadcast graphic in one Browser Source.
+ * Program overlay: the whole broadcast graphic in one page.
  *
  * Screens switch on `state.screen`, so the switcher operator never has to
- * change sources mid-show. One URL in OBS, all weekend.
+ * change sources mid-show. One URL all weekend: in a browser full screen on
+ * a switcher input it is graphics on black (luma), which the switcher's luma
+ * key cuts out and a projector shows as graphics on black; as an OBS Browser
+ * Source it is a transparent layer, as it always was; ?key=fill gives it the
+ * CalGames backdrop, for a projector that should never look empty.
+ *
+ * On a switcher it also stands in for the field: while the desk cannot give
+ * a score, it shows Cheesy Arena's own audience display instead (see "the
+ * field's own score" below), so the one keyed input carries a score either
+ * way and nobody has to swap a cable or a keyer when the desk has a problem.
  */
 
 import {
   connect, applyDisplayMode, fitStage, roll, restart, startTicker,
   clockDisplayFor, hubActiveAt, phaseFor, PHASE_LABEL, REBUILT, teamLabel,
+  insideObs, framedPage, monotonic,
 } from '/shared/desk-client.js';
 import { rpStrip } from '/shared/rp.js';
 import { allianceRoster, lineupKey, availablePool, finalVerdict } from '/shared/alliance.js';
-import { overviewKeys, overviewChange, backLine } from '/s/program/decide.js';
+import {
+  overviewKeys, overviewChange, backLine, standbyLine, feedNote,
+  fieldDisplayUrl, handoffStep, HANDOFF_START,
+} from '/s/program/decide.js';
 
-const params = applyDisplayMode();
+// Alone in a browser this is luma: graphics on black. The one address is
+// then right in both places a volunteer puts it: on a switcher input the
+// luma key cuts the black out, and on a projector it reads as graphics on
+// black. The backdrop (fill) is one ?key=fill away, which is what /s/watch
+// and the front page's projector choice ask for. In OBS or framed by
+// /s/watch it stays a transparent layer, as it always was. See
+// applyDisplayMode.
+const params = applyDisplayMode({ alone: 'luma' });
+const FILL = document.documentElement.dataset.key === 'fill';
 // ?mode=clean is the second-stream variant: minimal score bar and clock over a
 // static full-field camera, locked to the match layout. No screen switching,
 // no lower thirds, no status cards. See docs/11 "The second stream".
@@ -52,9 +73,17 @@ function replayUp(state) {
  */
 const KIOSK = params.get('kiosk') === '1';
 
+/*
+ * Nor does a program standing on its own (fill: a projector or a TV off a
+ * browser), for the same reason: nothing plays under it. The replay cue
+ * reports a clip OBS put on the STREAM, so a projector standing aside for
+ * it swapped the Final score for a "Replay" chip on an empty backdrop.
+ */
+const STANDS_ASIDE = !KIOSK && !FILL;
+
 /** The screen this overlay should be on right now. */
 const wantedScreen = state =>
-  (CLEAN ? 'match' : !KIOSK && replayUp(state) ? 'replay' : state.screen);
+  (CLEAN ? 'match' : STANDS_ASIDE && replayUp(state) ? 'replay' : state.screen);
 
 function showScreen(name) {
   if (!SCREENS.includes(name)) name = 'blank';
@@ -521,8 +550,8 @@ function paintFinal(state) {
    * the typed fuel was a few points out, that word named the wrong alliance,
    * in the typography the graphic reserves for the field's own answer.
    *
-   * Unofficial gets its own words and no gold cap: the cap is the thing people
-   * photograph.
+   * A guess gets its own words ("Leading") and no gold cap: the cap is the
+   * thing people photograph.
    */
   /*
    * The FIELD's answer when it has given one, and only then our arithmetic.
@@ -536,15 +565,15 @@ function paintFinal(state) {
    * alliance that had just been disqualified, while the announcer and the
    * bracket said the opposite.
    *
-   * The fallback stays for a desk with no field attached, where it is already
-   * labelled unofficial and nobody is being told it is official.
+   * The fallback stays for a desk with no field attached, where it reads
+   * "Leading", never "Winner", so nobody is told it is official.
    */
   /*
    * Who is ahead and whether that is a RESULT are two questions, answered in
    * finalVerdict (alliance.js, where it is tested). The gold cap is the claim
    * that it is a result, so it needs the field's total behind it; the words
    * say which kind of claim it is. A shadow-scored match that is clearly
-   * decided now reads "Leading, unofficial" instead of showing two outlined
+   * decided now reads "Leading" instead of showing two outlined
    * totals and no words, as it did while this was one '!estimated && r > b'
    * flag that made the unofficial branch unreachable.
    */
@@ -701,6 +730,301 @@ function paintThird(lt) {
   showThird(lt);
 }
 
+// ---- standby --------------------------------------------------------------
+/**
+ * What this screen says while it has nothing to show, when it is standing on
+ * its own (fill). The words are decided in standbyLine (decide.js); this only
+ * knows the socket. A snapshot can only arrive over an open socket, so it
+ * counts as the link being up as well as the 'link' event does.
+ *
+ * Painted first at load, before any state, so even a desk that never answers
+ * leaves words on the projector rather than an empty page. Never in clean
+ * mode, which is a second stream over a camera, and never outside fill,
+ * where any words would go out on the stream.
+ */
+let link = 'connecting';
+const ADDRESS = `${location.protocol}//${location.host}`;
+// The kiosk's word that the field feed it would put under this screen has
+// shown no picture (see feedNote). Read only from the kiosk's own address.
+const FEED_NOTE = KIOSK ? feedNote(params.get('feeddown')) : '';
+
+function paintStandby() {
+  const card = $('standby');
+  // Outside fill the answer is always no card, whatever the markup or a
+  // stylesheet says: on a layer, any words would go out on the stream.
+  const said = FILL && !CLEAN
+    ? standbyLine({
+      state: desk.state,
+      screen: desk.state ? wantedScreen(desk.state) : null,
+      link, address: ADDRESS,
+    })
+    : null;
+  if (!said) {
+    if (!card.hidden) card.hidden = true;
+    return;
+  }
+  const line = $('standbyLine');
+  if (line.textContent !== said.text) line.textContent = said.text;
+  if (said.warn) line.dataset.tone = 'warn'; else delete line.dataset.tone;
+  const note = $('standbyNote');
+  if (note.textContent !== FEED_NOTE) note.textContent = FEED_NOTE;
+  if (note.hidden !== !FEED_NOTE) note.hidden = !FEED_NOTE;
+  if (card.hidden) card.hidden = false;
+}
+
+desk.on('link', up => { link = up ? 'up' : 'down'; paintStandby(); });
+desk.on('ready', () => { link = 'up'; paintStandby(); });
+paintStandby();
+
+// ---- the field's own score, when the desk cannot give one -----------------
+/**
+ * On a video switcher this page is the keyed graphics input, and it is the
+ * ONLY one: Cheesy Arena's own score overlay used to be keyed as well, on
+ * its own computer and its own keyer, and with both up the stream carried
+ * two score bars. So this page keeps Cheesy's audience display loaded
+ * underneath, unseen and live, and shows it in place of the desk's graphics
+ * while the desk cannot give a score: the socket closed or silent (the desk
+ * stopped or restarted), or the desk up but its link to the field down
+ * (Cheesy has the real numbers then). When the desk is working, Cheesy's
+ * overlay is never on the stream. The timings are handoffStep's
+ * (decide.js), so a blip does not flicker the stream.
+ *
+ * Only here: luma, a browser on its own, not OBS (which has its own way to
+ * suppress the field overlay, in index.ts) and not framed (/s/watch has
+ * its own feed). And only once the desk has named the field (/api/info), so
+ * a page with no field never makes the frame at all.
+ *
+ * Cheesy's display is asked for directly by this browser, because the
+ * moment it is needed is the moment the desk is not there to relay it. Its
+ * page can fail: Cheesy restarting, or a field network this display cannot
+ * reach. A frame that failed holds the browser's own error page, which is
+ * LIGHT, and a light page on a luma key is a white box over the stream. So
+ * the frame is only shown once a load is known good:
+ *
+ *   none      no frame yet (no field named, or it has not answered yet)
+ *   loading   this page made a frame for the field's display, after the
+ *             field answered a probe, and it has not finished loading
+ *   checking  a load finished: this page's own, or one it did not ask for
+ *             (Cheesy's display reloads itself when its own socket drops).
+ *             Unseen until a probe ASKED AFTER that load says the field
+ *             answers: a load can finish on the error page if the field
+ *             went away between the probe and the load
+ *   good      checked, and shown whenever the desk cannot give a score
+ *   bad       a probe failed, or a load never finished: unseen, and loaded
+ *             again in a NEW frame (not just shown) once the field answers,
+ *             since what it holds now may be the error page. A load that
+ *             finishes while bad stays bad, for the same reason
+ *
+ * A new frame each time, never a new address on the old one: a frame that
+ * holds an error page can have the next navigation refused by the browser
+ * itself (a blocking extension or policy, or the Browser pane), and the
+ * refusal still fires 'load', so the old frame would be vouched for while
+ * it is black or an error box. A fresh frame starts from a blank page.
+ *
+ * The probe is a plain no-cors GET of the display's own address, which only
+ * says that something answered there; it reads nothing, and it is the same
+ * request the frame itself makes.
+ *
+ * Whether this safety net is there at all is reported to the desk (the
+ * hello frame's backup: 'ready', 'bad' or 'none'), because nothing on this
+ * page may say so: it is on the stream. A switcher computer that cannot
+ * reach the field network would otherwise keep a frozen score through the
+ * first desk restart, with nobody told until then.
+ *
+ * The page itself is never reloaded or sent anywhere by any of this: with
+ * the desk gone, a reload is the browser's error page again, on the stream.
+ */
+const ROOT = document.documentElement;
+const HANDS_OFF = ROOT.dataset.key === 'luma' && !insideObs(globalThis) && !framedPage(globalThis);
+const PROBE_TIMEOUT_MS = 4000;
+const PROBE_EVERY_MS = 15_000;        // while all is well
+const PROBE_TROUBLE_MS = 5000;        // while the desk or the frame needs it
+const LOAD_GIVE_UP_MS = 20_000;       // a load with no end is treated as failed
+const INFO_EVERY_MS = 60_000;         // the desk can find the field later
+// Not ready for this long before the desk is told the net is not there: a
+// field that answers on the next probe, or Cheesy reloading its display,
+// is not news. Three trouble probes.
+const BACKUP_BAD_MS = 15_000;
+let fieldHost = null;
+let infoAt = -Infinity;
+let backup = null;
+let frame = 'none';
+let frameSince = 0;
+let probing = false;
+let probeAt = -Infinity;
+/** How many loads the frames have finished. A probe vouches only if none finished after it was asked. */
+let loads = 0;
+/** What the desk was last told about the safety net, and since when it has not been ready. */
+let backupSaid = 'none';
+let notReadySince = null;
+let hand = { ...HANDOFF_START };
+
+/** Ask the desk which field it is on. A desk that does not answer changes nothing. */
+async function askInfo() {
+  infoAt = monotonic();
+  let info;
+  try {
+    const res = await fetch('/api/info', { cache: 'no-store' });
+    if (!res.ok) return;
+    info = await res.json();
+  } catch { return; }
+  const host = typeof info?.field?.host === 'string' ? info.field.host.trim() : '';
+  setFieldHost(fieldDisplayUrl(host) ? host : null);
+  // At once, not at the next paint: a frame for another field, or none,
+  // must not stay on the input for even one more frame.
+  stepHandoff();
+}
+
+function setFieldHost(host) {
+  if (host === fieldHost) return;
+  fieldHost = host;
+  if (!host) {
+    // The desk has no field now: nothing to stand in with.
+    backup?.remove();
+    backup = null;
+    frame = 'none';
+    return;
+  }
+  // A different field: whatever the frame holds is the wrong one.
+  if (backup) frame = 'bad';
+  probeAt = -Infinity;
+}
+
+/** Is anything answering at the field's address, from this browser? */
+async function probe() {
+  if (probing || !fieldHost) return;
+  probing = true;
+  probeAt = monotonic();
+  const host = fieldHost;
+  // A probe only vouches for loads that finished before it was asked: one
+  // already in flight when a load finished says nothing about what that
+  // load got.
+  const seen = loads;
+  let ok;
+  try {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), PROBE_TIMEOUT_MS) : null;
+    try {
+      await fetch(fieldDisplayUrl(host), { mode: 'no-cors', cache: 'no-store', signal: ctl?.signal });
+    } finally { clearTimeout(timer); }
+    ok = true;
+  } catch { ok = false; }
+  probing = false;
+  if (host !== fieldHost) return;      // re-targeted meanwhile: the next probe is for the new one
+  if (!ok) {
+    if (frame !== 'none') frame = 'bad';
+    stepHandoff();
+    return;
+  }
+  // A stale answer leaves a check pending; the load already asked for a
+  // fresh probe (onBackupLoad), which the next step sends.
+  if (frame === 'checking') {
+    if (seen === loads) frame = 'good';
+  } else if (frame === 'none' || frame === 'bad') loadBackup();
+  stepHandoff();
+}
+
+/**
+ * A new frame at the field's display, in place of any old one. Only ever
+ * called while the frame is none or bad, so never while one is on the input.
+ */
+function loadBackup() {
+  const url = fieldDisplayUrl(fieldHost);
+  if (!url) return;
+  frame = 'loading';
+  frameSince = monotonic();
+  backup?.remove();
+  const el = document.createElement('iframe');
+  el.id = 'fieldBackup';
+  el.title = 'Field score, shown while the desk cannot give one';
+  // Never its sound: the display plays the field's buzzers, and this
+  // computer's audio can be riding the same cable into the switcher.
+  el.setAttribute('allow', "autoplay 'none'");
+  // Scripts, for its own socket and animations; never the right to send
+  // this page anywhere (no allow-top-navigation) or to open windows.
+  el.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+  el.setAttribute('referrerpolicy', 'no-referrer');
+  el.setAttribute('aria-hidden', 'true');
+  el.tabIndex = -1;
+  // Only the frame in the page counts: one replaced is not on any input.
+  el.addEventListener('load', () => { if (el === backup) onBackupLoad(); });
+  el.src = url;
+  document.body.append(el);
+  backup = el;
+}
+
+function onBackupLoad() {
+  loads += 1;
+  // Bad stays bad: a load that finished after a probe failed is most likely
+  // the error page, and only a new frame (loadBackup) clears that.
+  if (frame === 'bad') { stepHandoff(); return; }
+  // Off the input at once if it was on, until a probe asked from now on
+  // says the field answers.
+  frame = 'checking';
+  probeAt = -Infinity;
+  stepHandoff();
+}
+
+/**
+ * Whether the safety net is there, for the desk: 'ready' (the field's
+ * display is loaded and checked), 'bad' (the desk named a field, and this
+ * computer has not been able to show its display for BACKUP_BAD_MS), or
+ * 'none' (no field named). In between it keeps saying what it last said,
+ * so a reload in passing is not reported as a fault.
+ */
+function backupWord(now) {
+  if (!fieldHost) { notReadySince = null; return 'none'; }
+  if (frame === 'good') { notReadySince = null; return 'ready'; }
+  if (notReadySince === null) notReadySince = now;
+  return now - notReadySince >= BACKUP_BAD_MS ? 'bad' : backupSaid;
+}
+
+/** Re-judged every frame (and on every change), because time is an input. */
+function stepHandoff() {
+  const now = monotonic();
+  const trouble = hand.deskBadSince !== null || hand.fieldBadSince !== null;
+  if (fieldHost) {
+    if (frame === 'loading' && now - frameSince > LOAD_GIVE_UP_MS) frame = 'bad';
+    const every = trouble || frame !== 'good' || hand.showing === 'cheesy' ? PROBE_TROUBLE_MS : PROBE_EVERY_MS;
+    if (!probing && now - probeAt >= every) void probe();
+  }
+  if (desk.connected && now - infoAt >= INFO_EVERY_MS) void askInfo();
+  hand = handoffStep(hand, {
+    now,
+    open: desk.connected,
+    heardAt: desk.heardAt,
+    synced: desk.synced,
+    fieldConfigured: !!fieldHost,
+    fieldUp: desk.state?.connected?.cheesy === true,
+    backupReady: !!backup && frame === 'good',
+  });
+  if (ROOT.dataset.showing !== hand.showing) {
+    ROOT.dataset.showing = hand.showing;
+    desk.setShowing(hand.showing);
+  }
+  const word = backupWord(now);
+  if (word !== backupSaid) {
+    backupSaid = word;
+    ROOT.dataset.backup = word;
+    desk.setBackup(word);
+  }
+}
+
+if (HANDS_OFF) {
+  ROOT.dataset.showing = 'desk';
+  ROOT.dataset.backup = backupSaid;
+  desk.setShowing('desk');
+  desk.setBackup(backupSaid);
+  void askInfo();
+  // A snapshot follows every reconnect, which is when the field may have
+  // changed (a desk restarted with another field, or one that found it).
+  desk.on('ready', () => { void askInfo(); stepHandoff(); });
+  desk.on('link', () => stepHandoff());
+  desk.on('state', () => stepHandoff());
+  // Its own ticker, not the paint loop's, which returns early with no state.
+  startTicker(stepHandoff);
+}
+
 // ---- local clock, derived every frame -------------------------------------
 startTicker(() => {
   const st = desk.state;
@@ -737,6 +1061,7 @@ startTicker(() => {
 
   if (currentScreen === 'selection') paintSelectionClock(st.selection);
   paintBack();
+  paintStandby();
 
   // The end of a replay is a moment on the clock, not an event: hand the
   // screen back when the clip has run, and only then. Limited to the replay
@@ -786,6 +1111,7 @@ desk.on('state', state => {
   paintAward(state.award);
   paintSlide(state.slide);
   showScreen(wantedScreen(state));
+  paintStandby();
 });
 
 // The event, not the state frame, is the authority for a fresh entrance: an
