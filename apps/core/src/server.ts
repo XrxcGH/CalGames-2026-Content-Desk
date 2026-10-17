@@ -2601,7 +2601,7 @@ export function startServer(opts: ServerOpts) {
         if (!obs?.connected) {
           return json(res, 409, { error: 'OBS is not connected. Start OBS on this machine, ' +
             'set "obs": { "enabled": true } in config.json (with the OBS password if it has one) ' +
-            'and restart the desk (handbook chapter 4, step 7).' });
+            'and restart the desk (the OBS steps in docs/handbook-reference.md).' });
         }
         try {
           const starting = path.endsWith('/start');

@@ -118,7 +118,7 @@ try {
         # READ-ME-FIRST.txt opens with "START WITH QUICK-START.pdf", and the
         # same git-tracked-only rule leaves out a quick start nobody has run
         # git add on: the note would then point a first-time volunteer at a
-        # file that is not there, which is the night the two pages exist for.
+        # file that is not there, which is the night the one page exists for.
         # START-*.cmd are not checked: the launcher writes those at install.
         $readmeEntry = $zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'READ-ME-FIRST.txt' } | Select-Object -First 1
         Check "the first-run note READ-ME-FIRST.txt is shipped" ($null -ne $readmeEntry)
@@ -127,7 +127,7 @@ try {
             try { $readmeText = $reader.ReadToEnd() } finally { $reader.Dispose() }
             $named = @([regex]::Matches($readmeText, '\b[A-Z][A-Z0-9-]*\.(?:pdf|md|txt)\b') |
                 ForEach-Object { $_.Value } | Sort-Object -Unique)
-            Check "the first-run note names the two-page quick start" ($named -contains 'QUICK-START.pdf')
+            Check "the first-run note names the one-page quick start" ($named -contains 'QUICK-START.pdf')
             foreach ($file in $named) {
                 Check "the first-run note names $file, and it is shipped" ($names -contains $file)
             }

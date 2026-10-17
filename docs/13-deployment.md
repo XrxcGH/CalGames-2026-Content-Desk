@@ -220,7 +220,7 @@ order:
 
 So a projector or TV goes through `/s/watch`, which frames the program with `?key=fill` when there
 is no feed to show through: the CalGames backdrop, and one line of words while there is nothing to
-show (the handbook's chapter 4, *What the projector says*, lists them). `?key=fill` on any of the
+show (the handbook's *What the projector says* table lists them). `?key=fill` on any of the
 three forces the backdrop; `?key=luma` forces black for a hardware keyer (an ATEM or a Roland
 downstream key); `?key=alpha` forces see-through, which vMix, Wirecast, CasparCG and any other
 software that layers the page without being OBS needs written in the address. An unknown `?key=`

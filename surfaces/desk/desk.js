@@ -960,7 +960,7 @@ function paintStream(s) {
   if (!s) line = 'Stream status did not answer. If the desk just restarted, the next poll picks it up on its own.';
   else if (!s.available) {
     line = 'OBS is not set up on this desk. To run the stream from here, set "obs": '
-      + '{ "enabled": true } in config.json and restart the desk (handbook chapter 4, step 7).';
+      + '{ "enabled": true } in config.json and restart the desk (the OBS steps in docs/handbook-reference.md).';
   }
   else if (!s.connected) line = 'OBS is not connected. Start OBS on this machine; the desk retries on its own.';
   else if (s.streaming === null) line = 'OBS is connected but did not answer the status probe.';
