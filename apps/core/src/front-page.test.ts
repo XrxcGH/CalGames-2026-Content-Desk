@@ -350,6 +350,30 @@ test('nothing secret reaches a browser that is not the desk laptop asking by a l
     /0864|1357|4567/);
 });
 
+test('the page says which computer runs the desk, first, on every computer', async () => {
+  // The AV table runs several Windows computers side by side, and nothing on
+  // any of them said which one is the desk.
+  const d = await boot({ obs: { connected: false }, cheesy: {}, statusSettleMs: 0 });
+  try {
+    const here = (await page(d.port, `localhost:${d.port}`)).body;
+    assert.match(here, /This computer runs the Content Desk\./);
+    assert.doesNotMatch(here, /does not run the Content Desk/);
+    // The desk laptop opened by its network name is still the desk laptop.
+    const byName = (await page(d.port, `172.22.0.23:${d.port}`)).body;
+    assert.match(byName, /This computer runs the Content Desk\./);
+    // Another computer: Windows and Linux answer the whole 127/8 as loopback
+    // but 127.0.0.2 is not one of this machine's own addresses.
+    let other: string | null = null;
+    try { other = (await page(d.port, `172.22.0.23:${d.port}`, '127.0.0.2')).body; } catch { other = null; }
+    if (other !== null) {
+      assert.match(other, /This computer does not run the Content Desk\./);
+      assert.match(other, /the computer at http:\/\/172\.22\.0\.23:8720/);
+    }
+  } finally {
+    await d.done();
+  }
+});
+
 // ---- the help --------------------------------------------------------------------------
 
 test('the help says what you see, then what to do, and names only what the desk console really has', async () => {

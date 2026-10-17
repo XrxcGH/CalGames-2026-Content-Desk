@@ -334,8 +334,8 @@
    it was settled by source order, and .bar-center's shorthand further down
    the file quietly took the lift back off the clock. */
 .bar-side { display: flex; align-items: center; gap: 28px; padding: 0 36px; }
-.bar-side--red  { padding-left: var(--safe-x);  background: var(--alliance-red);  border-right: var(--rule); }
-.bar-side--blue { padding-right: var(--safe-x); background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; }
+.bar-side--red  { padding-left: var(--safe-x);  background: var(--alliance-red);  border-right: var(--rule); --side-ink: var(--alliance-red); }
+.bar-side--blue { padding-right: var(--safe-x); background: var(--alliance-blue); border-left: var(--rule); flex-direction: row-reverse; --side-ink: var(--alliance-blue); }
 
 
 .bar-teams {
@@ -372,7 +372,7 @@
    estimated can be published, and the announcer's tablet still says so. */
 .bar-sub {
   font-family: var(--font-cond); font-weight: 600; font-size: var(--t-label);
-  color: var(--cg-white); opacity: .94; line-height: 1;
+  color: var(--cg-white); line-height: 1;
   letter-spacing: .06em; text-transform: uppercase;
 }
 /* Sub-line counters size to their value: the 3ch reservation that keeps the
@@ -388,17 +388,15 @@
 /* Badges sit on the alliance fills here: recess the unearned state instead of
    operator purple (purple on FIRST blue is the palette's one hazard), and skip
    the box-shadow ring, which the luma key strips anyway. Mirrors .final-rp. */
-.bar-rp .rp { background: rgba(0, 0, 0, .30); box-shadow: none; color: rgba(255, 255, 255, .72); }
-.bar-rp .rp[data-earned="true"] { background: var(--cg-green-hi); color: var(--cg-white); }
-/* Earned off a GUESS. Same outline convention the totals use two rules up: the
-   badge still says which ranking point is in play, and stops asserting that
-   the field agrees. Hollow with a green edge, not a green fill. */
-.bar-rp .rp[data-earned="true"][data-est="true"],
-.final-rp .rp[data-earned="true"][data-est="true"] {
-  background: transparent;
-  box-shadow: inset 0 0 0 3px var(--cg-green-hi);
-  color: var(--cg-green-hi);
-}
+.bar-rp .rp { background: rgba(0, 0, 0, .45); box-shadow: none; color: var(--cg-white); }
+.bar-rp .rp[data-earned="true"] { background: var(--cg-white); color: var(--side-ink, var(--cg-black)); }
+/* Earned is a WHITE chip with the alliance colour for its ink; unearned is
+   a deep recessed plate with full white ink. The difference is brightness,
+   not hue, so it reads for red-green colourblind viewers too, and nothing
+   on it is dark enough for the luma key to punch through. Measured: earned
+   red ink on white 4.4:1, blue 5.9:1; unearned white on the plate over red
+   10.3:1, over blue 12.0:1. The old thin green edge for a point earned on
+   a guess measured 1.24:1 on red and is gone: earned looks earned. */
 
 /* Centered in the bar by default. The program now goes from the switcher
    straight to the stream and an LED wall, and neither crops the edge of the
@@ -658,8 +656,8 @@
   clip-path: var(--chamfer);
   background-image: var(--tex-perf); background-size: var(--tex-perf-size);
 }
-.final-side--red  { background-color: var(--alliance-red); }
-.final-side--blue { background-color: var(--alliance-blue); }
+.final-side--red  { background-color: var(--alliance-red); --side-ink: var(--alliance-red); }
+.final-side--blue { background-color: var(--alliance-blue); --side-ink: var(--alliance-blue); }
 /* Winner cap: position and a label carry the result too, never color alone. */
 .final-side[data-won]::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 10px;
@@ -695,12 +693,12 @@
 }
 .final-break .fb-h {
   font-family: var(--font-cond); font-weight: 700; font-size: var(--t-label);
-  letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .72);
+  letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .92);
   text-align: right;
 }
 .final-break .fb-l {
   font-family: var(--font-cond); font-weight: 600; font-size: var(--t-label);
-  letter-spacing: .1em; text-transform: uppercase; color: rgba(255, 255, 255, .8);
+  letter-spacing: .1em; text-transform: uppercase; color: rgba(255, 255, 255, .92);
   text-align: left;
 }
 .final-break .fb-n {
@@ -713,13 +711,14 @@
 .final-rp { display: flex; gap: 12px; }
 /* Badges sit on an alliance fill here, not on chrome. Recess the unearned
    state instead of borrowing operator purple. */
-.final-rp .rp { background: rgba(0, 0, 0, .30); box-shadow: none; color: rgba(255, 255, 255, .72); }
-.final-rp .rp[data-earned="true"] { background: var(--cg-green-hi); color: var(--cg-white); }
-/* The unofficial verdict is a smaller, quieter claim than "Winner", and it
-   must not read as the same word at a glance from across a gym. */
+.final-rp .rp { background: rgba(0, 0, 0, .45); box-shadow: none; color: var(--cg-white); }
+.final-rp .rp[data-earned="true"] { background: var(--cg-white); color: var(--side-ink, var(--cg-black)); }
+/* "Leading" on a guess is a smaller claim than "Winner" and must not read as
+   the same word at a glance: smaller type and no gold. White, though: the
+   old purple-tinted dim measured 2.4:1 on the red plate. */
 .final-verdict[data-est="true"] {
   font-size: calc(var(--t-label) * .86);
-  color: var(--cg-white-dim);
+  color: var(--cg-white);
   letter-spacing: .1em;
 }
 .final-verdict {

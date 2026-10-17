@@ -10,6 +10,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { EventBus, EmitInit } from './bus.ts';
@@ -3054,7 +3055,26 @@ export function startServer(opts: ServerOpts) {
     const practice = mode ? modeVital(mode) : null;
     const modeLine = practice
       ? `<p class="mode"><b>${esc(practice.detail)}</b> ${esc(practice.fix ?? '')}</p>` : '';
-    if (!local) return `<div class="start">${modeLine}${addr}</div>`;
+    // Which computer this is, said first. The AV table runs several Windows
+    // computers side by side (the switcher's software, the mixer, the field,
+    // the graphics output), and nothing else on any of them said which one
+    // IS the desk. A display line only, never a gate: the codes below still
+    // need the strict local check above.
+    const ownAddrs = new Set<string>(['127.0.0.1', '::1']);
+    try {
+      for (const list of Object.values(networkInterfaces())) {
+        for (const a of list ?? []) ownAddrs.add(a.address);
+      }
+    } catch { /* the line falls back to "another computer" wording */ }
+    const ip = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+    const sameMachine = local || ownAddrs.has(ip);
+    const who = sameMachine
+      ? `<p class="who"><b>This computer runs the Content Desk.</b> Keep it on, plugged in
+          and on the event network. Closing this browser does not stop the show.</p>`
+      : `<p class="who"><b>This computer does not run the Content Desk.</b> The desk runs on
+          the computer at ${base ? esc(base) : 'the address on the whiteboard'}; this one only
+          shows or controls screens.</p>`;
+    if (!local) return `<div class="start">${who}${modeLine}${addr}</div>`;
     // The commonest reason the address works here and nowhere else, said
     // where the address is: the desk cannot see the firewall's answer, and
     // the volunteer at a blank pit TV has no other clue to go on. The link
@@ -3087,6 +3107,7 @@ export function startServer(opts: ServerOpts) {
         ? '; the Judge Advisor changes the awards code on <a href="/s/awards">their own page</a>.' : '.');
     return `<div class="start">
       <h2 style="margin-top:0">Start here</h2>
+      ${who}
       ${modeLine}
       ${fileLine}
       ${addr}
@@ -3335,6 +3356,8 @@ p.again{color:var(--text-dim);font-size:13px;margin:4px 0 22px}
 .start .mode{margin:0 0 12px;padding:12px 16px;background:var(--st-warn);color:#000;
   clip-path:var(--chamfer);--ch:8px}
 .start .hint{color:var(--text-dim);font-size:13px}
+.start .who{font-size:18px;margin:0 0 10px}
+.start .who b{color:var(--accent)}
 .start a{color:var(--accent)}
 .help{margin-top:22px;background:var(--surface)}
 .help h2{margin-top:0}
